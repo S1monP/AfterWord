@@ -137,6 +137,8 @@ def main() -> int:
     cfg = config_mod.Config(
         data_dir=tmp, host="127.0.0.1", port=0,
         openrouter_api_key="", minimax_api_key="",
+        ffmpeg_path="ffmpeg-nonexistent-test-binary",
+        max_upload_bytes=10 * 1024 * 1024,
     )
 
     try:

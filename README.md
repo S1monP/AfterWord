@@ -30,9 +30,37 @@ everything; deleting the `data/` directory gives a clean slate.
 
 * **Python 3.11 or newer** (3.12 / 3.13 / 3.14 all work). Verify
   with `python --version`.
+* **ffmpeg** (recommended) — needed to transcode iPhone Voice Memos
+  (M4A / AAC) and other non-WAV formats on the web upload path.
+  * Windows: `winget install Gyan.FFmpeg` (or `choco install ffmpeg`)
+  * Linux: `sudo apt install ffmpeg` (or `dnf install ffmpeg`)
+  * macOS: `brew install ffmpeg`
 * No database, no Docker, no Node — just Python and Flask.
 
-### Install (Windows)
+### One-shot install
+
+The repo includes `setup.cmd` (Windows) and `setup.sh` (Linux/macOS)
+that create the venv, install Python deps, and try to install ffmpeg
+for you.
+
+**Windows:**
+
+```powershell
+cd "C:\Users\pozig\Documents\Visual Studio\AI_NoteTaker\Server"
+setup.cmd
+```
+
+**Linux / macOS:**
+
+```bash
+cd /path/to/AI_NoteTaker/Server
+chmod +x setup.sh
+./setup.sh
+```
+
+### Manual install
+
+If you'd rather run the steps yourself:
 
 ```powershell
 cd "C:\Users\pozig\Documents\Visual Studio\AI_NoteTaker\Server"
@@ -40,8 +68,6 @@ python -m venv .venv
 .\.venv\Scripts\activate
 pip install -r requirements.txt
 ```
-
-### Install (Linux / macOS)
 
 ```bash
 cd /path/to/AI_NoteTaker/Server
@@ -61,6 +87,7 @@ You should see:
 ```
 [LR ] data dir: C:\Users\...\Server\data
 [LR ] DB ready:  C:\Users\...\Server\data\db\metadata.db
+[LR ] ffmpeg: ffmpeg version ...        (or a WARNING if not installed)
 [LR ] listening on http://0.0.0.0:8000
  * Running on http://127.0.0.1:8000
  * Running on http://192.168.x.y:8000
@@ -109,9 +136,11 @@ firewall level).
 python -m unittest discover -s tests -v
 ```
 
-29 tests cover the storage layer (atomic writes, retry safety, finish
-gating, stitching, status transitions) and the HTTP API (announce,
-upload, finish, range requests, the web UI, the search stub).
+45 tests cover the storage layer (atomic writes, retry safety, finish
+gating, stitching, status transitions), the HTTP API (announce,
+upload, finish, range requests, the web UI, the search stub), and
+the web upload path (page rendering, format sniffing, canonical-WAV
+skip, ffmpeg-missing 503, title defaulting, size limits).
 
 End-to-end smoke check (in-process, no network):
 
@@ -126,6 +155,12 @@ runs HTTP requests, shuts down):
 python e2e_check.py --live
 ```
 
+The web upload path has its own end-to-end check:
+
+```powershell
+python upload_smoke.py
+```
+
 ## Project layout
 
 ```
@@ -137,24 +172,32 @@ Server/
 ├── services/
 │   ├── __init__.py
 │   ├── llm.py             # OpenRouter + MiniMax provider stubs
-│   └── processing.py      # post-finish pipeline orchestrator stub
+│   ├── processing.py      # post-finish pipeline orchestrator stub
+│   └── transcode.py       # ffmpeg wrapper, format sniff
 ├── templates/
 │   ├── base.html
 │   ├── index.html         # session list
 │   ├── session.html       # one session + player
+│   ├── upload.html        # web upload page
 │   └── _macros.html       # shared Jinja macros
 ├── static/
 │   ├── css/
 │   │   ├── tokens.css     # design tokens (colours, spacing, type)
 │   │   ├── base.css       # resets, typography, layout
-│   │   └── components.css # cards, badges, tables, player
+│   │   ├── components.css # cards, badges, tables, player
+│   │   └── upload.css     # drop zone, file picker
 │   └── js/
-│       └── app.js         # progressive enhancement (currently empty)
+│       ├── app.js         # progressive enhancement (currently empty)
+│       └── upload.js      # upload page logic
 ├── tests/
 │   ├── conftest.py
 │   ├── test_storage.py
-│   └── test_api.py
-├── e2e_check.py           # manual end-to-end check
+│   ├── test_api.py
+│   └── test_upload.py
+├── e2e_check.py           # device-flow end-to-end check
+├── upload_smoke.py        # web-upload end-to-end check
+├── setup.cmd              # Windows one-shot install
+├── setup.sh               # Linux/macOS one-shot install
 ├── requirements.txt
 ├── .python-version        # 3.11
 ├── .env.example
@@ -248,6 +291,36 @@ Always returns `{hits: []}`. The endpoint exists so the UI can wire up
 a search box without a contract change later; the implementation is a
 no-op until the FTS5 index is populated.
 
+### `POST /api/v1/uploads/audio` — web upload (single file)
+
+Used by the `/upload` page. Accepts a multipart form with:
+
+* `file` — the audio bytes (any format the server's ffmpeg can read,
+  plus WAV always).
+* `title` — optional. Defaults to `rec_YYYY-MM-DDTHHMM` (the device's
+  naming scheme) based on the current time.
+
+The server sniffs the file format. If it's already a canonical
+22050 Hz mono 32-bit WAV, it skips ffmpeg. Otherwise it transcodes
+the file to that format, creates a one-chunk session, finishes it
+(equivalent to one-shot stitch), and returns:
+
+```json
+{
+  "created": true,
+  "session": { ... },
+  "redirect_url": "/sessions/<id>"
+}
+```
+
+Responses:
+
+* `201 Created` on success.
+* `400 Bad Request` on missing file, empty file, or invalid title.
+* `413 Payload Too Large` if the file exceeds `LR_MAX_UPLOAD_BYTES`.
+* `503 Service Unavailable` if the file needs transcoding but ffmpeg
+  isn't available.
+
 ## Web UI
 
 * `/` — list of all recordings, newest first. Each row shows title,
@@ -262,6 +335,25 @@ Status badges:
 * **Failed** (red): something went wrong (missing chunks, stitch
   error). The device can re-send missing chunks and call `/finish`
   again to recover.
+
+## Web upload (iPhone Voice Memos and other files)
+
+Use the **Upload** link in the header to open `/upload`. Drag a single
+audio file onto the drop zone (or click to browse), optionally edit
+the title, and click Upload. The page accepts:
+
+* **WAV** at any sample rate / channel / bit depth (transcoded to the
+  canonical 22050 Hz mono 32-bit).
+* **M4A / AAC** from iPhone Voice Memos (needs ffmpeg on the server).
+* **MP3, OGG, FLAC, WebM** (needs ffmpeg).
+
+Title defaults to `rec_YYYY-MM-DDTHHMM` (the same scheme the device
+uses) based on the current server time. Edit it before uploading if
+you want a different label.
+
+Without ffmpeg, the upload page shows a yellow warning and rejects any
+non-WAV file. Install ffmpeg (or set `LR_FFMPEG_PATH` to your binary)
+to enable the iPhone / MP3 / OGG paths.
 
 ## Data model
 
