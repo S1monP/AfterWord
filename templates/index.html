@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+
+{% block title %}Recordings &middot; Lecture Recorder{% endblock %}
+
+{% block content %}
+  <section class="lr-section-title">
+    <div>
+      <h1>Recordings</h1>
+      <div class="lr-section-sub">Newest first. Click a row to open.</div>
+    </div>
+  </section>
+
+  {% if sessions|length == 0 %}
+    <div class="lr-empty">
+      <h2>No recordings yet</h2>
+      <p>When the device finishes an upload, the stitched recording will appear here.</p>
+    </div>
+  {% else %}
+    <table class="lr-table">
+      <thead>
+        <tr>
+          <th>Title</th>
+          <th>Started</th>
+          <th>Status</th>
+          <th>Chunks</th>
+          <th>Duration</th>
+          <th>Size</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in sessions %}
+          <tr>
+            <td>
+              <a href="{{ url_for('ui_session', session_id=s.id) }}">
+                {{ s.title or '(untitled)' }}
+              </a>
+              <div class="lr-mono">{{ s.id }}</div>
+            </td>
+            <td>{{ s.started_at|iso_local }}</td>
+            <td>
+              {{ ui.status_badge(s.status, status_label.get(s.status, s.status)) }}
+              {% if s.status_detail %}
+                <div class="lr-mono" title="{{ s.status_detail }}">⚠</div>
+              {% endif %}
+            </td>
+            <td>
+              {{ s.received_chunks }} / {{ s.expected_count }}
+            </td>
+            <td>{{ duration_for(s)|human_duration }}</td>
+            <td>{{ s.full_audio_size|human_size }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+{% endblock %}

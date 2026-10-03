@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+
+{% block title %}{{ session.title or session.id }} &middot; Lecture Recorder{% endblock %}
+
+{% block content %}
+  <p><a href="{{ url_for('ui_index') }}">&larr; All recordings</a></p>
+
+  <section class="lr-card">
+    <div class="lr-row" style="align-items: flex-start; justify-content: space-between;">
+      <div>
+        <h1>{{ session.title or '(untitled)' }}</h1>
+        <div class="lr-mono">{{ session.id }}</div>
+      </div>
+      <div>
+        {{ ui.status_badge(session.status, status_label.get(session.status, session.status)) }}
+      </div>
+    </div>
+
+    <dl class="lr-detail-grid" style="margin-top: var(--lr-s-4);">
+      <dt>Started</dt>     <dd>{{ session.started_at|iso_local }}</dd>
+      <dt>Finished</dt>    <dd>{{ session.finished_at|iso_local if session.finished_at else '—' }}</dd>
+      <dt>Audio format</dt>
+      <dd>
+        {{ session.sample_rate }} Hz,
+        {{ session.channels }} ch,
+        {{ session.bits_per_sample }}-bit
+      </dd>
+      <dt>Chunks</dt>      <dd>{{ session.received_chunks }} / {{ session.expected_count }}</dd>
+      <dt>Size</dt>        <dd>{{ session.full_audio_size|human_size }}</dd>
+      <dt>Duration</dt>    <dd>{{ duration_for(session)|human_duration }}</dd>
+      {% if session.status_detail %}
+        <dt>Note</dt>      <dd>{{ session.status_detail }}</dd>
+      {% endif %}
+    </dl>
+  </section>
+
+  {% if session.status == 'ready' and session.full_audio_size > 0 %}
+    <section class="lr-card">
+      <h2>Playback</h2>
+      <div class="lr-player" style="margin-top: var(--lr-s-3);">
+        <audio controls preload="metadata"
+               src="{{ url_for('api_get_audio', session_id=session.id) }}"></audio>
+        <a class="lr-btn"
+           href="{{ url_for('api_get_audio', session_id=session.id) }}"
+           download="{{ (session.title or session.id) ~ '.wav' }}">Download</a>
+      </div>
+      <p class="lr-mono" style="margin-top: var(--lr-s-3);">
+        Audio is streamed from
+        <code>/api/v1/sessions/{{ session.id }}/audio</code> with HTTP Range support,
+        so the player can seek.
+      </p>
+    </section>
+  {% elif session.status == 'receiving' %}
+    <section class="lr-card">
+      <h2>Still receiving</h2>
+      <p>
+        {{ session.received_chunks }} of {{ session.expected_count }} chunks received.
+        The page will show a player as soon as the device finishes uploading and calls
+        <code>POST /api/v1/sessions/{{ session.id }}/finish</code>.
+      </p>
+    </section>
+  {% elif session.status == 'failed' %}
+    <section class="lr-card">
+      <h2>Failed</h2>
+      <p>{{ session.status_detail or 'No further detail.' }}</p>
+      <p>
+        The device can re-send any missing chunks and call finish again; a successful
+        finish resets this session to ready.
+      </p>
+    </section>
+  {% endif %}
+{% endblock %}

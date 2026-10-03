@@ -1,0 +1,17 @@
+{# Reusable Jinja macros. Imported via `{% import "_macros.html" as ui %}`. #}
+
+{% macro status_badge(status, label) %}
+  <span class="lr-badge lr-badge--{{ status }}">{{ label }}</span>
+{% endmacro %}
+
+{% macro human_size(num) -%}
+  {%- if not num -%}0 B
+  {%- else -%}
+    {%- set s = num|float -%}
+    {%- if s < 1024 -%}{{ '%.0f' % s }} B
+    {%- elif s < 1024 * 1024 -%}{{ '%.1f' % (s / 1024) }} KB
+    {%- elif s < 1024 * 1024 * 1024 -%}{{ '%.1f' % (s / 1024 / 1024) }} MB
+    {%- else -%}{{ '%.2f' % (s / 1024 / 1024 / 1024) }} GB
+    {%- endif -%}
+  {%- endif -%}
+{%- endmacro %}

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Lecture Recorder{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/tokens.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/components.css') }}">
+  <script defer src="{{ url_for('static', filename='js/app.js') }}"></script>
+</head>
+<body>
+  <header class="lr-header">
+    <div class="lr-header__inner">
+      <a class="lr-header__brand" href="{{ url_for('ui_index') }}">🎙 Lecture Recorder</a>
+      <nav class="lr-header__nav">
+        <a href="{{ url_for('ui_index') }}">Recordings</a>
+        <a href="/api/v1/sessions" title="JSON list of all sessions">API</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="lr-container">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="lr-footer">
+    Lecture Recorder &middot; Phase A &middot; LAN only
+  </footer>
+</body>
+</html>
