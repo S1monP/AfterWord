@@ -36,6 +36,8 @@ class Config:
     port: int
     openrouter_api_key: str
     minimax_api_key: str
+    ffmpeg_path: str
+    max_upload_bytes: int
 
     # Convenience paths derived from data_dir.
     @property
@@ -46,6 +48,11 @@ class Config:
     def sessions_dir(self) -> Path:
         return self.data_dir / "sessions"
 
+    @property
+    def inbox_dir(self) -> Path:
+        """Temp dir for in-flight web uploads. Cleaned on startup."""
+        return self.data_dir / "inbox"
+
 
 def load() -> Config:
     """Build a Config from the current process environment."""
@@ -55,4 +62,6 @@ def load() -> Config:
         port=_env_int("LR_PORT", 8000),
         openrouter_api_key=_env("LR_OPENROUTER_API_KEY", ""),
         minimax_api_key=_env("LR_MINIMAX_API_KEY", ""),
+        ffmpeg_path=_env("LR_FFMPEG_PATH", "ffmpeg"),
+        max_upload_bytes=_env_int("LR_MAX_UPLOAD_BYTES", 500 * 1024 * 1024),
     )

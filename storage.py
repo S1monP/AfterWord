@@ -283,6 +283,9 @@ class Storage:
         self._data_dir.mkdir(parents=True, exist_ok=True)
         (self._data_dir / "db").mkdir(parents=True, exist_ok=True)
         self._sessions_dir.mkdir(parents=True, exist_ok=True)
+        self._config.inbox_dir.mkdir(parents=True, exist_ok=True)
+        # Tidy any half-uploaded files left from a previous run.
+        self._clean_inbox()
         with self._connect() as conn:
             conn.execute("PRAGMA foreign_keys = ON")
             for stmt in SCHEMA_STATEMENTS:
@@ -290,6 +293,19 @@ class Storage:
             conn.commit()
         self._log(f"data dir: {self._data_dir}")
         self._log(f"DB ready: {self._db_path}")
+
+    def _clean_inbox(self) -> None:
+        inbox = self._config.inbox_dir
+        if not inbox.exists():
+            return
+        for entry in inbox.iterdir():
+            try:
+                if entry.is_file() or entry.is_symlink():
+                    entry.unlink()
+                elif entry.is_dir():
+                    shutil.rmtree(entry, ignore_errors=True)
+            except OSError:
+                pass
 
     def _log(self, msg: str) -> None:
         print(f"[LR ] {msg}", flush=True)
@@ -706,3 +722,37 @@ class Storage:
     def open_full_audio(self, session_id: str) -> Optional[Path]:
         p = self.full_audio_path(session_id)
         return p if p.exists() else None
+
+    # --- web upload ingest ------------------------------------------------
+
+    def ingest_single_audio(
+        self,
+        session_id: str,
+        title: str,
+        wav_bytes: bytes,
+        started_at: str,
+    ) -> Session:
+        """Create a session, write one canonical WAV chunk, finish in one call.
+
+        Used by the web upload path. ``wav_bytes`` must already be in
+        the canonical 22050 Hz mono 32-bit PCM WAV format; transcoding
+        is the caller's responsibility.
+        """
+        self.upsert_session(
+            session_id,
+            title=title,
+            expected_count=1,
+            sample_rate=22050,
+            channels=1,
+            bits_per_sample=32,
+            started_at=started_at,
+        )
+        self.write_chunk(session_id, 1, wav_bytes)
+        result = self.finish_session(session_id)
+        if not result.ok:
+            raise RuntimeError(
+                f"ingest_single_audio: finish failed: {result.reason}"
+            )
+        sess = self.get_session(session_id)
+        assert sess is not None
+        return sess
