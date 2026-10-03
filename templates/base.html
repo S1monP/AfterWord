@@ -7,7 +7,9 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/tokens.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/components.css') }}">
+  {% block extrahead %}{% endblock %}
   <script defer src="{{ url_for('static', filename='js/app.js') }}"></script>
+  {% block extrascripts %}{% endblock %}
 </head>
 <body>
   <header class="lr-header">
@@ -15,6 +17,7 @@
       <a class="lr-header__brand" href="{{ url_for('ui_index') }}">🎙 Lecture Recorder</a>
       <nav class="lr-header__nav">
         <a href="{{ url_for('ui_index') }}">Recordings</a>
+        <a href="{{ url_for('ui_upload') }}">Upload</a>
         <a href="/api/v1/sessions" title="JSON list of all sessions">API</a>
       </nav>
     </div>

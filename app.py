@@ -13,6 +13,10 @@ Configuration is via env vars (see :mod:`config`).
 from __future__ import annotations
 
 import os
+import re
+import shutil
+import time
+from pathlib import Path
 from typing import Any, Optional
 
 from flask import (
@@ -22,7 +26,7 @@ from flask import (
 import config as config_mod
 import search
 import storage
-from services import processing
+from services import processing, transcode
 
 
 # ---------------------------------------------------------------------------
@@ -37,6 +41,17 @@ def create_app(config: Optional[config_mod.Config] = None) -> Flask:
     app.config["LR_STORAGE"] = storage.Storage(cfg)
     app.config["LR_STORAGE"].initialise()
     app.secret_key = os.environ.get("LR_SECRET", "lr-dev-secret-not-for-prod")
+
+    if not transcode.ffmpeg_available(cfg.ffmpeg_path):
+        print(
+            f"[LR ] WARNING: ffmpeg not found at {cfg.ffmpeg_path!r}; "
+            "non-WAV uploads (iPhone M4A, etc.) will be rejected. "
+            "Install ffmpeg or set LR_FFMPEG_PATH.",
+            flush=True,
+        )
+    else:
+        v = transcode.ffmpeg_version(cfg.ffmpeg_path)
+        print(f"[LR ] ffmpeg: {v}", flush=True)
 
     _register_filters(app)
     _register_routes(app)
@@ -136,6 +151,15 @@ def _register_routes(app: Flask) -> None:
             session=sess,
             status_label=_STATUS_LABEL,
             duration_for=_estimate_duration_seconds,
+        )
+
+    @app.get("/upload")
+    def ui_upload() -> Any:
+        cfg = current_app.config["LR_CONFIG"]
+        return render_template(
+            "upload.html",
+            max_upload_bytes=cfg.max_upload_bytes,
+            ffmpeg_available=transcode.ffmpeg_available(cfg.ffmpeg_path),
         )
 
     # --- API: sessions (create / list / get) ----------------------------
@@ -284,6 +308,168 @@ def _register_routes(app: Flask) -> None:
             ],
         })
 
+    # --- API: web audio upload ------------------------------------------
+    @app.post("/api/v1/uploads/audio")
+    def api_upload_audio() -> Any:
+        """Accept one audio file from the browser, transcode to canonical
+        WAV if needed, and create a one-chunk session.
+
+        Multipart form fields:
+          - file: the audio bytes (any format the browser or ffmpeg can read)
+          - title: optional string; defaults to rec_YYYY-MM-DDTHHMM
+        """
+        cfg = current_app.config["LR_CONFIG"]
+        store = current_app_storage()
+
+        if "file" not in request.files:
+            return jsonify({
+                "error": "missing_file",
+                "detail": "multipart field 'file' is required",
+            }), 400
+
+        upload = request.files["file"]
+        raw = upload.read()
+        if not raw:
+            return jsonify({"error": "empty_file"}), 400
+        if len(raw) > cfg.max_upload_bytes:
+            return jsonify({
+                "error": "file_too_large",
+                "detail": (
+                    f"file is {len(raw)} bytes; max is {cfg.max_upload_bytes}"
+                ),
+            }), 413
+
+        # Title: empty/whitespace -> default; explicit bad -> 400.
+        title_input = request.form.get("title")
+        if title_input is not None and title_input.strip() != "":
+            title_clean = _normalise_title(title_input)
+            if title_clean is None:
+                return jsonify({
+                    "error": "invalid_title",
+                    "detail": (
+                        "title must be 1..200 chars of printable text "
+                        "(letters, digits, spaces, basic punctuation)"
+                    ),
+                }), 400
+            title = title_clean
+        else:
+            title = None  # substituted with default after we know mtime
+
+        # Save the upload to the inbox, preserving the original extension
+        # so ffmpeg can sniff it correctly.
+        original = upload.filename or "upload"
+        suffix = Path(original).suffix or ".bin"
+        inbox_token = storage.new_session_id()
+        inbox_path = cfg.inbox_dir / f"{inbox_token}{suffix}"
+        try:
+            inbox_path.write_bytes(raw)
+        except OSError as exc:
+            return jsonify({"error": "io_error", "detail": str(exc)}), 500
+
+        started_at = _file_mtime_iso(inbox_path) or storage.now_iso()
+        if title is None:
+            title = _default_title_from_iso(started_at)
+
+        work_dir: Optional[Path] = None
+        try:
+            fmt = transcode.sniff_format(inbox_path)
+            if transcode.is_canonical_wav(fmt):
+                wav_path = inbox_path
+            else:
+                if not transcode.ffmpeg_available(cfg.ffmpeg_path):
+                    return jsonify({
+                        "error": "ffmpeg_missing",
+                        "detail": (
+                            f"this file is {fmt.kind} and needs to be "
+                            f"transcoded, but ffmpeg was not found at "
+                            f"{cfg.ffmpeg_path!r}. Install ffmpeg or set "
+                            "LR_FFMPEG_PATH."
+                        ),
+                    }), 503
+                work_dir = cfg.inbox_dir / f"work-{inbox_token}"
+                work_dir.mkdir(parents=True, exist_ok=True)
+                wav_path = work_dir / "out.wav"
+                transcode.transcode_to_wav(
+                    inbox_path, wav_path, ffmpeg_path=cfg.ffmpeg_path,
+                )
+
+            wav_bytes = wav_path.read_bytes()
+            if len(wav_bytes) < 44 or wav_bytes[0:4] != b"RIFF":
+                return jsonify({
+                    "error": "transcode_failed",
+                    "detail": "output is not a valid WAV",
+                }), 500
+
+            sess = store.ingest_single_audio(
+                session_id=inbox_token,
+                title=title,
+                wav_bytes=wav_bytes,
+                started_at=started_at,
+            )
+        except transcode.TranscodeError as exc:
+            return jsonify({
+                "error": exc.reason,
+                "detail": exc.detail,
+            }), 503
+        except Exception as exc:
+            return jsonify({
+                "error": "ingest_failed", "detail": str(exc),
+            }), 500
+        finally:
+            try:
+                if inbox_path.exists():
+                    inbox_path.unlink()
+            except OSError:
+                pass
+            if work_dir is not None and work_dir.exists():
+                shutil.rmtree(work_dir, ignore_errors=True)
+
+        return jsonify({
+            "created": True,
+            "session": sess.to_api_dict(),
+            "redirect_url": f"/sessions/{sess.id}",
+        }), 201
+
+
+# ---------------------------------------------------------------------------
+# Upload helpers
+# ---------------------------------------------------------------------------
+
+_TITLE_RE = re.compile(r"^[\w\s\-.,()\[\]!&'\"]+$", re.UNICODE)
+_TITLE_MAX = 200
+
+
+def _normalise_title(raw: str) -> Optional[str]:
+    """Return a clean title, or None if it was empty / invalid."""
+    title = raw.strip()
+    if not title or len(title) > _TITLE_MAX:
+        return None
+    if not _TITLE_RE.match(title):
+        return None
+    return "".join(c for c in title if c.isprintable() and c not in "\n\r\t")
+
+
+def _default_title_from_iso(iso_ts: str) -> str:
+    """Convert ISO-8601 '2026-10-03T14:30:00Z' to 'rec_2026-10-03T1430'."""
+    core = iso_ts.replace("Z", "").replace("z", "")
+    if "T" in core:
+        date, time_str = core.split("T", 1)
+    else:
+        date, time_str = core, "00:00"
+    if len(time_str) >= 5 and time_str[2] == ":":
+        time_str = time_str[:5].replace(":", "")
+    else:
+        time_str = "0000"
+    return f"rec_{date}T{time_str}"
+
+
+def _file_mtime_iso(path: Path) -> Optional[str]:
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return None
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(mtime))
+
 
 # ---------------------------------------------------------------------------
 # Entrypoint
@@ -298,4 +484,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

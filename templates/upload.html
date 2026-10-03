@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block extrahead %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/upload.css') }}">
+{% endblock %}
+
+{% block extrascripts %}
+  <script defer src="{{ url_for('static', filename='js/upload.js') }}"></script>
+{% endblock %}
+
+{% block title %}Upload &middot; Lecture Recorder{% endblock %}
+
+{% block content %}
+  <section class="lr-section-title">
+    <div>
+      <h1>Upload recording</h1>
+      <div class="lr-section-sub">
+        Drop a single audio file below. The server turns it into the
+        canonical 22050 Hz mono 32-bit WAV the rest of the system uses.
+      </div>
+    </div>
+  </section>
+
+  {% if not ffmpeg_available %}
+    <div class="lr-empty" style="border-color: var(--lr-warning);">
+      <h2 style="color: var(--lr-warning);">ffmpeg is not installed</h2>
+      <p>
+        WAV files and any format your browser can decode natively (MP3, OGG,
+        WebM) will still work. M4A / AAC files from iPhone Voice Memos need
+        ffmpeg. Install it with
+        <code>winget install Gyan.FFmpeg</code> on Windows, or set the
+        <code>LR_FFMPEG_PATH</code> env var to your ffmpeg binary.
+      </p>
+    </div>
+  {% endif %}
+
+  <form id="upload-form" class="lr-card" enctype="multipart/form-data"
+        action="/api/v1/uploads/audio" method="post">
+    <div id="dropzone" class="lr-dropzone" tabindex="0" role="button"
+         aria-label="Drop or pick an audio file">
+      <input id="file-input" type="file" name="file" hidden
+             accept=".m4a,.mp4,.mp3,.wav,.ogg,.webm,.flac,audio/*">
+      <div class="lr-dropzone__icon">⬆</div>
+      <div class="lr-dropzone__text">
+        <strong>Drop a file here</strong> or click to browse
+      </div>
+      <div class="lr-mono" id="file-name">No file selected</div>
+    </div>
+
+    <div style="margin-top: var(--lr-s-4);">
+      <label for="title-input" style="display: block; margin-bottom: var(--lr-s-2); color: var(--lr-text-muted); font-size: var(--lr-fs-sm);">
+        Title (optional — defaults to file's recording time)
+      </label>
+      <input id="title-input" type="text" name="title" maxlength="200"
+             placeholder="rec_2026-10-03T1430"
+             class="lr-input">
+    </div>
+
+    <div id="upload-status" class="lr-mono" style="margin-top: var(--lr-s-4); min-height: 1.5em;"></div>
+
+    <div style="margin-top: var(--lr-s-4); display: flex; gap: var(--lr-s-3); align-items: center;">
+      <button type="submit" id="submit-btn" class="lr-btn lr-btn--primary" disabled>Upload</button>
+      <span class="lr-mono">max {{ (max_upload_bytes / 1024 / 1024)|int }} MB</span>
+    </div>
+  </form>
+{% endblock %}
