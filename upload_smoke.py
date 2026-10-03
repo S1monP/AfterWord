@@ -1,0 +1,166 @@
+"""Live smoke test for the web audio upload path.
+
+Generates a tiny canonical WAV in memory, starts the dev server in a
+background thread, POSTs it as multipart to /api/v1/uploads/audio, and
+verifies the result. Skips if ffmpeg is needed but missing.
+
+Run: ``python upload_smoke.py``.
+"""
+from __future__ import annotations
+
+import json
+import struct
+import sys
+import tempfile
+import threading
+import time
+import shutil
+from pathlib import Path
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
+
+
+def make_wav(payload: bytes = b"\x00\x00\x00\x00" * 800,
+             sr: int = 22050, ch: int = 1, bps: int = 32) -> bytes:
+    byte_rate = sr * ch * (bps // 8)
+    block_align = ch * (bps // 8)
+    data_size = len(payload)
+    riff_size = 36 + data_size
+    h = bytearray(44)
+    h[0:4] = b"RIFF"
+    struct.pack_into("<I", h, 4, riff_size)
+    h[8:12] = b"WAVE"
+    h[12:16] = b"fmt "
+    struct.pack_into("<I", h, 16, 16)
+    struct.pack_into("<H", h, 20, 1)
+    struct.pack_into("<H", h, 22, ch)
+    struct.pack_into("<I", h, 24, sr)
+    struct.pack_into("<I", h, 28, byte_rate)
+    struct.pack_into("<H", h, 32, block_align)
+    struct.pack_into("<H", h, 34, bps)
+    h[36:40] = b"data"
+    struct.pack_into("<I", h, 40, data_size)
+    return bytes(h) + payload
+
+
+def build_multipart(file_bytes: bytes, filename: str,
+                    title: str | None = None) -> tuple[bytes, str]:
+    """Return (body, content_type) for a multipart/form-data with one file."""
+    boundary = "----lr-smoke-boundary-7c4f8a2e"
+    parts: list[bytes] = []
+    if title is not None:
+        parts.append(
+            f"--{boundary}\r\n"
+            f"Content-Disposition: form-data; name=\"title\"\r\n"
+            f"\r\n{title}\r\n".encode("utf-8")
+        )
+    parts.append(
+        f"--{boundary}\r\n"
+        f"Content-Disposition: form-data; name=\"file\"; "
+        f"filename=\"{filename}\"\r\n"
+        f"Content-Type: audio/wav\r\n"
+        f"\r\n".encode("utf-8")
+    )
+    parts.append(file_bytes)
+    parts.append(f"\r\n--{boundary}--\r\n".encode("utf-8"))
+    body = b"".join(parts)
+    ctype = f"multipart/form-data; boundary={boundary}"
+    return body, ctype
+
+
+def main() -> int:
+    import config as config_mod
+    from app import create_app
+
+    tmp = Path(tempfile.mkdtemp(prefix="lr-upload-smoke-"))
+    cfg = config_mod.Config(
+        data_dir=tmp, host="127.0.0.1", port=0,
+        openrouter_api_key="", minimax_api_key="",
+        ffmpeg_path="ffmpeg-nonexistent-test-binary",
+        max_upload_bytes=10 * 1024 * 1024,
+    )
+
+    app = create_app(cfg)
+    from werkzeug.serving import make_server
+    server = make_server("127.0.0.1", 8001, app, threaded=True)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    time.sleep(0.5)
+    base = "http://127.0.0.1:8001"
+
+    def req(method, path, data=None, headers=None):
+        r = Request(base + path, method=method, data=data,
+                    headers=headers or {})
+        try:
+            with urlopen(r) as resp:
+                return resp.status, resp.read(), dict(resp.headers)
+        except HTTPError as e:
+            return e.code, e.read(), dict(e.headers)
+
+    try:
+        s, b, _ = req("GET", "/upload")
+        assert s == 200 and b"Drop a file here" in b, (s, b[:80])
+        print("1. Upload page OK")
+
+        wav = make_wav()
+        body, ctype = build_multipart(wav, "test.wav", "Smoke Title")
+        s, b, _ = req("POST", "/api/v1/uploads/audio",
+                       data=body, headers={"Content-Type": ctype})
+        assert s == 201, (s, b)
+        j = json.loads(b)
+        assert j["session"]["status"] == "ready"
+        assert j["session"]["title"] == "Smoke Title"
+        print(f"2. Canonical WAV upload OK, session={j['session']['id']}")
+
+        s, b, hdr = req("GET", j["session"]["full_audio_url"])
+        assert s == 200 and b[0:4] == b"RIFF" and b[8:12] == b"WAVE"
+        assert hdr.get("Content-Type", "").startswith("audio/wav")
+        assert len(b) == len(wav)
+        print(f"3. Audio playable, size={len(b)}")
+
+        body, ctype = build_multipart(wav, "default.wav", "")
+        s, b, _ = req("POST", "/api/v1/uploads/audio",
+                       data=body, headers={"Content-Type": ctype})
+        assert s == 201
+        j = json.loads(b)
+        assert j["session"]["title"].startswith("rec_"), j["session"]["title"]
+        print(f"4. Default title OK: {j['session']['title']}")
+
+        fake_m4a = b"\x00\x00\x00\x20ftypM4A " + b"\x00" * 256
+        body, ctype = build_multipart(fake_m4a, "voice.m4a")
+        s, b, _ = req("POST", "/api/v1/uploads/audio",
+                       data=body, headers={"Content-Type": ctype})
+        assert s == 503, (s, b)
+        assert json.loads(b)["error"] == "ffmpeg_missing"
+        print("5. Non-WAV without ffmpeg -> 503 OK")
+
+        boundary = "----lr-smoke-empty"
+        empty = f"--{boundary}--\r\n".encode()
+        s, b, _ = req("POST", "/api/v1/uploads/audio",
+                       data=empty,
+                       headers={"Content-Type":
+                                f"multipart/form-data; boundary={boundary}"})
+        assert s == 400 and json.loads(b)["error"] == "missing_file"
+        print("6. Missing file -> 400 OK")
+
+        s, b, _ = req("GET", "/api/v1/sessions")
+        assert s == 200
+        listed = json.loads(b)["sessions"]
+        assert any(x["title"] == "Smoke Title" for x in listed)
+        print("7. Session list OK")
+
+        print()
+        print("=== ALL UPLOAD SMOKE CHECKS PASS ===")
+        return 0
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        try:
+            app.config["LR_STORAGE"]._tls.conn.close()  # type: ignore[attr-defined]
+        except Exception:
+            pass
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

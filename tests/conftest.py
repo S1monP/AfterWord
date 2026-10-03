@@ -32,6 +32,8 @@ class LRTestCase(unittest.TestCase):
             port=0,
             openrouter_api_key="",
             minimax_api_key="",
+            ffmpeg_path="ffmpeg-nonexistent-test-binary",
+            max_upload_bytes=10 * 1024 * 1024,
         )
         self.app = create_app(self._cfg)
         self.client = self.app.test_client()
