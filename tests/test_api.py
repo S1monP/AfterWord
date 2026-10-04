@@ -207,6 +207,20 @@ class WebUITests(LRTestCase):
         self.assertIn(b"View on Todos", body)
         # Lectures card has a "View all" link to /lectures.
         self.assertIn(b'href="/lectures"', body)
+        # Page wrapper has the with-gap modifier for the top breathing room.
+        self.assertIn(b"lr-page--with-gap", body)
+
+    def test_dashboard_gap_token_defined(self) -> None:
+        """The dashboard's top-gap token is defined in tokens.css and
+        used by the layout. Static check so the visual stays consistent
+        if someone refactors."""
+        from pathlib import Path
+        css_root = Path(__file__).resolve().parent.parent / "static" / "css"
+        tokens = (css_root / "tokens.css").read_text(encoding="utf-8")
+        layout = (css_root / "layout.css").read_text(encoding="utf-8")
+        self.assertIn("--lr-pad-page-top:", tokens)
+        self.assertIn("min(12vh, 112px)", tokens)
+        self.assertIn("var(--lr-pad-page-top)", layout)
 
     def test_session_page_contains_audio(self) -> None:
         self._upload_complete_session()

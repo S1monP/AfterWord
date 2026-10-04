@@ -169,8 +169,16 @@
   grid-template-columns: 1fr 2fr 1fr;
   grid-template-rows: 0.18fr 0.82fr;
   gap: var(--lr-gap-card);
-  height: calc(100vh - var(--lr-topbar-h) - 2 * var(--lr-pad-page));
+  height: calc(100vh - var(--lr-topbar-h) - var(--lr-pad-page-top) - var(--lr-pad-page));
   min-height: 600px;
+}
+
+/* Modifier for the dashboard: a generous top gap so the content
+ * sits clearly below the top bar, not flush against it. About 1/8
+ * of the viewport, capped at 112px so very tall screens don't
+ * develop a canyon. Other pages keep the normal .lr-page padding. */
+.lr-page--with-gap {
+  padding-top: var(--lr-pad-page-top);
 }
 
 .lr-dashboard__calendar {
