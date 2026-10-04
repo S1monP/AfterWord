@@ -75,13 +75,30 @@ def sniff_format(path: Path) -> AudioFormat:
 
     if head[0:4] == b"RIFF" and len(head) >= 12 and head[8:12] == b"WAVE":
         fmt = AudioFormat(kind="wav")
-        if len(head) >= 36:
-            try:
-                fmt.channels = struct.unpack_from("<H", head, 22)[0]
-                fmt.sample_rate = struct.unpack_from("<I", head, 24)[0]
-                fmt.bits_per_sample = struct.unpack_from("<H", head, 34)[0]
-            except struct.error:
-                pass
+        # Walk chunks to find the fmt chunk instead of trusting fixed
+        # offsets, so we correctly read files that have LIST/JUNK/INFO
+        # chunks between RIFF and data (which ffmpeg 9.x produces).
+        pos = 12
+        while pos + 8 <= len(head):
+            chunk_id = head[pos:pos + 4]
+            if chunk_id == b"fmt ":
+                size = struct.unpack_from("<I", head, pos + 4)[0]
+                if size >= 16 and pos + 8 + 16 <= len(head):
+                    try:
+                        fmt.channels = struct.unpack_from(
+                            "<H", head, pos + 8 + 2
+                        )[0]
+                        fmt.sample_rate = struct.unpack_from(
+                            "<I", head, pos + 8 + 4
+                        )[0]
+                        fmt.bits_per_sample = struct.unpack_from(
+                            "<H", head, pos + 8 + 14
+                        )[0]
+                    except struct.error:
+                        pass
+                break
+            size = struct.unpack_from("<I", head, pos + 4)[0]
+            pos += 8 + size + (size & 1)
         return fmt
 
     if len(head) >= 8 and head[4:8] == b"ftyp":

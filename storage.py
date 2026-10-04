@@ -159,19 +159,74 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
 # ---------------------------------------------------------------------------
 
 def _validate_wav_header(header: bytes) -> None:
-    if len(header) < WAV_HEADER_SIZE:
+    if len(header) < 12:
         raise ValueError("WAV header too short")
     if header[0:4] != b"RIFF" or header[8:12] != b"WAVE":
         raise ValueError("not a RIFF/WAVE file")
 
 
 def _parse_wav_header(header: bytes) -> tuple[int, int, int]:
-    """Returns (sample_rate, channels, bits_per_sample)."""
+    """Returns (sample_rate, channels, bits_per_sample) from the fmt chunk.
+
+    Uses the chunk walker so it works with files that have extra chunks
+    (LIST, JUNK, INFO, bext, etc.) between ``fmt `` and ``data``.
+    """
     _validate_wav_header(header)
-    channels = struct.unpack_from("<H", header, 22)[0]
-    sample_rate = struct.unpack_from("<I", header, 24)[0]
-    bits_per_sample = struct.unpack_from("<H", header, 34)[0]
+    fmt = _find_chunk(header, b"fmt ")
+    if fmt is None:
+        raise ValueError("WAV has no 'fmt ' chunk")
+    if len(fmt) < 16:
+        raise ValueError("'fmt ' chunk too short")
+    channels = struct.unpack_from("<H", fmt, 2)[0]
+    sample_rate = struct.unpack_from("<I", fmt, 4)[0]
+    bits_per_sample = struct.unpack_from("<H", fmt, 14)[0]
     return sample_rate, channels, bits_per_sample
+
+
+def _find_chunk(data: bytes, chunk_id: bytes) -> Optional[bytes]:
+    """Return the payload of the first ``chunk_id`` in a RIFF stream.
+
+    Handles arbitrary padding between chunks (RIFF chunks are
+    word-aligned: each chunk's data is padded with a zero byte if its
+    declared size is odd). Returns ``None`` if the chunk is not found.
+    """
+    if len(data) < 12:
+        return None
+    pos = 12  # skip RIFF header
+    while pos + 8 <= len(data):
+        if data[pos:pos + 4] != chunk_id:
+            size = struct.unpack_from("<I", data, pos + 4)[0]
+            pos += 8 + size + (size & 1)  # word-aligned
+            continue
+        size = struct.unpack_from("<I", data, pos + 4)[0]
+        start = pos + 8
+        end = start + size
+        if end > len(data):
+            return data[start:]  # truncated; return what we have
+        return data[start:end]
+    return None
+
+
+def _wav_data_chunk_size(data: bytes) -> int:
+    """Return the size of the ``data`` chunk's payload, or 0 if not found."""
+    pos = 12
+    while pos + 8 <= len(data):
+        size = struct.unpack_from("<I", data, pos + 4)[0]
+        if data[pos:pos + 4] == b"data":
+            return size
+        pos += 8 + size + (size & 1)
+    return 0
+
+
+def _wav_data_offset(data: bytes) -> Optional[int]:
+    """Return the byte offset of the ``data`` chunk payload, or None."""
+    pos = 12
+    while pos + 8 <= len(data):
+        if data[pos:pos + 4] == b"data":
+            return pos + 8
+        size = struct.unpack_from("<I", data, pos + 4)[0]
+        pos += 8 + size + (size & 1)
+    return None
 
 
 def _build_wav_header(
@@ -649,7 +704,12 @@ class Storage:
         )
 
     def _stitch_chunks(self, session_id: str, sess: Session) -> int:
-        """Concatenate ``chunks/NNN.wav`` into ``full.wav`` (atomic)."""
+        """Concatenate ``chunks/NNN.wav`` into ``full.wav`` (atomic).
+
+        Uses a chunk-walking WAV parser so it works with files that
+        contain extra chunks between ``fmt `` and ``data`` (LIST, JUNK,
+        INFO, bext, ...) -- which is what ffmpeg 9.x produces.
+        """
         session_dir = self.session_dir(session_id)
         session_dir.mkdir(parents=True, exist_ok=True)
         chunks_dir = self.chunks_dir(session_id)
@@ -661,10 +721,12 @@ class Storage:
                 raise FileNotFoundError(f"chunk {n} missing on disk")
             chunk_files.append(p)
 
+        # Read the first chunk's full header so we can verify the audio
+        # format and find the data chunk's offset.
         with open(chunk_files[0], "rb") as f:
-            header = f.read(WAV_HEADER_SIZE)
-        _validate_wav_header(header)
-        sample_rate, channels, bits_per_sample = _parse_wav_header(header)
+            first = f.read()
+        _validate_wav_header(first)
+        sample_rate, channels, bits_per_sample = _parse_wav_header(first)
         if (sample_rate, channels, bits_per_sample) != (
             sess.sample_rate, sess.channels, sess.bits_per_sample
         ):
@@ -674,20 +736,25 @@ class Storage:
                 f"session=({sess.sample_rate},{sess.channels},{sess.bits_per_sample})"
             )
 
-        # Compute total payload size from each chunk's declared data size.
+        # For each chunk, locate the data chunk and compute how many
+        # bytes of audio are actually present. We trust the header's
+        # declared data size but never assume the file is exactly that
+        # many bytes after a 44-byte header -- ffmpeg may have added
+        # extra chunks, and the file may end with a padding byte.
+        per_chunk_audio: list[tuple[Path, int, int]] = []  # (path, data_offset, audio_len)
         total_data = 0
         for p in chunk_files:
             with open(p, "rb") as f:
-                hdr = f.read(WAV_HEADER_SIZE)
+                hdr = f.read()
             _validate_wav_header(hdr)
-            data_size = struct.unpack_from("<I", hdr, 40)[0]
-            file_size = p.stat().st_size
-            if file_size != WAV_HEADER_SIZE + data_size:
-                raise ValueError(
-                    f"chunk {p.name} size mismatch: "
-                    f"file={file_size} header_data={data_size}"
-                )
-            total_data += data_size
+            data_offset = _wav_data_offset(hdr)
+            if data_offset is None:
+                raise ValueError(f"chunk {p.name} has no 'data' chunk")
+            declared = _wav_data_chunk_size(hdr)
+            available = len(hdr) - data_offset
+            audio_len = min(declared, available) if declared else available
+            per_chunk_audio.append((p, data_offset, audio_len))
+            total_data += audio_len
 
         full_tmp = session_dir / "full.wav.tmp"
         full_final = session_dir / "full.wav"
@@ -696,16 +763,24 @@ class Storage:
             out.write(_build_wav_header(
                 sample_rate, channels, bits_per_sample, total_data
             ))
-            for p in chunk_files:
+            for p, data_offset, audio_len in per_chunk_audio:
+                if audio_len <= 0:
+                    continue
                 with open(p, "rb") as f:
-                    f.seek(WAV_HEADER_SIZE)
-                    shutil.copyfileobj(f, out, length=1024 * 1024)
+                    f.seek(data_offset)
+                    remaining = audio_len
+                    while remaining > 0:
+                        chunk = f.read(min(1024 * 1024, remaining))
+                        if not chunk:
+                            break
+                        out.write(chunk)
+                        remaining -= len(chunk)
             out.flush()
             os.fsync(out.fileno())
         os.replace(full_tmp, full_final)
 
         # Remove the chunk files; DB rows stay as provenance.
-        for p in chunk_files:
+        for p, _, _ in per_chunk_audio:
             try:
                 p.unlink()
             except FileNotFoundError:

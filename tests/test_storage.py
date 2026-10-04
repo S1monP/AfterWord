@@ -4,6 +4,7 @@ Run from the Server directory: ``python -m unittest discover -s tests -v``.
 """
 from __future__ import annotations
 
+import struct
 import unittest
 
 import storage
@@ -221,6 +222,109 @@ class FinishTests(LRTestCase):
         # Re-send chunk 1 (overwrite); status flips back to receiving.
         store.write_chunk(sid, 1, self.make_wav(b"X" * 50))
         self.assertEqual(store.get_session(sid).status, storage.STATUS_RECEIVING)
+
+
+class NonMinimalWavTests(LRTestCase):
+    """Regression: WAV files that aren't a strict 44-byte header.
+
+    ffmpeg 9.x writes a LIST chunk between fmt and data, and other
+    encoders may write JUNK, INFO, or bext. The stitcher must locate
+    the data chunk by walking, not by trusting fixed offsets.
+    """
+
+    @staticmethod
+    def _build_wav_with_extra_chunk(payload: bytes,
+                                     extra_chunk_id: bytes = b"LIST",
+                                     extra_payload: bytes = b"INFO" + b"\x00" * 8) -> bytes:
+        """Build a canonical 22050 Hz mono 32-bit PCM WAV with an extra
+        chunk inserted between the fmt and data chunks, mimicking the
+        output of ffmpeg 9.x.
+        """
+        byte_rate = 22050 * 1 * (32 // 8)
+        block_align = 1 * (32 // 8)
+        data_size = len(payload)
+        riff_size = 4 + (8 + 16) + (8 + len(extra_payload)) + (8 + data_size)
+
+        out = bytearray()
+        out += b"RIFF"
+        out += struct.pack("<I", riff_size)
+        out += b"WAVE"
+
+        # fmt chunk (16 bytes payload)
+        out += b"fmt "
+        out += struct.pack("<I", 16)
+        out += struct.pack("<H", 1)            # PCM
+        out += struct.pack("<H", 1)            # channels
+        out += struct.pack("<I", 22050)       # sample rate
+        out += struct.pack("<I", byte_rate)    # byte rate
+        out += struct.pack("<H", block_align)  # block align
+        out += struct.pack("<H", 32)           # bits per sample
+
+        # extra chunk (LIST/INFO/JUNK/etc.)
+        out += extra_chunk_id
+        out += struct.pack("<I", len(extra_payload))
+        out += extra_payload
+        if len(extra_payload) % 2:
+            out += b"\x00"  # word-align padding
+
+        # data chunk
+        out += b"data"
+        out += struct.pack("<I", data_size)
+        out += payload
+        return bytes(out)
+
+    def test_wav_with_list_chunk_is_accepted_by_sniff(self) -> None:
+        wav = self._build_wav_with_extra_chunk(b"\x00" * 200)
+        store = self.app.config["LR_STORAGE"]
+        sid = "listchunk1234567890"
+        store.upsert_session(
+            sid, title="t", expected_count=1,
+            sample_rate=22050, channels=1, bits_per_sample=32,
+            started_at=storage.now_iso(),
+        )
+        # write_chunk should accept the messy WAV; the existing strict
+        # 44-byte check used to be a no-op for write_chunk but
+        # finish_session would fail.
+        store.write_chunk(sid, 1, wav)
+        result = store.finish_session(sid)
+        self.assertTrue(result.ok, result.reason)
+
+    def test_wav_with_junk_chunk_is_accepted(self) -> None:
+        wav = self._build_wav_with_extra_chunk(
+            b"\x00" * 200, extra_chunk_id=b"JUNK",
+            extra_payload=b"\x00" * 64,
+        )
+        store = self.app.config["LR_STORAGE"]
+        sid = "junkchunk1234567890"
+        store.upsert_session(
+            sid, title="t", expected_count=1,
+            sample_rate=22050, channels=1, bits_per_sample=32,
+            started_at=storage.now_iso(),
+        )
+        store.write_chunk(sid, 1, wav)
+        result = store.finish_session(sid)
+        self.assertTrue(result.ok, result.reason)
+
+    def test_stitched_full_wav_contains_only_audio_data(self) -> None:
+        """The full.wav output must be a strict 44-byte header + raw
+        audio, with no LIST/JUNK leakage from the chunk."""
+        payload = b"ABCD" * 500  # 2000 bytes, easy to identify in output
+        wav = self._build_wav_with_extra_chunk(payload)
+        store = self.app.config["LR_STORAGE"]
+        sid = "payload1234567890ab"
+        store.upsert_session(
+            sid, title="t", expected_count=1,
+            sample_rate=22050, channels=1, bits_per_sample=32,
+            started_at=storage.now_iso(),
+        )
+        store.write_chunk(sid, 1, wav)
+        result = store.finish_session(sid)
+        self.assertTrue(result.ok, result.reason)
+        full = store.open_full_audio(sid).read_bytes()
+        # full.wav is 44 (new header) + 2000 (payload) = 2044 bytes.
+        self.assertEqual(len(full), 44 + len(payload))
+        # The payload bytes must be at the end, untouched.
+        self.assertEqual(full[44:], payload)
 
 
 if __name__ == "__main__":
