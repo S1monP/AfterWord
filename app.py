@@ -53,6 +53,21 @@ def create_app(config: Optional[config_mod.Config] = None) -> Flask:
         v = transcode.ffmpeg_version(cfg.ffmpeg_path)
         print(f"[LR ] ffmpeg: {v}", flush=True)
 
+    @app.context_processor
+    def _inject_globals():
+        # Pass the count of unclassified sessions to every template so
+        # the top-bar badge can render. Capped at 99 in the display.
+        try:
+            count = sum(
+                1 for s in current_app_storage().list_sessions()
+                if s.kind is None and s.status == storage.STATUS_READY
+            )
+        except Exception:
+            count = 0
+        return {
+            "unsorted_count": min(count, 99),
+        }
+
     _register_filters(app)
     _register_routes(app)
     return app

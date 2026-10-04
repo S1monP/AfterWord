@@ -1,8 +1,18 @@
 {# Reusable Jinja macros. Imported via `{% import "_macros.html" as ui %}`. #}
 
-{% macro status_badge(status, label) %}
-  <span class="lr-badge lr-badge--{{ status }}">{{ label }}</span>
-{% endmacro %}
+{% macro status_badge(status, label) -%}
+  <span class="lr-status lr-status--{{ status }}">{{ label }}</span>
+{%- endmacro %}
+
+{% macro kind_badge(kind) -%}
+  {% if kind %}
+    <span class="lr-kind lr-kind--{{ kind }}">{{ kind.replace('_', ' ') }}</span>
+  {% endif %}
+{%- endmacro %}
+
+{% macro priority_dot(priority) -%}
+  <span class="lr-priority lr-priority--{{ priority or 'low' }}"></span>
+{%- endmacro %}
 
 {% macro human_size(num) -%}
   {%- if not num -%}0 B

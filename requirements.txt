@@ -1,1 +1,7 @@
 Flask>=3.0,<4.0
+
+# Used for rendering markdown notes (Tier 1's notes feature).
+markdown>=3.6
+
+# Used for parsing .ics calendar files (Tier 1's calendar import).
+icalendar>=5.0

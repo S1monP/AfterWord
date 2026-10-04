@@ -1,56 +1,118 @@
-/* Design tokens. Every component CSS reads from these. */
+/* Design tokens. Every component CSS reads from these.
+ *
+ * Two themes:
+ *   - Dark (default): primary usage. Deep, warm-tinted neutrals.
+ *   - Light: opt-in via [data-theme="light"] on <html>.
+ *
+ * Type pairing:
+ *   - Manrope: display + UI text. Slightly geometric, slightly warm.
+ *   - IBM Plex Sans: body + dense data. Engineered, very legible.
+ *   - IBM Plex Mono: numbers, timestamps, code. Same family.
+ *
+ * Accent: lavender #a78bfa. Always means "you can act here".
+ */
 
 :root {
-  /* Colour palette: low-saturation, dark-friendly. */
-  --lr-bg:            #0f1115;
-  --lr-bg-elevated:   #171a21;
-  --lr-bg-card:       #1c2029;
-  --lr-border:        #2a2f3a;
-  --lr-text:          #e6e9ef;
-  --lr-text-muted:    #9aa3b2;
-  --lr-text-faint:    #6c7280;
+  /* ---- Colour, dark theme (default) ---- */
+  --lr-bg:            #0e0f12;
+  --lr-bg-elevated:   #17181d;
+  --lr-bg-card:       #17181d;
+  --lr-bg-card-hi:    #1f2128;
+  --lr-border:        #2a2c34;
+  --lr-border-hi:     #3a3d47;
 
-  --lr-accent:        #5b8def;
-  --lr-accent-hover:  #7aa1ff;
-  --lr-accent-text:   #0b1020;
+  --lr-text:          #e7e6ee;
+  --lr-text-muted:    #8b8a98;
+  --lr-text-faint:    #5a5965;
 
-  --lr-success:       #4ade80;
-  --lr-warning:       #f5b34a;
-  --lr-danger:        #f06a6a;
-  --lr-info:          #5bc0de;
+  --lr-accent:        #a78bfa;
+  --lr-accent-hover:  #c4b3fd;
+  --lr-accent-press:  #8a6fdb;
+  --lr-accent-text:   #0b0a14;
 
-  /* Spacing scale (4px base). */
-  --lr-s-1:  4px;
-  --lr-s-2:  8px;
-  --lr-s-3: 12px;
-  --lr-s-4: 16px;
-  --lr-s-5: 20px;
-  --lr-s-6: 24px;
-  --lr-s-8: 32px;
-  --lr-s-10: 40px;
-  --lr-s-12: 48px;
+  --lr-success:       #7dd3a0;
+  --lr-warning:       #e8b86d;
+  --lr-danger:        #e88282;
+  --lr-info:          #82b8e8;
 
-  /* Type scale. */
-  --lr-fs-xs:  12px;
-  --lr-fs-sm:  13px;
-  --lr-fs-md:  15px;
-  --lr-fs-lg:  17px;
-  --lr-fs-xl:  20px;
-  --lr-fs-2xl: 26px;
-  --lr-fs-3xl: 34px;
+  /* ---- Type ---- */
+  --lr-font-display:  "Manrope", -apple-system, BlinkMacSystemFont,
+                       "Segoe UI", Roboto, sans-serif;
+  --lr-font-body:     "IBM Plex Sans", -apple-system, BlinkMacSystemFont,
+                       "Segoe UI", Roboto, sans-serif;
+  --lr-font-mono:     "IBM Plex Mono", ui-monospace, SFMono-Regular,
+                       Menlo, Consolas, monospace;
+
+  /* Type scale, 1.25 minor-third */
+  --lr-fs-xs:   12px;
+  --lr-fs-sm:   13px;
+  --lr-fs-md:   15px;
+  --lr-fs-lg:   17px;
+  --lr-fs-xl:   19px;
+  --lr-fs-2xl:  24px;
+  --lr-fs-3xl:  30px;
+  --lr-fs-4xl:  38px;
 
   --lr-fh-tight:  1.2;
   --lr-fh-normal: 1.45;
 
-  /* Radii. */
-  --lr-r-sm: 4px;
-  --lr-r-md: 8px;
-  --lr-r-lg: 12px;
+  --lr-fw-regular:  400;
+  --lr-fw-medium:   500;
+  --lr-fw-semibold: 600;
+  --lr-fw-bold:     700;
 
-  /* Shadows. */
-  --lr-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
-  --lr-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35);
+  /* ---- Spacing scale ---- */
+  --lr-s-1:   4px;
+  --lr-s-2:   8px;
+  --lr-s-3:  12px;
+  --lr-s-4:  16px;
+  --lr-s-5:  20px;
+  --lr-s-7:  28px;
+  --lr-s-10: 40px;
+  --lr-s-14: 56px;
 
-  /* Motion. */
-  --lr-t-fast: 120ms ease-out;
+  /* ---- Shape ---- */
+  --lr-r-sm:   6px;
+  --lr-r-md:   8px;
+  --lr-r-lg:  14px;
+  --lr-r-pill: 999px;
+
+  /* ---- Shadows ---- */
+  --lr-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.20);
+  --lr-shadow-md: 0 4px 14px rgba(0, 0, 0, 0.30);
+  --lr-shadow-glow: 0 0 0 2px rgba(167, 139, 250, 0.35);
+
+  /* ---- Motion ---- */
+  --lr-t-fast:   100ms ease-out;
+  --lr-t-base:   180ms ease-out;
+  --lr-t-slow:   280ms cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ---- Top bar (square corners, special-cased) ---- */
+  --lr-topbar-h:  56px;
+
+  /* ---- Layout ---- */
+  --lr-container-max: 1280px;
+  --lr-gap-card:   24px;
+  --lr-pad-card:   20px;
+  --lr-pad-page:   24px;
+}
+
+/* ---- Light theme, opt-in via [data-theme="light"] on <html> ---- */
+[data-theme="light"] {
+  --lr-bg:           #fafaf7;
+  --lr-bg-elevated:  #ffffff;
+  --lr-bg-card:      #ffffff;
+  --lr-bg-card-hi:   #f3f3ef;
+  --lr-border:       #e6e5df;
+  --lr-border-hi:    #d4d3cd;
+
+  --lr-text:         #1a1b1f;
+  --lr-text-muted:   #5a5b62;
+  --lr-text-faint:   #8b8a92;
+
+  --lr-accent-text:  #ffffff;
+
+  --lr-shadow-sm:   0 1px 2px rgba(0, 0, 0, 0.06);
+  --lr-shadow-md:   0 4px 14px rgba(0, 0, 0, 0.10);
+  --lr-shadow-glow: 0 0 0 2px rgba(167, 139, 250, 0.45);
 }

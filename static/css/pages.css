@@ -1,0 +1,74 @@
+/* Page-specific styles.
+ *
+ * Most styles live in components.css. This file is for pieces that
+ * belong to specific pages: the session page's detail grid, the
+ * player chrome, etc.
+ */
+
+/* ---- Session detail: definition list ---- */
+
+.lr-detail-grid {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  row-gap: var(--lr-s-2);
+  column-gap: var(--lr-s-4);
+  font-size: var(--lr-fs-sm);
+  margin: 0;
+}
+.lr-detail-grid dt {
+  color: var(--lr-text-muted);
+  font-weight: var(--lr-fw-medium);
+}
+.lr-detail-grid dd { margin: 0; color: var(--lr-text); }
+.lr-detail-grid dd code {
+  font-family: var(--lr-font-mono);
+  font-size: var(--lr-fs-xs);
+  color: var(--lr-text-muted);
+}
+
+/* ---- Audio player ---- */
+
+.lr-player {
+  display: flex;
+  align-items: center;
+  gap: var(--lr-s-3);
+  flex-wrap: wrap;
+}
+.lr-player audio {
+  flex: 1 1 320px;
+  min-width: 0;
+  max-width: 540px;
+  height: 36px;
+}
+.lr-player audio::-webkit-media-controls-panel {
+  background: var(--lr-bg-elevated);
+}
+
+/* ---- Back link used at the top of detail pages ---- */
+
+.lr-back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--lr-s-2);
+  font-size: var(--lr-fs-sm);
+  color: var(--lr-text-muted);
+  margin-bottom: var(--lr-s-4);
+}
+.lr-back:hover { color: var(--lr-text); }
+
+/* ---- Section heading within a card (used by session.html h2 etc.) ---- */
+
+.lr-card h2 {
+  font-family: var(--lr-font-display);
+  font-size: var(--lr-fs-lg);
+  font-weight: var(--lr-fw-semibold);
+  color: var(--lr-text);
+  margin: 0 0 var(--lr-s-3);
+}
+.lr-card h3 {
+  font-family: var(--lr-font-display);
+  font-size: var(--lr-fs-md);
+  font-weight: var(--lr-fw-semibold);
+  color: var(--lr-text);
+  margin: 0 0 var(--lr-s-2);
+}

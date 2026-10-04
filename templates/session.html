@@ -4,20 +4,24 @@
 {% block title %}{{ session.title or session.id }} &middot; Lecture Recorder{% endblock %}
 
 {% block content %}
-  <p><a href="{{ url_for('ui_index') }}">&larr; All recordings</a></p>
+<div class="lr-page">
+  <a class="lr-back" href="{{ url_for('ui_index') }}">&larr; All recordings</a>
 
   <section class="lr-card">
     <div class="lr-row" style="align-items: flex-start; justify-content: space-between;">
       <div>
-        <h1>{{ session.title or '(untitled)' }}</h1>
+        <h1 style="font-size: var(--lr-fs-2xl); margin-bottom: var(--lr-s-1);">
+          {{ session.title or '(untitled)' }}
+        </h1>
         <div class="lr-mono">{{ session.id }}</div>
       </div>
-      <div>
+      <div class="lr-row" style="gap: var(--lr-s-2);">
+        {{ ui.kind_badge(session.kind) }}
         {{ ui.status_badge(session.status, status_label.get(session.status, session.status)) }}
       </div>
     </div>
 
-    <dl class="lr-detail-grid" style="margin-top: var(--lr-s-4);">
+    <dl class="lr-detail-grid" style="margin-top: var(--lr-s-5);">
       <dt>Started</dt>     <dd>{{ session.started_at|iso_local }}</dd>
       <dt>Finished</dt>    <dd>{{ session.finished_at|iso_local if session.finished_at else '—' }}</dd>
       <dt>Audio format</dt>
@@ -36,7 +40,7 @@
   </section>
 
   {% if session.status == 'ready' and session.full_audio_size > 0 %}
-    <section class="lr-card">
+    <section class="lr-card" style="margin-top: var(--lr-gap-card);">
       <h2>Playback</h2>
       <div class="lr-player" style="margin-top: var(--lr-s-3);">
         <audio controls preload="metadata"
@@ -52,7 +56,7 @@
       </p>
     </section>
   {% elif session.status == 'receiving' %}
-    <section class="lr-card">
+    <section class="lr-card" style="margin-top: var(--lr-gap-card);">
       <h2>Still receiving</h2>
       <p>
         {{ session.received_chunks }} of {{ session.expected_count }} chunks received.
@@ -61,7 +65,7 @@
       </p>
     </section>
   {% elif session.status == 'failed' %}
-    <section class="lr-card">
+    <section class="lr-card" style="margin-top: var(--lr-gap-card);">
       <h2>Failed</h2>
       <p>{{ session.status_detail or 'No further detail.' }}</p>
       <p>
@@ -70,4 +74,5 @@
       </p>
     </section>
   {% endif %}
+</div>
 {% endblock %}
