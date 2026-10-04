@@ -209,6 +209,8 @@ class WebUITests(LRTestCase):
         self.assertIn(b'href="/lectures"', body)
         # Page wrapper has the with-gap modifier for the top breathing room.
         self.assertIn(b"lr-page--with-gap", body)
+        # And the full modifier so it fills the viewport edge-to-edge.
+        self.assertIn(b"lr-page--full", body)
 
     def test_dashboard_gap_token_defined(self) -> None:
         """The dashboard's top-gap token is defined in tokens.css and
@@ -221,6 +223,10 @@ class WebUITests(LRTestCase):
         self.assertIn("--lr-pad-page-top:", tokens)
         self.assertIn("min(12vh, 112px)", tokens)
         self.assertIn("var(--lr-pad-page-top)", layout)
+        # The full-width modifier and its edge token.
+        self.assertIn("--lr-pad-edge:", tokens)
+        self.assertIn(".lr-page--full", layout)
+        self.assertIn("var(--lr-pad-edge)", layout)
 
     def test_session_page_contains_audio(self) -> None:
         self._upload_complete_session()

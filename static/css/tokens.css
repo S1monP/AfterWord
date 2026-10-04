@@ -95,6 +95,9 @@
   --lr-gap-card:   24px;
   --lr-pad-card:   20px;
   --lr-pad-page:   32px;
+  /* Edge gap for full-width pages (dashboard). Keeps content
+     a fixed distance from the viewport edges regardless of size. */
+  --lr-pad-edge:  24px;
   /* Generous top gap for the dashboard. ~1/8 of the viewport,
      capped at 112px on large screens. */
   --lr-pad-page-top: min(12vh, 112px);

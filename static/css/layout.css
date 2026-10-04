@@ -181,6 +181,17 @@
   padding-top: var(--lr-pad-page-top);
 }
 
+/* Modifier for full-width pages. Removes the 1280px content cap so
+ * the page fills the viewport, with a fixed 24px gap from each edge.
+ * Use on the dashboard (and any other page where edge-to-edge content
+ * is desired). Text-heavy pages should NOT use this -- a wide
+ * line length hurts readability. */
+.lr-page--full {
+  max-width: none;
+  padding-left: var(--lr-pad-edge);
+  padding-right: var(--lr-pad-edge);
+}
+
 .lr-dashboard__calendar {
   grid-column: 1;
   grid-row: 1 / span 2;
