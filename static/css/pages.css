@@ -2,8 +2,57 @@
  *
  * Most styles live in components.css. This file is for pieces that
  * belong to specific pages: the session page's detail grid, the
- * player chrome, etc.
+ * player chrome, the dashboard calendar list, etc.
  */
+
+/* ---- Dashboard: calendar list (Today / This week sections) ---- */
+
+.lr-cal-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lr-s-4);
+}
+.lr-cal-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lr-s-2);
+}
+.lr-cal-section__label {
+  font-family: var(--lr-font-display);
+  font-size: var(--lr-fs-xs);
+  font-weight: var(--lr-fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--lr-text-muted);
+  padding-bottom: var(--lr-s-2);
+  border-bottom: 1px solid var(--lr-border);
+}
+.lr-cal-section .lr-empty-card {
+  padding: var(--lr-s-4) var(--lr-s-2);
+  font-size: var(--lr-fs-xs);
+  text-align: left;
+  align-items: flex-start;
+}
+.lr-cal-section .lr-empty-card__title {
+  font-size: var(--lr-fs-sm);
+  color: var(--lr-text-muted);
+  font-weight: var(--lr-fw-medium);
+  margin-bottom: var(--lr-s-1);
+}
+.lr-cal-section .lr-empty-card p {
+  font-size: var(--lr-fs-xs);
+  color: var(--lr-text-faint);
+  margin: 0;
+}
+
+/* ---- Dashboard card variant: smaller, denser for bento ---- */
+
+.lr-dashboard .lr-card {
+  padding: var(--lr-s-4);
+}
+.lr-dashboard .lr-card__header {
+  margin-bottom: var(--lr-s-3);
+}
 
 /* ---- Session detail: definition list ---- */
 

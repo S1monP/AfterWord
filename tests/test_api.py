@@ -164,17 +164,38 @@ class DeviceFlowTests(LRTestCase):
 class WebUITests(LRTestCase):
 
     def test_index_empty(self) -> None:
-        r = self.client.get("/")
+        r = self.client.get("/recordings")
         self.assertEqual(r.status_code, 200)
         self.assertIn(b"No recordings yet", r.get_data())
 
     def test_index_shows_session(self) -> None:
         self._upload_complete_session()
-        r = self.client.get("/")
+        r = self.client.get("/recordings")
         self.assertEqual(r.status_code, 200)
         body = r.get_data()
         self.assertIn(b"Test", body)
         self.assertIn(b"Ready", body)
+
+    def test_dashboard_renders(self) -> None:
+        """The home page (/) is the bento dashboard."""
+        r = self.client.get("/")
+        self.assertEqual(r.status_code, 200)
+        body = r.get_data()
+        # Bento wrapper and all six panels.
+        self.assertIn(b"lr-dashboard", body)
+        for needle in (b"Calendar", b"Deadlines", b"Todos",
+                       b"Notes", b"Lectures", b"Meetings"):
+            self.assertIn(needle, body)
+        # Each panel's empty-state copy.
+        self.assertIn(b"Nothing scheduled", body)   # Calendar
+        self.assertIn(b"Nothing due", body)           # Deadlines
+        self.assertIn(b"All clear", body)             # Todos
+        self.assertIn(b"No notes yet", body)          # Notes
+        self.assertIn(b"No courses this semester", body)  # Lectures
+        self.assertIn(b"No meetings recorded", body)  # Meetings
+        # Search bar with the keyboard shortcut hint.
+        self.assertIn(b"Search recordings", body)
+        self.assertIn(b"lr-search__shortcut", body)
 
     def test_session_page_contains_audio(self) -> None:
         self._upload_complete_session()

@@ -147,6 +147,12 @@ def _estimate_duration_seconds(session: storage.Session) -> float:
 def _register_routes(app: Flask) -> None:
     # --- Web UI ----------------------------------------------------------
     @app.get("/")
+    def ui_dashboard() -> Any:
+        """The home page: a 3-col bento with calendar, search,
+        deadlines+Todos (right), and notes/lectures/meetings (centre)."""
+        return render_template("dashboard.html")
+
+    @app.get("/recordings")
     def ui_index() -> Any:
         sessions = current_app_storage().list_sessions()
         return render_template(

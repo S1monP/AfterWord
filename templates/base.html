@@ -16,7 +16,7 @@
 <body>
   <header class="lr-topbar">
     <div class="lr-topbar__inner">
-      <a class="lr-topbar__brand" href="{{ url_for('ui_index') }}">
+      <a class="lr-topbar__brand" href="{{ url_for('ui_dashboard') }}">
         <span class="lr-topbar__brand-dot"></span>
         Lecture Recorder
       </a>
@@ -26,6 +26,8 @@
       </div>
 
       <nav class="lr-topbar__nav" aria-label="Primary">
+        <a href="{{ url_for('ui_dashboard') }}"
+           class="{% if request.endpoint == 'ui_dashboard' %}is-active{% endif %}">Home</a>
         <a href="{{ url_for('ui_index') }}"
            class="{% if request.endpoint == 'ui_index' %}is-active{% endif %}">Recs</a>
         <a href="/notes"

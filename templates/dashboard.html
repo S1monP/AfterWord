@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+
+{% block title %}Home &middot; Lecture Recorder{% endblock %}
+
+{% block content %}
+{# Top-level bento grid.
+   Left column:    Calendar (full height, list view).
+   Middle column:  Search bar on top, three inner cards (Notes /
+                   Lectures / Meetings) below.
+   Right column:   Deadlines and Todos stacked, equal height.
+   All heights are CSS grid fractions; the dashboard fills the
+   viewport below the top bar. #}
+<div class="lr-dashboard">
+
+  {# --- Calendar (left, full height) --- #}
+  <section class="lr-card lr-dashboard__calendar" aria-label="Calendar">
+    <header class="lr-card__header">
+      <h2 class="lr-card__title">Calendar</h2>
+      <a class="lr-card__action" href="/calendar">Full calendar →</a>
+    </header>
+    <div class="lr-card__body">
+      <div class="lr-cal-list">
+        <div class="lr-cal-section">
+          <div class="lr-cal-section__label">Today</div>
+          <div class="lr-empty-card">
+            <div class="lr-empty-card__title">Nothing scheduled</div>
+            <p>Add lectures and meetings so recordings can match them automatically.</p>
+          </div>
+        </div>
+        <div class="lr-cal-section">
+          <div class="lr-cal-section__label">This week</div>
+          <div class="lr-empty-card">
+            <p>No events in the next 7 days.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  {# --- Middle column: search + three inner cards --- #}
+  <div class="lr-dashboard__middle">
+    {# Search bar #}
+    <section class="lr-card lr-dashboard__search" aria-label="Search">
+      <div class="lr-search">
+        <span class="lr-search__icon" aria-hidden="true">🔍</span>
+        <input class="lr-search__input" type="search"
+               placeholder="Search recordings, transcripts, notes…"
+               aria-label="Search">
+        <span class="lr-search__shortcut" aria-hidden="true">/</span>
+      </div>
+    </section>
+
+    {# Inner row: Notes, Lectures, Meetings #}
+    <div class="lr-dashboard__inner">
+      {# Notes #}
+      <section class="lr-card" aria-label="Notes">
+        <header class="lr-card__header">
+          <h2 class="lr-card__title">Notes</h2>
+          <a class="lr-card__action" href="/notes">+ New</a>
+        </header>
+        <div class="lr-card__body">
+          <div class="lr-empty-card">
+            <div class="lr-empty-card__title">No notes yet</div>
+            <p>Capture ideas here, or have them extracted from your recordings.</p>
+          </div>
+        </div>
+        <div class="lr-card__footer">
+          <a class="lr-card__action" href="/notes">View all →</a>
+        </div>
+      </section>
+
+      {# Lectures #}
+      <section class="lr-card" aria-label="Lectures">
+        <header class="lr-card__header">
+          <h2 class="lr-card__title">Lectures</h2>
+          <a class="lr-card__action" href="/courses">+ Add</a>
+        </header>
+        <div class="lr-card__body">
+          <div class="lr-empty-card">
+            <div class="lr-empty-card__title">No courses this semester</div>
+            <p>Add the courses you're taking. Recordings will be counted per course.</p>
+          </div>
+        </div>
+        <div class="lr-card__footer">
+          <a class="lr-card__action" href="/courses">View all →</a>
+        </div>
+      </section>
+
+      {# Meetings #}
+      <section class="lr-card" aria-label="Meetings">
+        <header class="lr-card__header">
+          <h2 class="lr-card__title">Meetings</h2>
+        </header>
+        <div class="lr-card__body">
+          <div class="lr-empty-card">
+            <div class="lr-empty-card__title">No meetings recorded</div>
+            <p>Meetings show up here automatically once recordings are tagged.</p>
+          </div>
+        </div>
+        <div class="lr-card__footer">
+          <a class="lr-card__action" href="/recordings">Browse recordings →</a>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  {# --- Right column: Deadlines + Todos (equal height, stacked) --- #}
+  <div class="lr-dashboard__deadtodos">
+    <section class="lr-card" aria-label="Deadlines">
+      <header class="lr-card__header">
+        <h2 class="lr-card__title">Deadlines</h2>
+        <span class="lr-badge">0 this week</span>
+      </header>
+      <div class="lr-card__body">
+        <div class="lr-empty-card">
+          <div class="lr-empty-card__title">Nothing due</div>
+          <p>Deadlines extracted from lectures show up here. You can also add them by hand.</p>
+          <p style="margin-top: var(--lr-s-3);">
+            <a class="lr-btn" href="/deadlines">+ New deadline</a>
+          </p>
+        </div>
+      </div>
+      <div class="lr-card__footer">
+        <a class="lr-card__action" href="/deadlines">View all →</a>
+      </div>
+    </section>
+
+    <section class="lr-card" aria-label="Todos">
+      <header class="lr-card__header">
+        <h2 class="lr-card__title">Todos</h2>
+        <span class="lr-badge">0 open</span>
+      </header>
+      <div class="lr-card__body">
+        <div class="lr-empty-card">
+          <div class="lr-empty-card__title">All clear</div>
+          <p>Nothing on your plate. Talk to your recordings or add a task.</p>
+          <p style="margin-top: var(--lr-s-3);">
+            <a class="lr-btn" href="/todos">+ New todo</a>
+          </p>
+        </div>
+      </div>
+      <div class="lr-card__footer">
+        <a class="lr-card__action" href="/todos">View all →</a>
+      </div>
+    </section>
+  </div>
+
+</div>
+{% endblock %}
