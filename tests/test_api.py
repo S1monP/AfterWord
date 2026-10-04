@@ -191,11 +191,22 @@ class WebUITests(LRTestCase):
         self.assertIn(b"Nothing due", body)           # Deadlines
         self.assertIn(b"All clear", body)             # Todos
         self.assertIn(b"No notes yet", body)          # Notes
-        self.assertIn(b"No courses this semester", body)  # Lectures
+        self.assertIn(b"No lectures yet", body)        # Lectures
         self.assertIn(b"No meetings recorded", body)  # Meetings
         # Search bar with the keyboard shortcut hint.
         self.assertIn(b"Search recordings", body)
         self.assertIn(b"lr-search__shortcut", body)
+        # Nav has the new structure: Lectures, Meetings, Notes, Todos, Calendar.
+        for nav_link in (b"Lectures", b"Meetings", b"Notes",
+                         b"Todos", b"Calendar"):
+            self.assertIn(nav_link, body)
+        # Old nav items should NOT be there.
+        self.assertNotIn(b"\">Home<", body)
+        self.assertNotIn(b"\">Recs<", body)
+        # Deadlines card now points to /todos (unified page).
+        self.assertIn(b"View on Todos", body)
+        # Lectures card has a "View all" link to /lectures.
+        self.assertIn(b'href="/lectures"', body)
 
     def test_session_page_contains_audio(self) -> None:
         self._upload_complete_session()
@@ -208,6 +219,64 @@ class WebUITests(LRTestCase):
     def test_session_page_404_for_unknown(self) -> None:
         r = self.client.get("/sessions/missing")
         self.assertEqual(r.status_code, 404)
+
+    def test_lectures_renders(self) -> None:
+        r = self.client.get("/lectures")
+        self.assertEqual(r.status_code, 200)
+        body = r.get_data()
+        self.assertIn(b"Lectures", body)
+        self.assertIn(b"Filter: lecture", body)
+
+    def test_meetings_renders(self) -> None:
+        r = self.client.get("/meetings")
+        self.assertEqual(r.status_code, 200)
+        body = r.get_data()
+        self.assertIn(b"Meetings", body)
+        self.assertIn(b"Filter: meeting", body)
+
+    def test_todos_renders(self) -> None:
+        r = self.client.get("/todos")
+        self.assertEqual(r.status_code, 200)
+        body = r.get_data()
+        self.assertIn(b"Todos", body)
+        # Both sub-sections visible.
+        self.assertIn(b"Tasks", body)
+        self.assertIn(b"Deadlines", body)
+
+    def test_calendar_renders(self) -> None:
+        r = self.client.get("/calendar")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn(b"Calendar", r.get_data())
+
+    def test_unsorted_renders(self) -> None:
+        r = self.client.get("/unsorted")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn(b"Sort recordings", r.get_data())
+
+    def test_lectures_filter_works_end_to_end(self) -> None:
+        """Set a session's kind to 'lecture' and verify it shows on
+        /lectures but not on /meetings."""
+        sid = "filtertest0001ab"
+        self.client.post("/api/v1/sessions", data=json.dumps({
+            "id": sid, "expected_count": 1,
+        }), content_type="application/json")
+        self.client.put(
+            f"/api/v1/sessions/{sid}/chunks/1",
+            data=self.make_wav(bytes([1]) * 200),
+        )
+        self.client.post(f"/api/v1/sessions/{sid}/finish")
+        # Tag as lecture.
+        self.client.post(
+            f"/api/v1/sessions/{sid}/kind",
+            data=json.dumps({"kind": "lecture"}),
+            content_type="application/json",
+        )
+        # /lectures shows it.
+        r = self.client.get("/lectures")
+        self.assertIn(sid[:12].encode(), r.get_data())
+        # /meetings does not.
+        r2 = self.client.get("/meetings")
+        self.assertNotIn(sid[:12].encode(), r2.get_data())
 
     def _upload_complete_session(self) -> None:
         self.client.post(

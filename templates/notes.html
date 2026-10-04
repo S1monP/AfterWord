@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block title %}Notes &middot; Lecture Recorder{% endblock %}
+
+{% block content %}
+<div class="lr-page">
+  <header class="lr-page__header">
+    <div>
+      <h1 class="lr-page__title">Notes</h1>
+      <div class="lr-page__sub">
+        Markdown notes, manual or auto-extracted from recordings.
+      </div>
+    </div>
+    <button class="lr-btn lr-btn--primary" disabled>+ New note</button>
+  </header>
+
+  <div class="lr-card">
+    <div class="lr-empty-card">
+      <div class="lr-empty-card__title">Coming in a later milestone</div>
+      <p>
+        Notes will land in Milestone 4: create, edit, search, and link
+        from recordings. The schema and service stubs are already in
+        place — see <code>services/notes.py</code>.
+      </p>
+    </div>
+  </div>
+</div>
+{% endblock %}

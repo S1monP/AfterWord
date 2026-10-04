@@ -152,15 +152,59 @@ def _register_routes(app: Flask) -> None:
         deadlines+Todos (right), and notes/lectures/meetings (centre)."""
         return render_template("dashboard.html")
 
-    @app.get("/recordings")
-    def ui_index() -> Any:
-        sessions = current_app_storage().list_sessions()
+    def _render_recordings(kind_filter: Optional[str] = None,
+                           page_title: str = "Recordings",
+                           sub: str = "Newest first. Click a row to open.") -> Any:
+        all_sessions = current_app_storage().list_sessions()
+        if kind_filter is not None:
+            sessions = [s for s in all_sessions if s.kind == kind_filter]
+        else:
+            sessions = all_sessions
         return render_template(
             "index.html",
             sessions=sessions,
+            page_title=page_title,
+            page_sub=sub,
+            kind_filter=kind_filter,
             status_label=_STATUS_LABEL,
             duration_for=_estimate_duration_seconds,
         )
+
+    @app.get("/recordings")
+    def ui_index() -> Any:
+        return _render_recordings()
+
+    @app.get("/lectures")
+    def ui_lectures() -> Any:
+        return _render_recordings(
+            kind_filter="lecture",
+            page_title="Lectures",
+            sub="Recordings tagged as lectures. Use Recordings → to see all.",
+        )
+
+    @app.get("/meetings")
+    def ui_meetings() -> Any:
+        return _render_recordings(
+            kind_filter="meeting",
+            page_title="Meetings",
+            sub="Recordings tagged as meetings. Use Recordings → to see all.",
+        )
+
+    @app.get("/notes")
+    def ui_notes() -> Any:
+        return render_template("notes.html")
+
+    @app.get("/todos")
+    def ui_todos() -> Any:
+        return render_template("todos.html")
+
+    @app.get("/calendar")
+    def ui_calendar() -> Any:
+        return render_template("calendar.html")
+
+    @app.get("/unsorted")
+    def ui_unsorted() -> Any:
+        return render_template("unsorted.html")
 
     @app.get("/sessions/<session_id>")
     def ui_session(session_id: str) -> Any:

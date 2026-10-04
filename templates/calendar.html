@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}Calendar &middot; Lecture Recorder{% endblock %}
+
+{% block content %}
+<div class="lr-page">
+  <header class="lr-page__header">
+    <div>
+      <h1 class="lr-page__title">Calendar</h1>
+      <div class="lr-page__sub">
+        Lectures and meetings you schedule, used to match recordings.
+      </div>
+    </div>
+    <button class="lr-btn lr-btn--primary" disabled>+ New event</button>
+  </header>
+
+  <div class="lr-card">
+    <div class="lr-empty-card">
+      <div class="lr-empty-card__title">Coming in a later milestone</div>
+      <p>
+        The full calendar page (with month grid, list view, and
+        <code>.ics</code> import) lands in Milestone 7. The schema
+        and service stubs are already in place — see
+        <code>services/events.py</code>.
+      </p>
+      <p style="margin-top: var(--lr-s-2); font-size: var(--lr-fs-xs); color: var(--lr-text-faint);">
+        For now, the dashboard's Calendar panel shows Today and This week
+        directly, with no events.
+      </p>
+    </div>
+  </div>
+</div>
+{% endblock %}

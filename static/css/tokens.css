@@ -94,7 +94,7 @@
   --lr-container-max: 1280px;
   --lr-gap-card:   24px;
   --lr-pad-card:   20px;
-  --lr-pad-page:   24px;
+  --lr-pad-page:   32px;
 }
 
 /* ---- Light theme, opt-in via [data-theme="light"] on <html> ---- */

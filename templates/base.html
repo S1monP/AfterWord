@@ -26,19 +26,19 @@
       </div>
 
       <nav class="lr-topbar__nav" aria-label="Primary">
-        <a href="{{ url_for('ui_dashboard') }}"
-           class="{% if request.endpoint == 'ui_dashboard' %}is-active{% endif %}">Home</a>
-        <a href="{{ url_for('ui_index') }}"
-           class="{% if request.endpoint == 'ui_index' %}is-active{% endif %}">Recs</a>
-        <a href="/notes"
-           class="{% if request.endpoint and request.endpoint.startswith('ui_notes') %}is-active{% endif %}">Notes</a>
-        <a href="/todos"
-           class="{% if request.endpoint and request.endpoint.startswith('ui_todos') %}is-active{% endif %}">Todos</a>
-        <a href="/calendar"
-           class="{% if request.endpoint and request.endpoint.startswith('ui_calendar') %}is-active{% endif %}">Calendar</a>
+        <a href="{{ url_for('ui_lectures') }}"
+           class="{% if request.endpoint == 'ui_lectures' %}is-active{% endif %}">Lectures</a>
+        <a href="{{ url_for('ui_meetings') }}"
+           class="{% if request.endpoint == 'ui_meetings' %}is-active{% endif %}">Meetings</a>
+        <a href="{{ url_for('ui_notes') }}"
+           class="{% if request.endpoint == 'ui_notes' %}is-active{% endif %}">Notes</a>
+        <a href="{{ url_for('ui_todos') }}"
+           class="{% if request.endpoint == 'ui_todos' %}is-active{% endif %}">Todos</a>
+        <a href="{{ url_for('ui_calendar') }}"
+           class="{% if request.endpoint == 'ui_calendar' %}is-active{% endif %}">Calendar</a>
         <a class="lr-topbar__upload" href="{{ url_for('ui_upload') }}">↑ Upload</a>
         {% if unsorted_count and unsorted_count > 0 %}
-          <a class="lr-topbar__unsorted" href="/unsorted" title="Recordings needing classification">
+          <a class="lr-topbar__unsorted" href="{{ url_for('ui_unsorted') }}" title="Recordings needing classification">
             <span class="lr-topbar__unsorted-dot"></span>
             <span class="lr-num">{{ unsorted_count }}</span>
           </a>

@@ -1,20 +1,40 @@
 {% extends "base.html" %}
 {% import "_macros.html" as ui %}
 
-{% block title %}Recordings &middot; Lecture Recorder{% endblock %}
+{% block title %}{{ page_title }} &middot; Lecture Recorder{% endblock %}
 
 {% block content %}
 <div class="lr-page">
   <header class="lr-page__header">
-    <h1 class="lr-page__title">Recordings</h1>
-    <div class="lr-page__sub">Newest first. Click a row to open.</div>
+    <h1 class="lr-page__title">{{ page_title }}</h1>
+    <div class="lr-page__sub">{{ page_sub }}</div>
   </header>
+
+  {% if kind_filter %}
+    <div class="lr-row" style="margin-bottom: var(--lr-s-4); gap: var(--lr-s-3); align-items: center;">
+      <span class="lr-badge lr-badge--accent">Filter: {{ kind_filter }}</span>
+      <a class="lr-card__action" href="{{ url_for('ui_index') }}">Clear filter · see all →</a>
+    </div>
+  {% endif %}
 
   {% if sessions|length == 0 %}
     <div class="lr-card">
       <div class="lr-empty-card">
-        <div class="lr-empty-card__title">No recordings yet</div>
-        <p>When the device finishes an upload, the stitched recording will appear here.</p>
+        <div class="lr-empty-card__title">
+          {% if kind_filter %}
+            No {{ kind_filter }} recordings yet
+          {% else %}
+            No recordings yet
+          {% endif %}
+        </div>
+        <p>
+          {% if kind_filter %}
+            Tag a recording as <code>{{ kind_filter }}</code> from the sort page
+            and it will show up here. You can also set the kind on the session detail page.
+          {% else %}
+            When the device finishes an upload, the stitched recording will appear here.
+          {% endif %}
+        </p>
         <p style="margin-top: var(--lr-s-3);">
           <a class="lr-btn lr-btn--primary" href="{{ url_for('ui_upload') }}">Upload a recording</a>
         </p>

@@ -11,6 +11,7 @@
   height: var(--lr-topbar-h);
   background: var(--lr-bg-elevated);
   border-bottom: 1px solid var(--lr-border);
+  box-shadow: 0 1px 0 var(--lr-border);
   border-radius: 0;
   position: sticky;
   top: 0;
@@ -165,7 +166,7 @@
 
 .lr-dashboard {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: 1fr 2fr 1fr;
   grid-template-rows: 0.18fr 0.82fr;
   gap: var(--lr-gap-card);
   height: calc(100vh - var(--lr-topbar-h) - 2 * var(--lr-pad-page));

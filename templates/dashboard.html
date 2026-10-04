@@ -74,16 +74,15 @@
       <section class="lr-card" aria-label="Lectures">
         <header class="lr-card__header">
           <h2 class="lr-card__title">Lectures</h2>
-          <a class="lr-card__action" href="/courses">+ Add</a>
         </header>
         <div class="lr-card__body">
           <div class="lr-empty-card">
-            <div class="lr-empty-card__title">No courses this semester</div>
-            <p>Add the courses you're taking. Recordings will be counted per course.</p>
+            <div class="lr-empty-card__title">No lectures yet</div>
+            <p>Recordings tagged as <code>lecture</code> show up here.</p>
           </div>
         </div>
         <div class="lr-card__footer">
-          <a class="lr-card__action" href="/courses">View all →</a>
+          <a class="lr-card__action" href="{{ url_for('ui_lectures') }}">View all →</a>
         </div>
       </section>
 
@@ -115,14 +114,14 @@
       <div class="lr-card__body">
         <div class="lr-empty-card">
           <div class="lr-empty-card__title">Nothing due</div>
-          <p>Deadlines extracted from lectures show up here. You can also add them by hand.</p>
+          <p>Deadlines live on the Todos page alongside your tasks.</p>
           <p style="margin-top: var(--lr-s-3);">
-            <a class="lr-btn" href="/deadlines">+ New deadline</a>
+            <a class="lr-btn" href="{{ url_for('ui_todos') }}">+ New deadline</a>
           </p>
         </div>
       </div>
       <div class="lr-card__footer">
-        <a class="lr-card__action" href="/deadlines">View all →</a>
+        <a class="lr-card__action" href="{{ url_for('ui_todos') }}">View on Todos →</a>
       </div>
     </section>
 

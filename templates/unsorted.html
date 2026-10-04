@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}Sort recordings &middot; Lecture Recorder{% endblock %}
+
+{% block content %}
+<div class="lr-page">
+  <header class="lr-page__header">
+    <div>
+      <h1 class="lr-page__title">Sort recordings</h1>
+      <div class="lr-page__sub">
+        Tag each recording with a kind (lecture, voice memo, meeting, other)
+        so it lands in the right place on the dashboard.
+      </div>
+    </div>
+  </header>
+
+  <div class="lr-card">
+    <div class="lr-empty-card">
+      <div class="lr-empty-card__title">No recordings to sort</div>
+      <p>
+        Once you have recordings that haven't been tagged with a kind
+        yet, they show up here. For now everything is sorted, or
+        nothing has finished uploading.
+      </p>
+      <p style="margin-top: var(--lr-s-3); font-size: var(--lr-fs-xs); color: var(--lr-text-faint);">
+        The bulk-sort UI lands in Milestone 8. The
+        <code>POST /api/v1/sessions/&lt;id&gt;/kind</code> route
+        already works for manual override.
+      </p>
+    </div>
+  </div>
+</div>
+{% endblock %}
