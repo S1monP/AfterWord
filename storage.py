@@ -151,6 +151,92 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
         tokenize = 'porter unicode61 remove_diacritics 2'
     )
     """,
+    # -- Tier 1 schema additions --
+    # Notes: independent of recordings. Markdown source + render cache.
+    """
+    CREATE TABLE IF NOT EXISTS notes (
+        id          TEXT PRIMARY KEY,
+        title       TEXT NOT NULL,
+        body_md     TEXT NOT NULL,
+        body_html   TEXT,
+        source      TEXT NOT NULL DEFAULT 'manual',
+        source_ref  TEXT,
+        pinned      INTEGER NOT NULL DEFAULT 0,
+        created_at  TEXT NOT NULL,
+        updated_at  TEXT NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_notes_updated ON notes(updated_at DESC)",
+    # Todos: no due date (you said no deadlines on todos). Priority + status.
+    # Age buckets (new/aging/stale) are derived at render time from created_at.
+    """
+    CREATE TABLE IF NOT EXISTS todos (
+        id          TEXT PRIMARY KEY,
+        title       TEXT NOT NULL,
+        body_md     TEXT,
+        priority    TEXT NOT NULL DEFAULT 'medium',
+        status      TEXT NOT NULL DEFAULT 'open',
+        source      TEXT NOT NULL DEFAULT 'manual',
+        source_ref  TEXT,
+        created_at  TEXT NOT NULL,
+        updated_at  TEXT NOT NULL,
+        completed_at TEXT
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_todos_status ON todos(status, updated_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_todos_priority ON todos(priority, status)",
+    # Deadlines: extracted from lectures + voice memos + manual.
+    # source_offset_ms lets the UI deep-link to a moment in the recording.
+    """
+    CREATE TABLE IF NOT EXISTS deadlines (
+        id                TEXT PRIMARY KEY,
+        title             TEXT NOT NULL,
+        description       TEXT,
+        due_at            TEXT NOT NULL,
+        status            TEXT NOT NULL DEFAULT 'set',
+        source            TEXT NOT NULL DEFAULT 'manual',
+        source_ref        TEXT,
+        source_offset_ms  INTEGER,
+        created_at        TEXT NOT NULL,
+        updated_at        TEXT NOT NULL,
+        completed_at      TEXT
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_deadlines_due ON deadlines(due_at)",
+    "CREATE INDEX IF NOT EXISTS idx_deadlines_status ON deadlines(status, due_at)",
+    # Events: calendar (lectures + meetings). Matched to sessions.
+    # matched_session_id is the session we believe corresponds to this event;
+    # match_confidence is the 0..1 score (set by the matcher).
+    """
+    CREATE TABLE IF NOT EXISTS events (
+        id                  TEXT PRIMARY KEY,
+        title               TEXT NOT NULL,
+        description         TEXT,
+        kind                TEXT NOT NULL,
+        starts_at           TEXT NOT NULL,
+        ends_at             TEXT,
+        location            TEXT,
+        source              TEXT NOT NULL DEFAULT 'manual',
+        source_ref          TEXT,
+        matched_session_id  TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+        match_confidence    REAL,
+        created_at          TEXT NOT NULL,
+        updated_at          TEXT NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_events_starts ON events(starts_at)",
+    "CREATE INDEX IF NOT EXISTS idx_events_kind ON events(kind, starts_at)",
+)
+
+
+# ALTER statements for existing tables. Run idempotently — each is
+# wrapped to silently ignore "duplicate column" errors that arise when
+# the schema is already up to date.
+SCHEMA_ALTERS: tuple[str, ...] = (
+    # sessions: recording-kind classification (Tier 1's manual override).
+    "ALTER TABLE sessions ADD COLUMN kind TEXT",
+    "ALTER TABLE sessions ADD COLUMN kind_confidence REAL",
+    "ALTER TABLE sessions ADD COLUMN kind_set_at TEXT",
 )
 
 
@@ -285,6 +371,12 @@ class Session:
     updated_at: str
     received_chunks: int
     full_audio_size: int
+    # Tier 1: recording-kind classification. 'lecture' | 'voice_memo' |
+    # 'meeting' | 'other' | None (unclassified). kind_confidence is 0..1;
+    # kind_set_at is when the classification was assigned (LLM or human).
+    kind: Optional[str] = None
+    kind_confidence: Optional[float] = None
+    kind_set_at: Optional[str] = None
 
     def to_api_dict(self) -> dict[str, Any]:
         return {
@@ -306,6 +398,9 @@ class Session:
                 if self.status == STATUS_READY and self.full_audio_size > 0
                 else None
             ),
+            "kind": self.kind,
+            "kind_confidence": self.kind_confidence,
+            "kind_set_at": self.kind_set_at,
         }
 
 
@@ -345,6 +440,13 @@ class Storage:
             conn.execute("PRAGMA foreign_keys = ON")
             for stmt in SCHEMA_STATEMENTS:
                 conn.execute(stmt)
+            # Idempotent column additions: swallow "duplicate column" errors.
+            for stmt in SCHEMA_ALTERS:
+                try:
+                    conn.execute(stmt)
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column" not in str(exc).lower():
+                        raise
             conn.commit()
         self._log(f"data dir: {self._data_dir}")
         self._log(f"DB ready: {self._db_path}")
@@ -504,6 +606,9 @@ class Storage:
             updated_at=row["updated_at"],
             received_chunks=received,
             full_audio_size=full_size,
+            kind=row["kind"] if "kind" in row.keys() else None,
+            kind_confidence=row["kind_confidence"] if "kind_confidence" in row.keys() else None,
+            kind_set_at=row["kind_set_at"] if "kind_set_at" in row.keys() else None,
         )
 
     def _write_meta_json(self, session_id: str) -> None:
@@ -554,6 +659,50 @@ class Storage:
                 (status, status_detail, finished_at, now, session_id),
             )
         self._write_meta_json(session_id)
+
+    # --- kind classification ------------------------------------------------
+
+    # Allowed values for sessions.kind. ``None`` means "unclassified".
+    RECORDING_KINDS: frozenset[str] = frozenset(
+        {"lecture", "voice_memo", "meeting", "other"}
+    )
+
+    def set_kind(
+        self,
+        session_id: str,
+        kind: Optional[str],
+        *,
+        confidence: Optional[float] = None,
+    ) -> Session:
+        """Set the recording's kind (or clear it with ``None``).
+
+        The caller can supply a confidence (e.g. an LLM-assigned score).
+        A user manually setting a kind passes ``confidence=1.0`` implicitly
+        by leaving the default — the API layer normalises that.
+        """
+        if kind is not None and kind not in self.RECORDING_KINDS:
+            raise ValueError(
+                f"unknown kind: {kind!r}; expected one of "
+                f"{sorted(self.RECORDING_KINDS)} or None"
+            )
+        if confidence is not None and not (0.0 <= confidence <= 1.0):
+            raise ValueError(f"confidence must be in [0, 1], got {confidence}")
+        now = now_iso()
+        with self._tx() as conn:
+            conn.execute(
+                """
+                UPDATE sessions
+                SET kind = ?, kind_confidence = ?, kind_set_at = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (kind, confidence, now, now, session_id),
+            )
+        self._write_meta_json(session_id)
+        sess = self.get_session(session_id)
+        if sess is None:
+            raise KeyError(session_id)
+        return sess
 
     # --- chunk writes -----------------------------------------------------
 

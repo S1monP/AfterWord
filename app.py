@@ -300,6 +300,45 @@ def _register_routes(app: Flask) -> None:
             download_name=f"{sess.title or sess.id}.wav",
         )
 
+    # --- API: recording-kind classification (manual override) ----------
+    @app.post("/api/v1/sessions/<session_id>/kind")
+    def api_set_kind(session_id: str) -> Any:
+        """Manually set or clear a session's recording kind.
+
+        Body: ``{"kind": "lecture" | "voice_memo" | "meeting" | "other" | null}``
+
+        Returns the updated session. This is the only classification
+        route that does real work in Tier 1; the LLM-driven
+        ``classify`` route lands in Tier 3.
+        """
+        store = current_app_storage()
+        if store.get_session(session_id) is None:
+            return jsonify({"error": "not_found"}), 404
+        payload = request.get_json(silent=True) or {}
+        if "kind" not in payload:
+            return jsonify({
+                "error": "invalid_payload",
+                "detail": "field 'kind' is required (string or null)",
+            }), 400
+        kind = payload["kind"]
+        if kind is not None and kind not in storage.Storage.RECORDING_KINDS:
+            return jsonify({
+                "error": "invalid_kind",
+                "detail": (
+                    f"kind must be one of "
+                    f"{sorted(storage.Storage.RECORDING_KINDS)} or null"
+                ),
+            }), 400
+        confidence = payload.get("confidence")
+        if confidence is None and kind is not None:
+            # Manual override — treat as full confidence.
+            confidence = 1.0
+        try:
+            sess = store.set_kind(session_id, kind, confidence=confidence)
+        except ValueError as exc:
+            return jsonify({"error": "invalid_payload", "detail": str(exc)}), 400
+        return jsonify({"session": sess.to_api_dict()})
+
     # --- API: search (Phase A stub returns []) -------------------------
     @app.get("/api/v1/search")
     def api_search() -> Any:
