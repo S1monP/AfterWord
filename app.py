@@ -163,7 +163,11 @@ def _register_routes(app: Flask) -> None:
     def ui_dashboard() -> Any:
         """The home page: a 3-col bento with calendar, search,
         deadlines+Todos (right), and notes/lectures/meetings (centre)."""
-        return render_template("dashboard.html")
+        recent_notes, _ = current_app_notes_service().list(limit=5, offset=0)
+        return render_template(
+            "dashboard.html",
+            recent_notes=recent_notes,
+        )
 
     def _render_recordings(kind_filter: Optional[str] = None,
                            page_title: str = "Recordings",

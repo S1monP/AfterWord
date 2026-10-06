@@ -58,14 +58,9 @@
       <section class="lr-card" aria-label="Notes">
         <header class="lr-card__header">
           <h2 class="lr-card__title">Notes</h2>
-          <a class="lr-card__action" href="/notes">+ New</a>
+          <a class="lr-card__action" href="{{ url_for('ui_notes_new') }}">+ New</a>
         </header>
-        <div class="lr-card__body">
-          <div class="lr-empty-card">
-            <div class="lr-empty-card__title">No notes yet</div>
-            <p>Capture ideas here, or have them extracted from your recordings.</p>
-          </div>
-        </div>
+        <div class="lr-card__body">{% if recent_notes %}<ul class="lr-list lr-list--compact">{% for n in recent_notes %}<li class="lr-list__row"><a class="lr-list__title" href="{{ url_for('ui_note_detail', note_id=n.id) }}">{{ n.title }}</a><span class="lr-list__meta lr-mono">{{ n.updated_at }}</span></li>{% endfor %}</ul>{% else %}<div class="lr-empty-card"><div class="lr-empty-card__title">No notes yet</div><p>Capture ideas here, or have them extracted from your recordings.</p></div>{% endif %}</div>
         <div class="lr-card__footer">
           <a class="lr-card__action" href="/notes">View all →</a>
         </div>
