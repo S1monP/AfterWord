@@ -28,6 +28,7 @@ import config as config_mod
 import search
 import services
 import services.notes  # noqa: F401  (exposes NotesService, render_html, constants)
+import services.todos  # noqa: F401  (exposes TodosService, ALLOWED_TRANSITIONS)
 import storage
 from services import processing, transcode
 
@@ -46,6 +47,9 @@ def create_app(config: Optional[config_mod.Config] = None) -> Flask:
     # NotesService is constructed once per app and cached. It holds a
     # reference to the storage layer, which itself is per-app.
     app.config["LR_NOTES_SERVICE"] = services.notes.NotesService(
+        app.config["LR_STORAGE"]
+    )
+    app.config["LR_TODOS_SERVICE"] = services.todos.TodosService(
         app.config["LR_STORAGE"]
     )
     app.secret_key = os.environ.get("LR_SECRET", "lr-dev-secret-not-for-prod")
@@ -89,6 +93,11 @@ def current_app_storage() -> storage.Storage:
 def current_app_notes_service() -> services.notes.NotesService:
     """Pull the NotesService off the active Flask app."""
     return current_app.config["LR_NOTES_SERVICE"]
+
+
+def current_app_todos_service() -> services.todos.TodosService:
+    """Pull the TodosService off the active Flask app."""
+    return current_app.config["LR_TODOS_SERVICE"]
 
 
 # ---------------------------------------------------------------------------
@@ -164,9 +173,14 @@ def _register_routes(app: Flask) -> None:
         """The home page: a 3-col bento with calendar, search,
         deadlines+Todos (right), and notes/lectures/meetings (centre)."""
         recent_notes, _ = current_app_notes_service().list(limit=5, offset=0)
+        open_todos, open_total = current_app_todos_service().list(
+            status="open", limit=5, offset=0,
+        )
         return render_template(
             "dashboard.html",
             recent_notes=recent_notes,
+            open_todos=open_todos,
+            open_todo_count=open_total,
         )
 
     def _render_recordings(kind_filter: Optional[str] = None,
@@ -300,7 +314,37 @@ def _register_routes(app: Flask) -> None:
 
     @app.get("/todos")
     def ui_todos() -> Any:
-        return render_template("todos.html")
+        """The Tasks page: list view + quick-add form. The Deadlines
+        section is rendered in Milestone 6; the right column stays
+        as a placeholder for now."""
+        status_filter = request.args.get("status")
+        if status_filter not in (None, "", "open", "done", "cancelled"):
+            status_filter = None
+        todos, total = current_app_todos_service().list(
+            status=status_filter or None, limit=100,
+        )
+        open_count = sum(1 for t in todos if t.status == "open")
+        return render_template(
+            "todos.html",
+            todos=todos,
+            total=total,
+            open_count=open_count,
+            status_filter=status_filter or "",
+        )
+
+    @app.post("/todos/quick")
+    def ui_todos_quick() -> Any:
+        """Quick-add a single todo from the form. Redirects back to
+        /todos. The JSON API is the canonical path; this is a thin
+        shortcut so the no-JS form works."""
+        title = (request.form.get("title") or "").strip()
+        if not title:
+            return redirect(url_for("ui_todos"))
+        try:
+            current_app_todos_service().create(title=title)
+        except ValueError:
+            return redirect(url_for("ui_todos"))
+        return redirect(url_for("ui_todos"))
 
     @app.get("/calendar")
     def ui_calendar() -> Any:
@@ -624,6 +668,115 @@ def _register_routes(app: Flask) -> None:
                           f"{services.notes.MAX_BODY_MD_LEN} chars",
             }), 400
         return jsonify({"html": services.notes.render_html(body_md)})
+
+    # --- API: todos (CRUD + status transitions) --------------------------
+    def _todo_to_dict(t: storage.Todo) -> dict[str, Any]:
+        return t.to_api_dict()
+
+    @app.get("/api/v1/todos")
+    def api_list_todos() -> Any:
+        """List todos. Query params: ``status``, ``priority``,
+        ``limit`` (1-200, default 100), ``offset`` (>=0)."""
+        try:
+            limit = int(request.args.get("limit", 100))
+            offset = int(request.args.get("offset", 0))
+        except ValueError:
+            return jsonify({"error": "invalid_limit_or_offset"}), 400
+        if limit < 1 or limit > 200:
+            return jsonify({"error": "invalid_limit",
+                            "detail": "limit must be 1..200"}), 400
+        if offset < 0:
+            return jsonify({"error": "invalid_offset"}), 400
+        status = request.args.get("status") or None
+        priority = request.args.get("priority") or None
+        try:
+            todos, total = current_app_todos_service().list(
+                status=status, priority=priority,
+                limit=limit, offset=offset,
+            )
+        except ValueError as exc:
+            return jsonify({"error": "invalid_payload",
+                            "detail": str(exc)}), 400
+        return jsonify({
+            "todos": [_todo_to_dict(t) for t in todos],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "status": status,
+            "priority": priority,
+        })
+
+    @app.post("/api/v1/todos")
+    def api_create_todo() -> Any:
+        """Create a todo. Body: ``{title, body_md?, priority?}``."""
+        payload = request.get_json(silent=True) or {}
+        try:
+            todo = current_app_todos_service().create(
+                title=payload.get("title", ""),
+                body_md=payload.get("body_md"),
+                priority=payload.get("priority") or "medium",
+                source=payload.get("source") or "manual",
+                source_ref=payload.get("source_ref"),
+            )
+        except ValueError as exc:
+            return jsonify({"error": "invalid_payload",
+                            "detail": str(exc)}), 400
+        return jsonify({"todo": _todo_to_dict(todo)}), 201
+
+    @app.get("/api/v1/todos/<todo_id>")
+    def api_get_todo(todo_id: str) -> Any:
+        todo = current_app_todos_service().get(todo_id)
+        if todo is None:
+            return jsonify({"error": "not_found"}), 404
+        return jsonify({"todo": _todo_to_dict(todo)})
+
+    @app.patch("/api/v1/todos/<todo_id>")
+    def api_update_todo(todo_id: str) -> Any:
+        """Partial update. Body: any of ``{title, body_md, priority}``.
+
+        Status is changed via ``POST /api/v1/todos/<id>/status`` so
+        the transition rules are enforced.
+        """
+        payload = request.get_json(silent=True) or {}
+        kwargs: dict[str, Any] = {}
+        if "title" in payload:
+            kwargs["title"] = payload["title"]
+        if "body_md" in payload:
+            kwargs["body_md"] = payload["body_md"]
+        if "priority" in payload:
+            kwargs["priority"] = payload["priority"]
+        try:
+            todo = current_app_todos_service().update(todo_id, **kwargs)
+        except KeyError:
+            return jsonify({"error": "not_found"}), 404
+        except ValueError as exc:
+            return jsonify({"error": "invalid_payload",
+                            "detail": str(exc)}), 400
+        return jsonify({"todo": _todo_to_dict(todo)})
+
+    @app.post("/api/v1/todos/<todo_id>/status")
+    def api_set_todo_status(todo_id: str) -> Any:
+        """Transition a todo's status. Body: ``{status: "open"|"done"|"cancelled"}``."""
+        payload = request.get_json(silent=True) or {}
+        status = payload.get("status")
+        if status is None:
+            return jsonify({"error": "invalid_payload",
+                            "detail": "field 'status' is required"}), 400
+        try:
+            todo = current_app_todos_service().set_status(todo_id, status)
+        except KeyError:
+            return jsonify({"error": "not_found"}), 404
+        except ValueError as exc:
+            return jsonify({"error": "invalid_payload",
+                            "detail": str(exc)}), 400
+        return jsonify({"todo": _todo_to_dict(todo)})
+
+    @app.delete("/api/v1/todos/<todo_id>")
+    def api_delete_todo(todo_id: str) -> Any:
+        deleted = current_app_todos_service().delete(todo_id)
+        if not deleted:
+            return jsonify({"error": "not_found"}), 404
+        return ("", 204)
 
     # --- API: web audio upload ------------------------------------------
     @app.post("/api/v1/uploads/audio")

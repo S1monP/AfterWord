@@ -121,3 +121,64 @@
   color: var(--lr-text);
   margin: 0 0 var(--lr-s-2);
 }
+
+
+/* ---- Todo list (Milestone 5) ---- */
+
+.lr-card__quickadd {
+  display: flex;
+  gap: var(--lr-s-2);
+  padding: var(--lr-s-3) var(--lr-pad-card);
+  border-bottom: 1px solid var(--lr-border);
+  background: var(--lr-surface);
+}
+.lr-card__quickadd .lr-input { flex: 1; }
+
+.lr-card__actions { display: inline-flex; gap: var(--lr-s-2); }
+.lr-card__action.is-active { color: var(--lr-accent); }
+
+.lr-todo-list { list-style: none; padding: 0; margin: 0; }
+.lr-todo {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: var(--lr-s-3);
+  padding: var(--lr-s-3) var(--lr-pad-card);
+  border-bottom: 1px solid var(--lr-border);
+  transition: background 100ms ease;
+}
+.lr-todo:last-child { border-bottom: 0; }
+.lr-todo:hover { background: var(--lr-surface-hover, transparent); }
+.lr-todo__check {
+  width: 16px; height: 16px; cursor: pointer;
+  accent-color: var(--lr-accent);
+}
+.lr-todo__title {
+  font-size: var(--lr-fs-md);
+  color: var(--lr-text);
+  outline: none;
+}
+.lr-todo.is-done .lr-todo__title {
+  text-decoration: line-through;
+  color: var(--lr-text-faint);
+}
+.lr-todo.is-cancelled .lr-todo__title {
+  text-decoration: line-through;
+  color: var(--lr-text-faint);
+  font-style: italic;
+}
+.lr-todo__priority {
+  font-family: var(--lr-font-mono);
+  font-size: var(--lr-fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.lr-todo__del {
+  background: transparent; border: 0;
+  font-size: 18px; line-height: 1;
+  color: var(--lr-text-faint);
+  cursor: pointer; padding: 4px 8px;
+  border-radius: var(--lr-radius-sm);
+}
+.lr-todo__del:hover { color: var(--lr-danger); background: var(--lr-surface-hover, transparent); }
+.lr-todo__del:disabled { opacity: 0.4; cursor: not-allowed; }

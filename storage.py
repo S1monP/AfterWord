@@ -56,6 +56,19 @@ _CHUNK_INDEX_MIN = 1
 WAV_HEADER_SIZE = 44
 
 
+# Sentinel for "argument was not passed" in update methods where
+# ``None`` is a legitimate value (e.g. clearing a column).
+class _UnsetType:
+    def __repr__(self) -> str:
+        return "<UNSET>"
+
+    def __bool__(self) -> bool:
+        return False
+
+
+_UNSET: Any = _UnsetType()
+
+
 def now_iso() -> str:
     """UTC timestamp in ISO-8601 with a trailing Z, second resolution."""
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -434,6 +447,35 @@ class Note:
             "pinned": self.pinned,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+        }
+
+
+@dataclass
+class Todo:
+    """In-memory view of a todo row."""
+    id: str
+    title: str
+    body_md: Optional[str]
+    priority: str
+    status: str
+    source: str
+    source_ref: Optional[str]
+    created_at: str
+    updated_at: str
+    completed_at: Optional[str]
+
+    def to_api_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "body_md": self.body_md,
+            "priority": self.priority,
+            "status": self.status,
+            "source": self.source,
+            "source_ref": self.source_ref,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "completed_at": self.completed_at,
         }
 
 
@@ -887,7 +929,168 @@ class Storage:
             updated_at=row["updated_at"],
         )
 
-    # --- chunk writes -----------------------------------------------------
+    # --- todos ------------------------------------------------------------
+
+    def create_todo(
+        self,
+        todo_id: str,
+        *,
+        title: str,
+        body_md: Optional[str] = None,
+        priority: str = "medium",
+        status: str = "open",
+        source: str = "manual",
+        source_ref: Optional[str] = None,
+    ) -> Todo:
+        now = now_iso()
+        with self._tx() as conn:
+            conn.execute(
+                """
+                INSERT INTO todos
+                    (id, title, body_md, priority, status, source,
+                     source_ref, created_at, updated_at, completed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (todo_id, title, body_md, priority, status, source,
+                 source_ref, now, now,
+                 now if status == "done" else None),
+            )
+        return self.get_todo(todo_id)  # type: ignore[return-value]
+
+    def get_todo(self, todo_id: str) -> Optional[Todo]:
+        with self._tx() as conn:
+            row = conn.execute(
+                "SELECT * FROM todos WHERE id = ?", (todo_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            return self._row_to_todo(row)
+
+    def update_todo(
+        self,
+        todo_id: str,
+        *,
+        title: Optional[str] = None,
+        body_md: Optional[str] = None,
+        priority: Optional[str] = None,
+        status: Optional[str] = None,
+        completed_at: Any = _UNSET,
+    ) -> Todo:
+        """Partial update.
+
+        ``body_md`` and ``completed_at`` use a sentinel so the caller
+        can pass ``None`` to clear them explicitly. ``title``,
+        ``priority``, ``status`` use the simpler None-means-don't-touch
+        convention because their None value is never valid anyway.
+        """
+        sets: list[str] = []
+        params: list[Any] = []
+        if title is not None:
+            sets.append("title = ?")
+            params.append(title)
+        if body_md is not _UNSET:
+            sets.append("body_md = ?")
+            params.append(body_md)
+        if priority is not None:
+            sets.append("priority = ?")
+            params.append(priority)
+        if status is not None:
+            sets.append("status = ?")
+            params.append(status)
+        if completed_at is not _UNSET:
+            sets.append("completed_at = ?")
+            params.append(completed_at)
+        if not sets:
+            existing = self.get_todo(todo_id)
+            if existing is None:
+                raise KeyError(todo_id)
+            return existing
+        sets.append("updated_at = ?")
+        params.append(now_iso())
+        params.append(todo_id)
+        with self._tx() as conn:
+            cur = conn.execute(
+                f"UPDATE todos SET {', '.join(sets)} WHERE id = ?",
+                params,
+            )
+            if cur.rowcount == 0:
+                raise KeyError(todo_id)
+        updated = self.get_todo(todo_id)
+        assert updated is not None
+        return updated
+
+    def delete_todo(self, todo_id: str) -> bool:
+        with self._tx() as conn:
+            cur = conn.execute("DELETE FROM todos WHERE id = ?", (todo_id,))
+            return cur.rowcount > 0
+
+    def list_todos(
+        self,
+        *,
+        status: Optional[str] = None,
+        priority: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[Todo], int]:
+        """List todos, open ones first then by priority (urgent first),
+        then by created_at DESC. ``status`` and ``priority`` are optional
+        filters; both single-valued (Tier 1 doesn't expose multi-select)."""
+        if limit < 1:
+            raise ValueError("limit must be >= 1")
+        if offset < 0:
+            raise ValueError("offset must be >= 0")
+        clauses: list[str] = []
+        where_params: list[Any] = []
+        if status is not None:
+            clauses.append("status = ?")
+            where_params.append(status)
+        if priority is not None:
+            clauses.append("priority = ?")
+            where_params.append(priority)
+        where_sql = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        with self._tx() as conn:
+            total = conn.execute(
+                f"SELECT COUNT(*) AS c FROM todos {where_sql}",
+                where_params,
+            ).fetchone()["c"]
+            rows = conn.execute(
+                f"""
+                SELECT * FROM todos
+                {where_sql}
+                ORDER BY
+                    CASE status
+                        WHEN 'open' THEN 0
+                        WHEN 'cancelled' THEN 1
+                        WHEN 'done' THEN 2
+                        ELSE 3
+                    END,
+                    CASE priority
+                        WHEN 'urgent' THEN 0
+                        WHEN 'high'   THEN 1
+                        WHEN 'medium' THEN 2
+                        WHEN 'low'    THEN 3
+                        ELSE 4
+                    END,
+                    created_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                where_params + [limit, offset],
+            ).fetchall()
+        return [self._row_to_todo(r) for r in rows], int(total)
+
+    def _row_to_todo(self, row: sqlite3.Row) -> Todo:
+        return Todo(
+            id=row["id"],
+            title=row["title"],
+            body_md=row["body_md"],
+            priority=row["priority"],
+            status=row["status"],
+            source=row["source"],
+            source_ref=row["source_ref"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            completed_at=row["completed_at"],
+        )
 
     def write_chunk(
         self,

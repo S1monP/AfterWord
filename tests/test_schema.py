@@ -227,13 +227,17 @@ class ServiceStubTests(unittest.TestCase):
             'NotesService.__init__ should take (self, store)',
         )
 
-    def test_todos_service_is_stub(self) -> None:
+    def test_todos_service_is_real(self) -> None:
+        """Todos is the second service to land (Milestone 5). The
+        constructor should take a Storage instance; full behaviour
+        is covered in ``tests/test_todos.py``."""
         from services.todos import TodosService
-        s = TodosService()
-        with self.assertRaises(NotImplementedError):
-            s.create(title="x")
-        with self.assertRaises(NotImplementedError):
-            s.set_status("abc", "done")
+        import inspect
+        sig = inspect.signature(TodosService.__init__)
+        self.assertGreaterEqual(
+            len(sig.parameters), 2,
+            "TodosService.__init__ should take (self, store)",
+        )
 
     def test_deadlines_service_is_stub(self) -> None:
         from services.deadlines import DeadlinesService

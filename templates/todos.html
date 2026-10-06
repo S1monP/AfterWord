@@ -8,8 +8,8 @@
     <div>
       <h1 class="lr-page__title">Todos</h1>
       <div class="lr-page__sub">
-        Tasks (manual or extracted from voice memos) and deadlines
-        (manual or extracted from lectures).
+        Tasks. {{ open_count }} open / {{ total }} total.
+        {% if status_filter %}Filtered to <span class="lr-mono">{{ status_filter }}</span>.{% endif %}
       </div>
     </div>
   </header>
@@ -18,29 +18,55 @@
     <section class="lr-card" style="flex: 1 1 360px; min-width: 320px;">
       <header class="lr-card__header">
         <h2 class="lr-card__title">Tasks</h2>
-        <span class="lr-badge">0 open</span>
-      </header>
-      <div class="lr-card__body">
-        <div class="lr-empty-card">
-          <p>No tasks yet.</p>
-          <p style="margin-top: var(--lr-s-2); font-size: var(--lr-fs-xs); color: var(--lr-text-faint);">
-            Will be created via <code>+ New todo</code> on this page,
-            or extracted from voice memos by the LLM pipeline.
-          </p>
+        <div class="lr-card__actions">
+          <a class="lr-card__action {% if status_filter == '' %}is-active{% endif %}" href="{{ url_for('ui_todos') }}">All</a>
+          <a class="lr-card__action {% if status_filter == 'open' %}is-active{% endif %}" href="{{ url_for('ui_todos', status='open') }}">Open</a>
+          <a class="lr-card__action {% if status_filter == 'done' %}is-active{% endif %}" href="{{ url_for('ui_todos', status='done') }}">Done</a>
         </div>
+      </header>
+
+      <form class="lr-card__quickadd" method="post" action="{{ url_for('ui_todos_quick') }}">
+        <input class="lr-input" type="text" name="title" required maxlength="200"
+               placeholder="Add a task and press Enter..." autocomplete="off">
+        <button class="lr-btn lr-btn--primary" type="submit">+ Add</button>
+      </form>
+
+      <div class="lr-card__body">
+        {% if todos %}
+          <ul class="lr-todo-list" id="lr-todo-list">
+            {% for t in todos %}
+              <li class="lr-todo {% if t.status == 'done' %}is-done{% endif %} {% if t.status == 'cancelled' %}is-cancelled{% endif %}"
+                  data-todo-id="{{ t.id }}" data-status="{{ t.status }}" data-priority="{{ t.priority }}">
+                <input class="lr-todo__check" type="checkbox"
+                       {% if t.status == 'done' %}checked{% endif %}
+                       aria-label="Mark as done">
+                <span class="lr-todo__title" tabindex="0">{{ t.title }}</span>
+                <span class="lr-todo__priority lr-badge lr-badge--{{ t.priority }}">{{ t.priority }}</span>
+                <button class="lr-todo__del" type="button" aria-label="Delete">&times;</button>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <div class="lr-empty-card">
+            <div class="lr-empty-card__title">
+              {% if status_filter %}No {{ status_filter }} tasks{% else %}No tasks yet{% endif %}
+            </div>
+            <p>Type a task above and press Enter.</p>
+          </div>
+        {% endif %}
       </div>
     </section>
 
     <section class="lr-card" style="flex: 1 1 360px; min-width: 320px;">
       <header class="lr-card__header">
         <h2 class="lr-card__title">Deadlines</h2>
-        <span class="lr-badge">0 this week</span>
+        <span class="lr-badge">Coming soon</span>
       </header>
       <div class="lr-card__body">
         <div class="lr-empty-card">
           <p>No deadlines yet.</p>
           <p style="margin-top: var(--lr-s-2); font-size: var(--lr-fs-xs); color: var(--lr-text-faint);">
-            Will be added by hand or extracted from lectures.
+            Milestone 6 will add manual and lecture-extracted deadlines here.
             Clicking a deadline opens the source recording at the moment
             the LLM heard it.
           </p>
@@ -48,16 +74,7 @@
       </div>
     </section>
   </div>
-
-  <div class="lr-card" style="margin-top: var(--lr-gap-card);">
-    <div class="lr-empty-card">
-      <div class="lr-empty-card__title">Coming in a later milestone</div>
-      <p>
-        Both sections will get full CRUD (Milestone 5 & 6). The schema
-        and service stubs are already in place — see
-        <code>services/todos.py</code> and <code>services/deadlines.py</code>.
-      </p>
-    </div>
-  </div>
 </div>
+
+<script src="{{ url_for('static', filename='js/todos.js') }}" defer></script>
 {% endblock %}
