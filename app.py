@@ -20,11 +20,14 @@ from pathlib import Path
 from typing import Any, Optional
 
 from flask import (
-    Flask, abort, current_app, jsonify, render_template, request, send_file,
+    Flask, abort, current_app, jsonify, redirect, render_template, request,
+    send_file, url_for,
 )
 
 import config as config_mod
 import search
+import services
+import services.notes  # noqa: F401  (exposes NotesService, render_html, constants)
 import storage
 from services import processing, transcode
 
@@ -40,6 +43,11 @@ def create_app(config: Optional[config_mod.Config] = None) -> Flask:
     app.config["LR_CONFIG"] = cfg
     app.config["LR_STORAGE"] = storage.Storage(cfg)
     app.config["LR_STORAGE"].initialise()
+    # NotesService is constructed once per app and cached. It holds a
+    # reference to the storage layer, which itself is per-app.
+    app.config["LR_NOTES_SERVICE"] = services.notes.NotesService(
+        app.config["LR_STORAGE"]
+    )
     app.secret_key = os.environ.get("LR_SECRET", "lr-dev-secret-not-for-prod")
 
     if not transcode.ffmpeg_available(cfg.ffmpeg_path):
@@ -76,6 +84,11 @@ def create_app(config: Optional[config_mod.Config] = None) -> Flask:
 def current_app_storage() -> storage.Storage:
     """Pull the Storage instance off the active Flask app."""
     return current_app.config["LR_STORAGE"]
+
+
+def current_app_notes_service() -> services.notes.NotesService:
+    """Pull the NotesService off the active Flask app."""
+    return current_app.config["LR_NOTES_SERVICE"]
 
 
 # ---------------------------------------------------------------------------
@@ -192,7 +205,94 @@ def _register_routes(app: Flask) -> None:
 
     @app.get("/notes")
     def ui_notes() -> Any:
-        return render_template("notes.html")
+        """List view: title, updated time, snippet. Search is via
+        a query string param ``q`` so it's bookmarkable."""
+        q = request.args.get("q", "").strip()
+        notes, total = current_app_notes_service().list(
+            limit=50, offset=0, search=q or None,
+        )
+        return render_template(
+            "notes.html",
+            notes=notes,
+            total=total,
+            q=q,
+        )
+
+    @app.get("/notes/new")
+    def ui_notes_new() -> Any:
+        """Empty form for creating a note. The form posts to the API."""
+        return render_template("note.html", mode="new", note=None)
+
+    @app.get("/notes/<note_id>")
+    def ui_note_detail(note_id: str) -> Any:
+        note = current_app_notes_service().get(note_id)
+        if note is None:
+            abort(404)
+        return render_template(
+            "note.html", mode="read", note=note,
+        )
+
+    @app.get("/notes/<note_id>/edit")
+    def ui_note_edit(note_id: str) -> Any:
+        note = current_app_notes_service().get(note_id)
+        if note is None:
+            abort(404)
+        return render_template(
+            "note.html", mode="edit", note=note,
+        )
+
+    @app.post("/notes/new")
+    def create_note_action() -> Any:
+        """Form action: create a note from the editor and redirect
+        to its detail page. JSON API at /api/v1/notes is the canonical
+        path; this is a thin HTML shortcut for the no-JS path."""
+        title = (request.form.get("title") or "").strip()
+        body_md = request.form.get("body_md") or ""
+        try:
+            note = current_app_notes_service().create(
+                title=title, body_md=body_md,
+            )
+        except ValueError as exc:
+            return (
+                render_template(
+                    "note.html", mode="new", note=None,
+                    error=str(exc), form_title=title, form_body=body_md,
+                ),
+                400,
+            )
+        return redirect(url_for("ui_note_detail", note_id=note.id))
+
+    @app.post("/notes/<note_id>")
+    def update_note_action(note_id: str) -> Any:
+        """Form action: update a note from the editor."""
+        title = request.form.get("title")
+        body_md = request.form.get("body_md")
+        kwargs: dict[str, Any] = {}
+        if title is not None:
+            kwargs["title"] = title
+        if body_md is not None:
+            kwargs["body_md"] = body_md
+        try:
+            current_app_notes_service().update(note_id, **kwargs)
+        except KeyError:
+            abort(404)
+        except ValueError as exc:
+            existing = current_app_notes_service().get(note_id)
+            return (
+                render_template(
+                    "note.html", mode="edit", note=existing,
+                    error=str(exc),
+                ),
+                400,
+            )
+        return redirect(url_for("ui_note_detail", note_id=note_id))
+
+    @app.post("/notes/<note_id>/delete")
+    def delete_note_action(note_id: str) -> Any:
+        deleted = current_app_notes_service().delete(note_id)
+        if not deleted:
+            abort(404)
+        return redirect(url_for("ui_notes"))
 
     @app.get("/todos")
     def ui_todos() -> Any:
@@ -411,6 +511,115 @@ def _register_routes(app: Flask) -> None:
                 for h in hits
             ],
         })
+
+    # --- API: notes (CRUD + render) -------------------------------------
+    def _note_to_dict(n: storage.Note) -> dict[str, Any]:
+        return n.to_api_dict()
+
+    @app.get("/api/v1/notes")
+    def api_list_notes() -> Any:
+        """List notes, newest first.
+
+        Query params: ``limit`` (1-200, default 50), ``offset`` (>=0,
+        default 0), ``q`` (substring search on title and body).
+        """
+        try:
+            limit = int(request.args.get("limit", 50))
+            offset = int(request.args.get("offset", 0))
+        except ValueError:
+            return jsonify({"error": "invalid_limit_or_offset"}), 400
+        if limit < 1 or limit > 200:
+            return jsonify({"error": "invalid_limit",
+                            "detail": "limit must be 1..200"}), 400
+        if offset < 0:
+            return jsonify({"error": "invalid_offset",
+                            "detail": "offset must be >= 0"}), 400
+        q = request.args.get("q", "").strip() or None
+        try:
+            notes, total = current_app_notes_service().list(
+                limit=limit, offset=offset, search=q,
+            )
+        except ValueError as exc:
+            return jsonify({"error": "invalid_payload",
+                            "detail": str(exc)}), 400
+        return jsonify({
+            "notes": [_note_to_dict(n) for n in notes],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "q": q,
+        })
+
+    @app.post("/api/v1/notes")
+    def api_create_note() -> Any:
+        """Create a new note. Body: ``{title, body_md?, source?, source_ref?}``."""
+        payload = request.get_json(silent=True) or {}
+        try:
+            note = current_app_notes_service().create(
+                title=payload.get("title", ""),
+                body_md=payload.get("body_md", "") or "",
+                source=payload.get("source") or "manual",
+                source_ref=payload.get("source_ref"),
+            )
+        except ValueError as exc:
+            return jsonify({"error": "invalid_payload",
+                            "detail": str(exc)}), 400
+        return jsonify({"note": _note_to_dict(note)}), 201
+
+    @app.get("/api/v1/notes/<note_id>")
+    def api_get_note(note_id: str) -> Any:
+        note = current_app_notes_service().get(note_id)
+        if note is None:
+            return jsonify({"error": "not_found"}), 404
+        return jsonify({"note": _note_to_dict(note)})
+
+    @app.patch("/api/v1/notes/<note_id>")
+    def api_update_note(note_id: str) -> Any:
+        """Partial update. Body: any of ``{title, body_md, pinned}``."""
+        payload = request.get_json(silent=True) or {}
+        kwargs: dict[str, Any] = {}
+        if "title" in payload:
+            kwargs["title"] = payload["title"]
+        if "body_md" in payload:
+            kwargs["body_md"] = payload["body_md"] or ""
+        if "pinned" in payload:
+            kwargs["pinned"] = bool(payload["pinned"])
+        try:
+            note = current_app_notes_service().update(note_id, **kwargs)
+        except KeyError:
+            return jsonify({"error": "not_found"}), 404
+        except ValueError as exc:
+            return jsonify({"error": "invalid_payload",
+                            "detail": str(exc)}), 400
+        return jsonify({"note": _note_to_dict(note)})
+
+    @app.delete("/api/v1/notes/<note_id>")
+    def api_delete_note(note_id: str) -> Any:
+        deleted = current_app_notes_service().delete(note_id)
+        if not deleted:
+            return jsonify({"error": "not_found"}), 404
+        return ("", 204)
+
+    @app.post("/api/v1/notes/render")
+    def api_render_note() -> Any:
+        """Render markdown to safe HTML. Body: ``{body_md}``.
+
+        Used by the live-preview side of the editor. The output is
+        HTML with raw HTML escaped (markdown library default).
+        """
+        payload = request.get_json(silent=True) or {}
+        body_md = payload.get("body_md", "") or ""
+        if not isinstance(body_md, str):
+            return jsonify({"error": "invalid_payload",
+                            "detail": "body_md must be a string"}), 400
+        # Hard cap to keep this endpoint cheap; same limit as the service.
+        if len(body_md) > services.notes.MAX_BODY_MD_LEN:
+            return jsonify({
+                "error": "invalid_payload",
+                "detail": f"body_md must be at most "
+                          f"{services.notes.MAX_BODY_MD_LEN} chars",
+            }), 400
+        return jsonify({"html": services.notes.render_html(body_md)})
 
     # --- API: web audio upload ------------------------------------------
     @app.post("/api/v1/uploads/audio")

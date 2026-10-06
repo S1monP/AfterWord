@@ -217,13 +217,15 @@ class KindOverrideTests(LRTestCase):
 class ServiceStubTests(unittest.TestCase):
     """The service modules are present with NotImplementedError bodies."""
 
-    def test_notes_service_is_stub(self) -> None:
+    def test_notes_service_is_real(self) -> None:
         from services.notes import NotesService
-        s = NotesService()
-        with self.assertRaises(NotImplementedError):
-            s.create(title="x", body_md="y")
-        with self.assertRaises(NotImplementedError):
-            s.list()
+        # The constructor should accept a storage instance now.
+        import inspect
+        sig = inspect.signature(NotesService.__init__)
+        self.assertGreaterEqual(
+            len(sig.parameters), 2,
+            'NotesService.__init__ should take (self, store)',
+        )
 
     def test_todos_service_is_stub(self) -> None:
         from services.todos import TodosService

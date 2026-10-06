@@ -404,6 +404,39 @@ class Session:
         }
 
 
+@dataclass
+class Note:
+    """In-memory view of a note row.
+
+    ``body_md`` is the canonical source (the user's text). ``body_html`` is
+    a pre-rendered cache kept in the row so list views don't re-render
+    on every fetch. The service layer is responsible for keeping these
+    two in sync; this dataclass is just a view.
+    """
+    id: str
+    title: str
+    body_md: str
+    body_html: Optional[str]
+    source: str
+    source_ref: Optional[str]
+    pinned: bool
+    created_at: str
+    updated_at: str
+
+    def to_api_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "body_md": self.body_md,
+            "body_html": self.body_html,
+            "source": self.source,
+            "source_ref": self.source_ref,
+            "pinned": self.pinned,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
 # ---------------------------------------------------------------------------
 # Storage facade
 # ---------------------------------------------------------------------------
@@ -703,6 +736,156 @@ class Storage:
         if sess is None:
             raise KeyError(session_id)
         return sess
+
+    # --- notes ------------------------------------------------------------
+
+    def create_note(
+        self,
+        note_id: str,
+        *,
+        title: str,
+        body_md: str,
+        body_html: Optional[str],
+        source: str = "manual",
+        source_ref: Optional[str] = None,
+        pinned: bool = False,
+    ) -> Note:
+        """Insert a new note. The caller is responsible for the rendered
+        ``body_html`` (the service layer renders markdown and passes
+        both fields in so the row is consistent in a single insert).
+        """
+        now = now_iso()
+        with self._tx() as conn:
+            conn.execute(
+                """
+                INSERT INTO notes
+                    (id, title, body_md, body_html, source, source_ref,
+                     pinned, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (note_id, title, body_md, body_html, source, source_ref,
+                 1 if pinned else 0, now, now),
+            )
+        return self.get_note(note_id)  # type: ignore[return-value]
+
+    def get_note(self, note_id: str) -> Optional[Note]:
+        with self._tx() as conn:
+            row = conn.execute(
+                "SELECT * FROM notes WHERE id = ?", (note_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            return self._row_to_note(row)
+
+    def update_note(
+        self,
+        note_id: str,
+        *,
+        title: Optional[str] = None,
+        body_md: Optional[str] = None,
+        body_html: Optional[str] = None,
+        pinned: Optional[bool] = None,
+    ) -> Note:
+        """Partial update. Only fields that are not None are touched.
+
+        If ``body_md`` is updated, ``body_html`` is expected to be the
+        freshly-rendered version of the new markdown (caller's job).
+        The previous ``body_html`` is replaced wholesale — we never
+        try to merge renders.
+        """
+        sets: list[str] = []
+        params: list[Any] = []
+        if title is not None:
+            sets.append("title = ?")
+            params.append(title)
+        if body_md is not None:
+            sets.append("body_md = ?")
+            params.append(body_md)
+        if body_html is not None:
+            sets.append("body_html = ?")
+            params.append(body_html)
+        if pinned is not None:
+            sets.append("pinned = ?")
+            params.append(1 if pinned else 0)
+        if not sets:
+            # No-op update: just return the existing note unchanged.
+            existing = self.get_note(note_id)
+            if existing is None:
+                raise KeyError(note_id)
+            return existing
+        sets.append("updated_at = ?")
+        params.append(now_iso())
+        params.append(note_id)
+        with self._tx() as conn:
+            cur = conn.execute(
+                f"UPDATE notes SET {', '.join(sets)} WHERE id = ?",
+                params,
+            )
+            if cur.rowcount == 0:
+                raise KeyError(note_id)
+        updated = self.get_note(note_id)
+        assert updated is not None
+        return updated
+
+    def delete_note(self, note_id: str) -> bool:
+        """Delete a note. Returns True if a row was removed, False if
+        the note didn't exist."""
+        with self._tx() as conn:
+            cur = conn.execute("DELETE FROM notes WHERE id = ?", (note_id,))
+            return cur.rowcount > 0
+
+    def list_notes(
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        search: Optional[str] = None,
+    ) -> tuple[list[Note], int]:
+        """List notes, newest first. ``search`` is a case-insensitive
+        substring match against ``title`` and ``body_md``.
+
+        Returns ``(notes, total_count)``. The total is the count of
+        matches BEFORE the limit/offset is applied, so the caller can
+        render pagination controls.
+        """
+        if limit < 1:
+            raise ValueError("limit must be >= 1")
+        if offset < 0:
+            raise ValueError("offset must be >= 0")
+        where_sql = ""
+        where_params: list[Any] = []
+        if search:
+            like = f"%{search}%"
+            where_sql = "WHERE title LIKE ? OR body_md LIKE ?"
+            where_params = [like, like]
+        with self._tx() as conn:
+            total = conn.execute(
+                f"SELECT COUNT(*) AS c FROM notes {where_sql}",
+                where_params,
+            ).fetchone()["c"]
+            rows = conn.execute(
+                f"""
+                SELECT * FROM notes
+                {where_sql}
+                ORDER BY updated_at DESC, id DESC
+                LIMIT ? OFFSET ?
+                """,
+                where_params + [limit, offset],
+            ).fetchall()
+        return [self._row_to_note(r) for r in rows], int(total)
+
+    def _row_to_note(self, row: sqlite3.Row) -> Note:
+        return Note(
+            id=row["id"],
+            title=row["title"],
+            body_md=row["body_md"],
+            body_html=row["body_html"],
+            source=row["source"],
+            source_ref=row["source_ref"],
+            pinned=bool(row["pinned"]),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
 
     # --- chunk writes -----------------------------------------------------
 

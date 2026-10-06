@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+
+{% block title %}{% if mode == 'new' %}New note{% else %}{{ note.title }}{% endif %} &middot; Lecture Recorder{% endblock %}
+
+{% block extrahead %}
+  {# Per-page styles for the editor split. #}
+  <style>
+    .lr-note-editor { display: grid; grid-template-columns: 1fr 1fr; gap: var(--lr-s-5); }
+    .lr-note-editor__source, .lr-note-editor__preview { min-height: 60vh; }
+    .lr-note-editor__source textarea {
+      width: 100%; height: 100%; min-height: 60vh; resize: vertical;
+      font-family: var(--lr-font-mono); font-size: 14px; line-height: 1.55;
+      padding: var(--lr-s-3); box-sizing: border-box;
+    }
+    .lr-note-editor__preview { padding: var(--lr-s-3);
+      background: var(--lr-surface); border-radius: var(--lr-radius-md);
+      overflow: auto; }
+    .lr-note-error { color: var(--lr-danger); margin-top: var(--lr-s-2); }
+    @media (max-width: 900px) {
+      .lr-note-editor { grid-template-columns: 1fr; }
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+<div class="lr-page">
+  <header class="lr-page__header">
+    <div>
+      <a class="lr-page__back" href="{{ url_for('ui_notes') }}">&larr; All notes</a>
+    </div>
+    {% if mode == 'read' %}
+      <div class="lr-page__actions">
+        <a class="lr-btn" href="{{ url_for('ui_note_edit', note_id=note.id) }}">Edit</a>
+        <form method="post" action="{{ url_for('delete_note_action', note_id=note.id) }}" style="display:inline" onsubmit="return confirm('Delete this note? This cannot be undone.');">
+          <button class="lr-btn lr-btn--danger" type="submit">Delete</button>
+        </form>
+      </div>
+    {% endif %}
+  </header>
+
+  {% if mode == 'new' %}
+    {# New note: the whole page is the editor. #}
+    <h1 class="lr-page__title">New note</h1>
+    <form id="lr-note-form" method="post" action="{{ url_for('create_note_action') }}">
+      <div class="lr-card lr-card--padded">
+        <label class="lr-field">
+          <span class="lr-field__label">Title</span>
+          <input class="lr-input" type="text" name="title" required maxlength="200" autocomplete="off">
+        </label>
+        <div class="lr-note-editor">
+          <div class="lr-note-editor__source">
+            <label class="lr-field__label" for="lr-note-body">Body (markdown)</label>
+            <textarea id="lr-note-body" name="body_md" placeholder="# Start typing&hellip;"></textarea>
+          </div>
+          <div class="lr-note-editor__preview">
+            <div class="lr-field__label">Preview</div>
+            <div id="lr-note-preview" class="lr-prose"></div>
+          </div>
+        </div>
+        <div id="lr-note-error" class="lr-note-error" hidden></div>
+        <div class="lr-form-actions">
+          <a class="lr-btn lr-btn--ghost" href="{{ url_for('ui_notes') }}">Cancel</a>
+          <button class="lr-btn lr-btn--primary" type="submit">Create note</button>
+        </div>
+      </div>
+    </form>
+
+  {% elif mode == 'edit' %}
+    <h1 class="lr-page__title">Edit note</h1>
+    <form id="lr-note-form" method="post" action="{{ url_for('update_note_action', note_id=note.id) }}">
+      <div class="lr-card lr-card--padded">
+        <label class="lr-field">
+          <span class="lr-field__label">Title</span>
+          <input class="lr-input" type="text" name="title" required maxlength="200"
+                 value="{{ note.title }}" autocomplete="off">
+        </label>
+        <div class="lr-note-editor">
+          <div class="lr-note-editor__source">
+            <label class="lr-field__label" for="lr-note-body">Body (markdown)</label>
+            <textarea id="lr-note-body" name="body_md">{{ note.body_md }}</textarea>
+          </div>
+          <div class="lr-note-editor__preview">
+            <div class="lr-field__label">Preview</div>
+            <div id="lr-note-preview" class="lr-prose"></div>
+          </div>
+        </div>
+        <div id="lr-note-error" class="lr-note-error" hidden></div>
+        <div class="lr-form-actions">
+          <a class="lr-btn lr-btn--ghost" href="{{ url_for('ui_note_detail', note_id=note.id) }}">Cancel</a>
+          <button class="lr-btn lr-btn--primary" type="submit">Save changes</button>
+        </div>
+      </div>
+    </form>
+
+  {% else %}
+    {# Read mode. #}
+    <h1 class="lr-page__title">{{ note.title }}</h1>
+    <div class="lr-page__sub lr-mono">
+      Updated {{ note.updated_at }} &middot; created {{ note.created_at }}
+    </div>
+    <article class="lr-prose lr-card lr-card--padded">
+      {{ note.body_html|safe }}
+    </article>
+  {% endif %}
+</div>
+
+<script>
+  (function () {
+    var form = document.getElementById("lr-note-form");
+    if (!form) return;
+    var src = document.getElementById("lr-note-body");
+    var pv  = document.getElementById("lr-note-preview");
+    var err = document.getElementById("lr-note-error");
+    if (!src || !pv) return;
+    var timer = null;
+    function render() {
+      fetch("/api/v1/notes/render", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({body_md: src.value})
+      }).then(function (r) { return r.json(); }).then(function (j) {
+        if (j && typeof j.html === "string") { pv.innerHTML = j.html; }
+      }).catch(function () { /* offline preview is fine */ });
+    }
+    src.addEventListener("input", function () {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(render, 200);
+    });
+    // Initial render.
+    if (src.value) render();
+  })();
+</script>
+{% endblock %}

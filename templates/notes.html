@@ -9,20 +9,51 @@
       <h1 class="lr-page__title">Notes</h1>
       <div class="lr-page__sub">
         Markdown notes, manual or auto-extracted from recordings.
+        {% if q %}Searching for &ldquo;<span class="lr-mono">{{ q }}</span>&rdquo;.{% endif %}
       </div>
     </div>
-    <button class="lr-btn lr-btn--primary" disabled>+ New note</button>
+    <a class="lr-btn lr-btn--primary" href="{{ url_for('ui_notes_new') }}">+ New note</a>
   </header>
 
-  <div class="lr-card">
-    <div class="lr-empty-card">
-      <div class="lr-empty-card__title">Coming in a later milestone</div>
-      <p>
-        Notes will land in Milestone 4: create, edit, search, and link
-        from recordings. The schema and service stubs are already in
-        place — see <code>services/notes.py</code>.
-      </p>
+  <form class="lr-search" method="get" action="{{ url_for('ui_notes') }}" role="search">
+    <input class="lr-input" type="search" name="q" value="{{ q or '' }}"
+           placeholder="Search title or body&hellip;" aria-label="Search notes">
+    <button class="lr-btn" type="submit">Search</button>
+    {% if q %}<a class="lr-btn lr-btn--ghost" href="{{ url_for('ui_notes') }}">Clear</a>{% endif %}
+  </form>
+
+  {% if notes %}
+    <div class="lr-card lr-card--padded">
+      <ul class="lr-list">
+        {% for n in notes %}
+          <li class="lr-list__row">
+            <a class="lr-list__title" href="{{ url_for('ui_note_detail', note_id=n.id) }}">{{ n.title }}</a>
+            <span class="lr-list__meta lr-mono" title="{{ n.updated_at }}">{{ n.updated_at }}</span>
+          </li>
+        {% endfor %}
+      </ul>
     </div>
-  </div>
+    <div class="lr-page__sub">
+      {{ total }} note{{ '' if total == 1 else 's' }}{% if q %} match{{ '' if total == 1 else 'es' }}{% endif %}.
+    </div>
+  {% else %}
+    <div class="lr-card">
+      <div class="lr-empty-card">
+        <div class="lr-empty-card__title">
+          {% if q %}No notes match &ldquo;{{ q }}&rdquo;{% else %}No notes yet{% endif %}
+        </div>
+        <p>
+          {% if q %}
+            Try a different search term, or <a href="{{ url_for('ui_notes') }}">clear the search</a>.
+          {% else %}
+            Capture ideas here, or have them extracted from your recordings.
+          {% endif %}
+        </p>
+        {% if not q %}
+          <a class="lr-btn lr-btn--primary" href="{{ url_for('ui_notes_new') }}">+ New note</a>
+        {% endif %}
+      </div>
+    </div>
+  {% endif %}
 </div>
 {% endblock %}

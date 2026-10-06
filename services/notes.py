@@ -1,51 +1,218 @@
 """Notes service: independent of recordings, markdown-rendered.
 
-Tier 1: stub. All public methods raise :class:`NotImplementedError`. The
-shape of the API is part of the contract that the future implementation
-will follow, so adding it now means a stable surface for the routes
-and templates.
+The service owns three concerns the storage layer doesn't:
+
+* Input validation (title length, body size, control characters).
+* Markdown rendering and HTML sanitisation. The ``markdown`` library
+  with default extensions escapes raw HTML, so we don't need a
+  separate bleach pass for Tier 1.
+* Synchronising ``body_html`` when ``body_md`` changes. The storage
+  layer keeps the two fields side-by-side so list views don't have
+  to render on every read.
+
+The service is constructed with a :class:`storage.Storage` instance
+so it can be tested without a Flask app. Routes get the service via
+``app.current_app_notes_service``.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+import re
+import uuid
 from typing import Optional
 
+import bleach
+import markdown as _md
+import storage
+from storage import Note
 
-@dataclass
-class Note:
-    id: str
-    title: str
-    body_md: str
-    body_html: Optional[str]
-    source: str               # 'manual' | 'extracted' | 'imported'
-    source_ref: Optional[str]
-    pinned: bool
-    created_at: str
-    updated_at: str
+
+# --- Limits -----------------------------------------------------------------
+
+MAX_TITLE_LEN = 200
+MAX_BODY_MD_LEN = 200_000  # 200 KB of markdown; generous for a personal app
+MAX_SEARCH_LEN = 200
+
+VALID_SOURCES = ("manual", "extracted", "imported")
+
+
+# Reject control characters except common whitespace (\t, \n, \r).
+_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _validate_title(title: object) -> str:
+    if not isinstance(title, str):
+        raise ValueError("title must be a string")
+    title = title.strip()
+    if not title:
+        raise ValueError("title is required")
+    if len(title) > MAX_TITLE_LEN:
+        raise ValueError(f"title must be at most {MAX_TITLE_LEN} chars")
+    if _CONTROL_CHARS.search(title):
+        raise ValueError("title contains control characters")
+    return title
+
+
+def _validate_body(body_md: object) -> str:
+    if body_md is None:
+        return ""
+    if not isinstance(body_md, str):
+        raise ValueError("body_md must be a string")
+    if len(body_md) > MAX_BODY_MD_LEN:
+        raise ValueError(f"body_md must be at most {MAX_BODY_MD_LEN} chars")
+    if _CONTROL_CHARS.search(body_md):
+        raise ValueError("body_md contains control characters")
+    return body_md
+
+
+def _validate_source(source: object) -> str:
+    if source is None:
+        return "manual"
+    if not isinstance(source, str):
+        raise ValueError("source must be a string")
+    if source not in VALID_SOURCES:
+        raise ValueError(
+            f"source must be one of {VALID_SOURCES}; got {source!r}"
+        )
+    return source
+
+
+def _validate_source_ref(source_ref: object) -> Optional[str]:
+    if source_ref is None or source_ref == "":
+        return None
+    if not isinstance(source_ref, str):
+        raise ValueError("source_ref must be a string")
+    if len(source_ref) > 256:
+        raise ValueError("source_ref must be at most 256 chars")
+    return source_ref
+
+
+# --- Markdown rendering -----------------------------------------------------
+
+# ``markdown.Markdown`` with no extensions: renders core markdown
+# (headings, paragraphs, lists, links, code, blockquotes, emphasis).
+# Raw HTML in the source is NOT escaped by the markdown library in
+# 3.x — we have to sanitise the rendered output ourselves with bleach.
+# The allowlist covers everything the markdown library can emit, so
+# legitimate content passes through unchanged.
+_md_renderer = _md.Markdown()
+
+_ALLOWED_TAGS: list[str] = [
+    "a", "abbr", "acronym", "b", "blockquote", "br", "code", "em",
+    "h1", "h2", "h3", "h4", "h5", "h6", "hr", "i", "img", "li",
+    "ol", "p", "pre", "s", "strong", "sub", "sup", "u", "ul",
+]
+_ALLOWED_ATTRS: dict[str, list[str]] = {
+    "a": ["href", "title", "rel"],
+    "img": ["src", "alt", "title"],
+}
+_ALLOWED_PROTOCOLS: list[str] = ["http", "https", "mailto"]
+
+
+def render_html(body_md: str) -> str:
+    """Render markdown to safe HTML.
+
+    The output is suitable for direct insertion into a template.
+    Raw HTML in the source is sanitised: tags not in the allowlist
+    are escaped, dangerous protocols (e.g. ``javascript:``) are
+    stripped, and unsafe attributes are removed.
+    """
+    _md_renderer.reset()
+    raw = _md_renderer.convert(body_md or "")
+    return bleach.clean(
+        raw,
+        tags=_ALLOWED_TAGS,
+        attributes=_ALLOWED_ATTRS,
+        protocols=_ALLOWED_PROTOCOLS,
+        strip=False,
+    )
+
+
+# --- Service ----------------------------------------------------------------
 
 
 class NotesService:
-    def create(self, *, title: str, body_md: str,
-               source: str = "manual",
-               source_ref: Optional[str] = None) -> Note:
-        raise NotImplementedError
+    """Coordinates validation, rendering, and storage for notes."""
 
-    def update(self, note_id: str, *,
-               title: Optional[str] = None,
-               body_md: Optional[str] = None,
-               pinned: Optional[bool] = None) -> Note:
-        raise NotImplementedError
+    def __init__(self, store: storage.Storage) -> None:
+        self._store = store
 
-    def delete(self, note_id: str) -> None:
-        raise NotImplementedError
+    def create(
+        self,
+        *,
+        title: str,
+        body_md: str = "",
+        source: str = "manual",
+        source_ref: Optional[str] = None,
+    ) -> Note:
+        title = _validate_title(title)
+        body_md = _validate_body(body_md)
+        source = _validate_source(source)
+        source_ref = _validate_source_ref(source_ref)
+        body_html = render_html(body_md)
+        note_id = uuid.uuid4().hex
+        return self._store.create_note(
+            note_id,
+            title=title,
+            body_md=body_md,
+            body_html=body_html,
+            source=source,
+            source_ref=source_ref,
+        )
+
+    def update(
+        self,
+        note_id: str,
+        *,
+        title: Optional[str] = None,
+        body_md: Optional[str] = None,
+        pinned: Optional[bool] = None,
+    ) -> Note:
+        if not isinstance(note_id, str) or not note_id:
+            raise ValueError("note_id is required")
+        if self._store.get_note(note_id) is None:
+            raise KeyError(note_id)
+        new_title: Optional[str] = None
+        new_body: Optional[str] = None
+        new_body_html: Optional[str] = None
+        if title is not None:
+            new_title = _validate_title(title)
+        if body_md is not None:
+            new_body = _validate_body(body_md)
+            new_body_html = render_html(new_body)
+        return self._store.update_note(
+            note_id,
+            title=new_title,
+            body_md=new_body,
+            body_html=new_body_html,
+            pinned=pinned,
+        )
+
+    def delete(self, note_id: str) -> bool:
+        if not isinstance(note_id, str) or not note_id:
+            raise ValueError("note_id is required")
+        return self._store.delete_note(note_id)
 
     def get(self, note_id: str) -> Optional[Note]:
-        raise NotImplementedError
+        if not isinstance(note_id, str) or not note_id:
+            return None
+        return self._store.get_note(note_id)
 
-    def list(self, *, limit: int = 50, offset: int = 0,
-             search: Optional[str] = None) -> list[Note]:
-        raise NotImplementedError
+    def list(
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        search: Optional[str] = None,
+    ) -> tuple[list[Note], int]:
+        if not isinstance(limit, int) or limit < 1:
+            raise ValueError("limit must be a positive int")
+        if not isinstance(offset, int) or offset < 0:
+            raise ValueError("offset must be a non-negative int")
+        if search is not None:
+            search = search.strip()
+            if not search:
+                search = None
+            elif len(search) > MAX_SEARCH_LEN:
+                raise ValueError(f"search must be at most {MAX_SEARCH_LEN} chars")
+        return self._store.list_notes(limit=limit, offset=offset, search=search)
 
-    def render_html(self, body_md: str) -> str:
-        """Render markdown to HTML. Returns a sanitised HTML string."""
-        raise NotImplementedError
