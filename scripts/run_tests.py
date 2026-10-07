@@ -70,14 +70,23 @@ def run(args: list[str], log_path: Path, timeout: int) -> int:
     except OSError as exc:
         print(f"ERROR: cannot create {log_path}: {exc}", file=sys.stderr)
         return 2
+    # On Windows, ``CREATE_NEW_PROCESS_GROUP`` puts the child in its
+    # own process group so a Ctrl+C / Ctrl+Break sent to the parent
+    # terminal doesn't kill the test process. The ``start /B`` and
+    # ``Start-Process -NoNewWindow`` invocations from a parent
+    # PowerShell session have been observed to send a kill signal to
+    # the entire group when the parent shell detects the test
+    # process's output is buffering; this flag prevents that.
+    popen_kwargs: dict = {
+        "cwd": str(ROOT),
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "text": True,
+    }
+    if sys.platform == "win32":
+        popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
     try:
-        result = subprocess.run(
-            cmd,
-            cwd=str(ROOT),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
+        result = subprocess.run(cmd, timeout=timeout, **popen_kwargs)
         print(f"  subprocess returned: exit={result.returncode} "
               f"stdout_len={len(result.stdout)} stderr_len={len(result.stderr)}")
     except subprocess.TimeoutExpired as exc:
