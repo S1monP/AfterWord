@@ -180,47 +180,36 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_notes_updated ON notes(updated_at DESC)",
-    # Todos: optional due_at (was originally no due date; user asked
-    # for a personal "by when" date, so the column was added later).
-    # Priority + status. Age buckets (new/aging/stale) are derived at
-    # render time from created_at.
+    # Tasks: the merged table replacing todos + deadlines. A row is
+    # either a personal todo (``kind = 'task'``) or a course deadline
+    # (``kind = 'deadline'``). Personal todos may or may not have a
+    # ``due_at``; deadlines must have one (enforced at the service
+    # layer, not in the schema, to keep the schema simple). The
+    # ``source_offset_ms`` + ``course_id`` columns are populated when
+    # a deadline is auto-extracted from a recording.
     """
-    CREATE TABLE IF NOT EXISTS todos (
-        id          TEXT PRIMARY KEY,
-        title       TEXT NOT NULL,
-        body_md     TEXT,
-        priority    TEXT NOT NULL DEFAULT 'medium',
-        status      TEXT NOT NULL DEFAULT 'open',
-        source      TEXT NOT NULL DEFAULT 'manual',
-        source_ref  TEXT,
-        due_at      TEXT,
-        created_at  TEXT NOT NULL,
-        updated_at  TEXT NOT NULL,
-        completed_at TEXT
+    CREATE TABLE IF NOT EXISTS tasks (
+        id               TEXT PRIMARY KEY,
+        title            TEXT NOT NULL,
+        body_md          TEXT,
+        description      TEXT,
+        priority         TEXT NOT NULL DEFAULT 'medium',
+        status           TEXT NOT NULL DEFAULT 'open',
+        kind             TEXT NOT NULL DEFAULT 'task',
+        due_at           TEXT,
+        source           TEXT NOT NULL DEFAULT 'manual',
+        source_ref       TEXT,
+        source_offset_ms INTEGER,
+        course_id        TEXT,
+        pinned           INTEGER NOT NULL DEFAULT 0,
+        completed_at     TEXT,
+        created_at       TEXT NOT NULL,
+        updated_at       TEXT NOT NULL
     )
     """,
-    "CREATE INDEX IF NOT EXISTS idx_todos_status ON todos(status, updated_at DESC)",
-    "CREATE INDEX IF NOT EXISTS idx_todos_priority ON todos(priority, status)",
-    "CREATE INDEX IF NOT EXISTS idx_todos_due ON todos(due_at)",
-    # Deadlines: extracted from lectures + voice memos + manual.
-    # source_offset_ms lets the UI deep-link to a moment in the recording.
-    """
-    CREATE TABLE IF NOT EXISTS deadlines (
-        id                TEXT PRIMARY KEY,
-        title             TEXT NOT NULL,
-        description       TEXT,
-        due_at            TEXT NOT NULL,
-        status            TEXT NOT NULL DEFAULT 'set',
-        source            TEXT NOT NULL DEFAULT 'manual',
-        source_ref        TEXT,
-        source_offset_ms  INTEGER,
-        created_at        TEXT NOT NULL,
-        updated_at        TEXT NOT NULL,
-        completed_at      TEXT
-    )
-    """,
-    "CREATE INDEX IF NOT EXISTS idx_deadlines_due ON deadlines(due_at)",
-    "CREATE INDEX IF NOT EXISTS idx_deadlines_status ON deadlines(status, due_at)",
+    "CREATE INDEX IF NOT EXISTS idx_tasks_kind_status_due ON tasks(kind, status, due_at)",
+    "CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_at)",
+    "CREATE INDEX IF NOT EXISTS idx_tasks_pinned ON tasks(pinned) WHERE pinned = 1",
     # Events: calendar (lectures + meetings). Matched to sessions.
     # matched_session_id is the session we believe corresponds to this event;
     # match_confidence is the 0..1 score (set by the matcher).
@@ -254,8 +243,9 @@ SCHEMA_ALTERS: tuple[str, ...] = (
     "ALTER TABLE sessions ADD COLUMN kind TEXT",
     "ALTER TABLE sessions ADD COLUMN kind_confidence REAL",
     "ALTER TABLE sessions ADD COLUMN kind_set_at TEXT",
-    # todos: optional personal due date (added in M5 follow-up).
-    "ALTER TABLE todos ADD COLUMN due_at TEXT",
+    # tasks: the merged todos + deadlines table; nothing to alter
+    # because it was created at table-creation time. Future columns
+    # go here.
 )
 
 
@@ -457,33 +447,49 @@ class Note:
 
 
 @dataclass
-class Todo:
-    """In-memory view of a todo row."""
+class Task:
+    """In-memory view of a tasks-table row.
+
+    A row is either a personal todo (``kind = 'task'``) or a course
+    deadline (``kind = 'deadline'``). The shape is the same; the
+    difference is which fields are typically populated and which
+    page renders the row.
+    """
     id: str
     title: str
     body_md: Optional[str]
+    description: Optional[str]
     priority: str
     status: str
+    kind: str
+    due_at: Optional[str]
     source: str
     source_ref: Optional[str]
-    due_at: Optional[str]
+    source_offset_ms: Optional[int]
+    course_id: Optional[str]
+    pinned: bool
+    completed_at: Optional[str]
     created_at: str
     updated_at: str
-    completed_at: Optional[str]
 
     def to_api_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "title": self.title,
             "body_md": self.body_md,
+            "description": self.description,
             "priority": self.priority,
             "status": self.status,
+            "kind": self.kind,
+            "due_at": self.due_at,
             "source": self.source,
             "source_ref": self.source_ref,
-            "due_at": self.due_at,
+            "source_offset_ms": self.source_offset_ms,
+            "course_id": self.course_id,
+            "pinned": self.pinned,
+            "completed_at": self.completed_at,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
-            "completed_at": self.completed_at,
         }
 
 
@@ -530,9 +536,55 @@ class Storage:
                 except sqlite3.OperationalError as exc:
                     if "duplicate column" not in str(exc).lower():
                         raise
+            # The todos/deadlines -> tasks merge only runs on databases
+            # that pre-date the merged schema. It's a one-shot upgrade.
+            self._migrate_todos_to_tasks(conn)
             conn.commit()
         self._log(f"data dir: {self._data_dir}")
         self._log(f"DB ready: {self._db_path}")
+
+    def _migrate_todos_to_tasks(self, conn: sqlite3.Connection) -> None:
+        """One-shot migration: copy ``todos`` rows into ``tasks`` with
+        ``kind = 'task'``, then drop the old tables. Idempotent: if
+        the ``todos`` table doesn't exist, this is a no-op.
+
+        New columns on ``tasks`` (description, kind, source_offset_ms,
+        course_id) get sensible defaults: NULL or the constant ``'task'``
+        for kind. Existing columns pass through unchanged. The
+        ``pinned`` column doesn't exist on the old ``todos`` table;
+        we default it to 0.
+        """
+        cur = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='todos'"
+        )
+        if cur.fetchone() is None:
+            return  # already migrated
+        self._log("migrating todos -> tasks (one-shot)")
+        # Copy rows. The kind is hard-coded to 'task' for migrated rows;
+        # the user can edit them later if any were actually deadlines.
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO tasks
+                (id, title, body_md, description, priority, status,
+                 kind, due_at, source, source_ref, source_offset_ms,
+                 course_id, pinned, completed_at, created_at, updated_at)
+            SELECT
+                id, title, body_md, NULL, priority, status,
+                'task', due_at, source, source_ref, NULL,
+                NULL, 0, completed_at, created_at, updated_at
+            FROM todos
+            """
+        )
+        # Drop the old tables. The deadlines table was never used, so
+        # it's safe to drop without a copy.
+        conn.execute("DROP TABLE IF EXISTS todos")
+        conn.execute("DROP TABLE IF EXISTS idx_todos_status")
+        conn.execute("DROP TABLE IF EXISTS idx_todos_priority")
+        conn.execute("DROP TABLE IF EXISTS idx_todos_due")
+        conn.execute("DROP TABLE IF EXISTS deadlines")
+        conn.execute("DROP TABLE IF EXISTS idx_deadlines_due")
+        conn.execute("DROP TABLE IF EXISTS idx_deadlines_status")
+        self._log("migration complete: todos and deadlines are gone")
 
     def _clean_inbox(self) -> None:
         inbox = self._config.inbox_dir
@@ -937,63 +989,78 @@ class Storage:
             updated_at=row["updated_at"],
         )
 
-    # --- todos ------------------------------------------------------------
+    # --- tasks ------------------------------------------------------------
 
-    def create_todo(
+    def create_task(
         self,
-        todo_id: str,
+        task_id: str,
         *,
         title: str,
         body_md: Optional[str] = None,
+        description: Optional[str] = None,
         priority: str = "medium",
         status: str = "open",
+        kind: str = "task",
+        due_at: Optional[str] = None,
         source: str = "manual",
         source_ref: Optional[str] = None,
-        due_at: Optional[str] = None,
-    ) -> Todo:
+        source_offset_ms: Optional[int] = None,
+        course_id: Optional[str] = None,
+        pinned: bool = False,
+        completed_at: Optional[str] = None,
+    ) -> Task:
         now = now_iso()
         with self._tx() as conn:
             conn.execute(
                 """
-                INSERT INTO todos
-                    (id, title, body_md, priority, status, source,
-                     source_ref, due_at, created_at, updated_at,
-                     completed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO tasks
+                    (id, title, body_md, description, priority, status,
+                     kind, due_at, source, source_ref, source_offset_ms,
+                     course_id, pinned, completed_at,
+                     created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?)
                 """,
-                (todo_id, title, body_md, priority, status, source,
-                 source_ref, due_at, now, now,
-                 now if status == "done" else None),
+                (task_id, title, body_md, description, priority, status,
+                 kind, due_at, source, source_ref, source_offset_ms,
+                 course_id, 1 if pinned else 0,
+                 now if status == "done" else completed_at,
+                 now, now),
             )
-        return self.get_todo(todo_id)  # type: ignore[return-value]
+        return self.get_task(task_id)  # type: ignore[return-value]
 
-    def get_todo(self, todo_id: str) -> Optional[Todo]:
+    def get_task(self, task_id: str) -> Optional[Task]:
         with self._tx() as conn:
             row = conn.execute(
-                "SELECT * FROM todos WHERE id = ?", (todo_id,)
+                "SELECT * FROM tasks WHERE id = ?", (task_id,)
             ).fetchone()
             if row is None:
                 return None
-            return self._row_to_todo(row)
+            return self._row_to_task(row)
 
-    def update_todo(
+    def update_task(
         self,
-        todo_id: str,
+        task_id: str,
         *,
         title: Optional[str] = None,
         body_md: Any = _UNSET,
+        description: Any = _UNSET,
         priority: Optional[str] = None,
         status: Optional[str] = None,
+        kind: Optional[str] = None,
         completed_at: Any = _UNSET,
         due_at: Any = _UNSET,
-    ) -> Todo:
+        source_offset_ms: Any = _UNSET,
+        course_id: Any = _UNSET,
+        pinned: Any = _UNSET,
+    ) -> Task:
         """Partial update.
 
-        ``body_md``, ``completed_at``, and ``due_at`` use a sentinel
-        so the caller can pass ``None`` to clear them explicitly.
-        ``title``, ``priority``, ``status`` use the simpler
-        None-means-don't-touch convention because their None value
-        is never valid anyway.
+        ``body_md``, ``description``, ``completed_at``, ``due_at``,
+        ``source_offset_ms``, ``course_id``, ``pinned`` use a
+        sentinel so the caller can pass ``None`` to clear them
+        explicitly. ``title``, ``priority``, ``status``, ``kind``
+        use the simpler None-means-don't-touch convention.
         """
         sets: list[str] = []
         params: list[Any] = []
@@ -1003,60 +1070,81 @@ class Storage:
         if body_md is not _UNSET:
             sets.append("body_md = ?")
             params.append(body_md)
+        if description is not _UNSET:
+            sets.append("description = ?")
+            params.append(description)
         if priority is not None:
             sets.append("priority = ?")
             params.append(priority)
         if status is not None:
             sets.append("status = ?")
             params.append(status)
+        if kind is not None:
+            sets.append("kind = ?")
+            params.append(kind)
         if completed_at is not _UNSET:
             sets.append("completed_at = ?")
             params.append(completed_at)
         if due_at is not _UNSET:
             sets.append("due_at = ?")
             params.append(due_at)
+        if source_offset_ms is not _UNSET:
+            sets.append("source_offset_ms = ?")
+            params.append(source_offset_ms)
+        if course_id is not _UNSET:
+            sets.append("course_id = ?")
+            params.append(course_id)
+        if pinned is not _UNSET:
+            sets.append("pinned = ?")
+            params.append(1 if pinned else 0)
         if not sets:
-            existing = self.get_todo(todo_id)
+            existing = self.get_task(task_id)
             if existing is None:
-                raise KeyError(todo_id)
+                raise KeyError(task_id)
             return existing
         sets.append("updated_at = ?")
         params.append(now_iso())
-        params.append(todo_id)
+        params.append(task_id)
         with self._tx() as conn:
             cur = conn.execute(
-                f"UPDATE todos SET {', '.join(sets)} WHERE id = ?",
+                f"UPDATE tasks SET {', '.join(sets)} WHERE id = ?",
                 params,
             )
             if cur.rowcount == 0:
-                raise KeyError(todo_id)
-        updated = self.get_todo(todo_id)
+                raise KeyError(task_id)
+        updated = self.get_task(task_id)
         assert updated is not None
         return updated
 
-    def delete_todo(self, todo_id: str) -> bool:
+    def delete_task(self, task_id: str) -> bool:
         with self._tx() as conn:
-            cur = conn.execute("DELETE FROM todos WHERE id = ?", (todo_id,))
+            cur = conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
             return cur.rowcount > 0
 
-    def list_todos(
+    def list_tasks(
         self,
         *,
+        kind: Optional[str] = None,
         status: Optional[str] = None,
         priority: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> tuple[list[Todo], int]:
-        """List todos, open ones first then by priority (urgent first),
-        then by due date (overdue first, then no-due-date, then
-        future), then by created_at DESC. ``status`` and ``priority``
-        are optional filters; both single-valued."""
+    ) -> tuple[list[Task], int]:
+        """List tasks with optional filters.
+
+        Sort order: status (open first, then cancelled, then done),
+        then by due date (overdue / dated first, no-date last), then
+        by priority (urgent → low), then by created_at DESC.
+        """
         if limit < 1:
             raise ValueError("limit must be >= 1")
         if offset < 0:
             raise ValueError("offset must be >= 0")
         clauses: list[str] = []
         where_params: list[Any] = []
+        if kind is not None:
+            clauses.append("kind = ?")
+            where_params.append(kind)
         if status is not None:
             clauses.append("status = ?")
             where_params.append(status)
@@ -1066,12 +1154,12 @@ class Storage:
         where_sql = ("WHERE " + " AND ".join(clauses)) if clauses else ""
         with self._tx() as conn:
             total = conn.execute(
-                f"SELECT COUNT(*) AS c FROM todos {where_sql}",
+                f"SELECT COUNT(*) AS c FROM tasks {where_sql}",
                 where_params,
             ).fetchone()["c"]
             rows = conn.execute(
                 f"""
-                SELECT * FROM todos
+                SELECT * FROM tasks
                 {where_sql}
                 ORDER BY
                     CASE status
@@ -1080,7 +1168,7 @@ class Storage:
                         WHEN 'done' THEN 2
                         ELSE 3
                     END,
-                    -- Todos with a due date sort before those without
+                    -- Tasks with a due date sort before those without
                     -- (an overdue task is more urgent than any
                     -- no-date task at any priority). Within the
                     -- dated bucket, earlier dates come first.
@@ -1098,21 +1186,30 @@ class Storage:
                 """,
                 where_params + [limit, offset],
             ).fetchall()
-        return [self._row_to_todo(r) for r in rows], int(total)
+        return [self._row_to_task(r) for r in rows], int(total)
 
-    def _row_to_todo(self, row: sqlite3.Row) -> Todo:
-        return Todo(
+    def _row_to_task(self, row: sqlite3.Row) -> Task:
+        keys = row.keys()
+        return Task(
             id=row["id"],
             title=row["title"],
             body_md=row["body_md"],
+            description=row["description"] if "description" in keys else None,
             priority=row["priority"],
             status=row["status"],
+            kind=row["kind"] if "kind" in keys else "task",
+            due_at=row["due_at"] if "due_at" in keys else None,
             source=row["source"],
             source_ref=row["source_ref"],
-            due_at=row["due_at"] if "due_at" in row.keys() else None,
+            source_offset_ms=(
+                row["source_offset_ms"]
+                if "source_offset_ms" in keys else None
+            ),
+            course_id=row["course_id"] if "course_id" in keys else None,
+            pinned=bool(row["pinned"]) if "pinned" in keys else False,
+            completed_at=row["completed_at"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
-            completed_at=row["completed_at"],
         )
 
     def write_chunk(

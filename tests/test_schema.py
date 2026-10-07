@@ -25,7 +25,7 @@ class SchemaShapeTests(LRTestCase):
                     "SELECT name FROM sqlite_master WHERE type='table'"
                 ).fetchall()
             }
-        for t in ("notes", "todos", "deadlines", "events"):
+        for t in ("notes", "tasks", "events"):
             self.assertIn(t, tables, f"missing table {t}")
 
     def test_sessions_kind_columns(self) -> None:
@@ -54,35 +54,31 @@ class SchemaShapeTests(LRTestCase):
                   "created_at", "updated_at"):
             self.assertIn(c, cols)
 
-    def test_todos_columns(self) -> None:
+    def test_tasks_columns(self) -> None:
+        """The merged tasks table has the union of todos + deadlines columns."""
         store = self.app.config["LR_STORAGE"]
         with store._connect() as conn:  # type: ignore[attr-defined]
             cols = {
                 r["name"]
                 for r in conn.execute(
-                    "PRAGMA table_info(todos)"
+                    "PRAGMA table_info(tasks)"
                 ).fetchall()
             }
-        # Note: due_at was added to todos (M5 follow-up). The two-table
-        # split is going away in Milestone 5 part 2.
-        self.assertIn("due_at", cols)
-        for c in ("id", "title", "priority", "status",
-                  "source", "created_at", "updated_at", "completed_at"):
+        for c in (
+            "id", "title", "body_md", "description",
+            "priority", "status", "kind",
+            "due_at", "source", "source_ref",
+            "source_offset_ms", "course_id",
+            "pinned", "completed_at",
+            "created_at", "updated_at",
+        ):
             self.assertIn(c, cols)
-
-    def test_deadlines_columns(self) -> None:
-        store = self.app.config["LR_STORAGE"]
-        with store._connect() as conn:  # type: ignore[attr-defined]
-            cols = {
-                r["name"]
-                for r in conn.execute(
-                    "PRAGMA table_info(deadlines)"
-                ).fetchall()
-            }
-        for c in ("id", "title", "due_at", "status",
-                  "source", "source_ref", "source_offset_ms",
-                  "created_at", "updated_at", "completed_at"):
-            self.assertIn(c, cols)
+        # The old todo + deadline tables are gone after the merge.
+        for gone in ("todos", "deadlines"):
+            cur = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (gone,)
+            )
+            self.assertIsNone(cur.fetchone())
 
     def test_events_columns(self) -> None:
         store = self.app.config["LR_STORAGE"]
@@ -228,23 +224,17 @@ class ServiceStubTests(unittest.TestCase):
             'NotesService.__init__ should take (self, store)',
         )
 
-    def test_todos_service_is_real(self) -> None:
-        """Todos is the second service to land (Milestone 5). The
+    def test_tasks_service_is_real(self) -> None:
+        """Tasks is the second service to land (Milestone 5). The
         constructor should take a Storage instance; full behaviour
-        is covered in ``tests/test_todos.py``."""
-        from services.todos import TodosService
+        is covered in ``tests/test_tasks.py``."""
+        from services.tasks import TasksService
         import inspect
-        sig = inspect.signature(TodosService.__init__)
+        sig = inspect.signature(TasksService.__init__)
         self.assertGreaterEqual(
             len(sig.parameters), 2,
-            "TodosService.__init__ should take (self, store)",
+            "TasksService.__init__ should take (self, store)",
         )
-
-    def test_deadlines_service_is_stub(self) -> None:
-        from services.deadlines import DeadlinesService
-        s = DeadlinesService()
-        with self.assertRaises(NotImplementedError):
-            s.create(title="x", due_at="2026-10-04T12:00:00Z")
 
     def test_events_service_is_stub(self) -> None:
         from services.events import EventsService
@@ -262,15 +252,8 @@ class ServiceStubTests(unittest.TestCase):
         from services.events import KINDS
         self.assertEqual(KINDS, frozenset({"lecture", "meeting", "other"}))
 
-    def test_todos_priority_and_status_constants(self) -> None:
-        from services.todos import PRIORITIES, STATUSES
+    def test_tasks_priority_status_and_kind_constants(self) -> None:
+        from services.tasks import PRIORITIES, STATUSES, KINDS
         self.assertEqual(PRIORITIES, frozenset({"low", "medium", "high", "urgent"}))
         self.assertEqual(STATUSES, frozenset({"open", "done", "cancelled"}))
 
-    def test_deadlines_statuses_constant(self) -> None:
-        from services.deadlines import STATUSES as DSTATUS
-        self.assertEqual(DSTATUS, frozenset({"set", "complete"}))
-
-
-if __name__ == "__main__":
-    unittest.main()

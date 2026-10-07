@@ -28,7 +28,7 @@ import config as config_mod
 import search
 import services
 import services.notes  # noqa: F401  (exposes NotesService, render_html, constants)
-import services.todos  # noqa: F401  (exposes TodosService, ALLOWED_TRANSITIONS)
+import services.tasks  # noqa: F401  (exposes TasksService, KINDS, ALLOWED_TRANSITIONS)
 import storage
 from services import processing, transcode
 
@@ -49,7 +49,7 @@ def create_app(config: Optional[config_mod.Config] = None) -> Flask:
     app.config["LR_NOTES_SERVICE"] = services.notes.NotesService(
         app.config["LR_STORAGE"]
     )
-    app.config["LR_TODOS_SERVICE"] = services.todos.TodosService(
+    app.config["LR_TASKS_SERVICE"] = services.tasks.TasksService(
         app.config["LR_STORAGE"]
     )
     app.secret_key = os.environ.get("LR_SECRET", "lr-dev-secret-not-for-prod")
@@ -76,9 +76,9 @@ def create_app(config: Optional[config_mod.Config] = None) -> Flask:
             )
         except Exception:
             count = 0
-        # Helpers for todo date rendering. Available in every template.
-        from services.todos import is_due_today as _is_due_today
-        from services.todos import is_overdue as _is_overdue
+        # Helpers for task date rendering. Available in every template.
+        from services.tasks import is_due_today as _is_due_today
+        from services.tasks import is_overdue as _is_overdue
         return {
             "unsorted_count": min(count, 99),
             "now_iso": storage.now_iso(),
@@ -101,9 +101,9 @@ def current_app_notes_service() -> services.notes.NotesService:
     return current_app.config["LR_NOTES_SERVICE"]
 
 
-def current_app_todos_service() -> services.todos.TodosService:
-    """Pull the TodosService off the active Flask app."""
-    return current_app.config["LR_TODOS_SERVICE"]
+def current_app_tasks_service() -> services.tasks.TasksService:
+    """Pull the TasksService off the active Flask app."""
+    return current_app.config["LR_TASKS_SERVICE"]
 
 
 # ---------------------------------------------------------------------------
@@ -177,16 +177,20 @@ def _register_routes(app: Flask) -> None:
     @app.get("/")
     def ui_dashboard() -> Any:
         """The home page: a 3-col bento with calendar, search,
-        deadlines+Todos (right), and notes/lectures/meetings (centre)."""
+        deadlines+Tasks (right), and notes/lectures/meetings (centre)."""
         recent_notes, _ = current_app_notes_service().list(limit=5, offset=0)
-        open_todos, open_total = current_app_todos_service().list(
-            status="open", limit=5, offset=0,
+        open_tasks, open_task_total = current_app_tasks_service().list(
+            kind="task", status="open", limit=5, offset=0,
+        )
+        open_deadlines, _ = current_app_tasks_service().list(
+            kind="deadline", status="open", limit=5, offset=0,
         )
         return render_template(
             "dashboard.html",
             recent_notes=recent_notes,
-            open_todos=open_todos,
-            open_todo_count=open_total,
+            open_tasks=open_tasks,
+            open_task_count=open_task_total,
+            open_deadlines=open_deadlines,
         )
 
     def _render_recordings(kind_filter: Optional[str] = None,
@@ -320,19 +324,18 @@ def _register_routes(app: Flask) -> None:
 
     @app.get("/todos")
     def ui_todos() -> Any:
-        """The Tasks page: list view + quick-add form. The Deadlines
-        section is rendered in Milestone 6; the right column stays
-        as a placeholder for now."""
+        """The Tasks page: list view of ``kind='task'`` rows +
+        quick-add form."""
         status_filter = request.args.get("status")
         if status_filter not in (None, "", "open", "done", "cancelled"):
             status_filter = None
-        todos, total = current_app_todos_service().list(
-            status=status_filter or None, limit=100,
+        tasks, total = current_app_tasks_service().list(
+            kind="task", status=status_filter or None, limit=100,
         )
-        open_count = sum(1 for t in todos if t.status == "open")
+        open_count = sum(1 for t in tasks if t.status == "open")
         return render_template(
             "todos.html",
-            todos=todos,
+            tasks=tasks,
             total=total,
             open_count=open_count,
             status_filter=status_filter or "",
@@ -340,30 +343,73 @@ def _register_routes(app: Flask) -> None:
 
     @app.post("/todos/quick")
     def ui_todos_quick() -> Any:
-        """Quick-add a single todo from the form. Redirects back to
-        /todos. The JSON API is the canonical path; this is a thin
-        shortcut so the no-JS form works.
+        """Quick-add a personal task. Optional fields: priority, due_at.
 
-        Optional form fields: ``priority`` (low/medium/high/urgent,
-        defaults to medium), ``due_at`` (ISO-8601 date or datetime,
-        empty means no date).
+        ``due_at`` is optional for tasks (kind='task' here). Empty
+        form values are normalised to ``None`` so the service sees a
+        clean value.
         """
         title = (request.form.get("title") or "").strip()
         if not title:
             return redirect(url_for("ui_todos"))
         priority = (request.form.get("priority") or "medium").strip()
-        # The form sends either a date (``YYYY-MM-DD``) or a
-        # datetime. The service accepts ISO-8601; the browser date
-        # input is a valid date prefix, which ``fromisoformat``
-        # handles.
         due_at_raw = (request.form.get("due_at") or "").strip()
         try:
-            current_app_todos_service().create(
-                title=title, priority=priority, due_at=due_at_raw or None,
+            current_app_tasks_service().create(
+                title=title, kind="task",
+                priority=priority, due_at=due_at_raw or None,
             )
         except ValueError:
             return redirect(url_for("ui_todos"))
         return redirect(url_for("ui_todos"))
+
+    @app.get("/deadlines")
+    def ui_deadlines() -> Any:
+        """The Deadlines page: list view of ``kind='deadline'`` rows
+        + quick-add form. Deadlines MUST have a date; the form
+        enforces that with HTML5 ``required`` and the service enforces
+        it server-side."""
+        status_filter = request.args.get("status")
+        if status_filter not in (None, "", "open", "done", "cancelled"):
+            status_filter = None
+        deadlines, total = current_app_tasks_service().list(
+            kind="deadline", status=status_filter or None, limit=100,
+        )
+        open_count = sum(1 for t in deadlines if t.status == "open")
+        return render_template(
+            "deadlines.html",
+            deadlines=deadlines,
+            total=total,
+            open_count=open_count,
+            status_filter=status_filter or "",
+        )
+
+    @app.post("/deadlines/quick")
+    def ui_deadlines_quick() -> Any:
+        """Quick-add a deadline. ``due_at`` is required.
+
+        Optional: ``description``, ``course_id``, ``source_ref``,
+        ``source_offset_ms`` (the last one is hidden in the simple
+        form; LLM-extracted deadlines populate it automatically).
+        """
+        title = (request.form.get("title") or "").strip()
+        if not title:
+            return redirect(url_for("ui_deadlines"))
+        priority = (request.form.get("priority") or "medium").strip()
+        due_at_raw = (request.form.get("due_at") or "").strip()
+        description = (request.form.get("description") or "").strip()
+        course_id = (request.form.get("course_id") or "").strip()
+        try:
+            current_app_tasks_service().create(
+                title=title, kind="deadline",
+                priority=priority,
+                due_at=due_at_raw or None,
+                description=description or None,
+                course_id=course_id or None,
+            )
+        except ValueError:
+            return redirect(url_for("ui_deadlines"))
+        return redirect(url_for("ui_deadlines"))
 
     @app.get("/calendar")
     def ui_calendar() -> Any:
@@ -688,14 +734,15 @@ def _register_routes(app: Flask) -> None:
             }), 400
         return jsonify({"html": services.notes.render_html(body_md)})
 
-    # --- API: todos (CRUD + status transitions) --------------------------
-    def _todo_to_dict(t: storage.Todo) -> dict[str, Any]:
+    # --- API: tasks (CRUD + status transitions) --------------------------
+    def _task_to_dict(t: storage.Task) -> dict[str, Any]:
         return t.to_api_dict()
 
-    @app.get("/api/v1/todos")
-    def api_list_todos() -> Any:
-        """List todos. Query params: ``status``, ``priority``,
-        ``limit`` (1-200, default 100), ``offset`` (>=0)."""
+    @app.get("/api/v1/tasks")
+    def api_list_tasks() -> Any:
+        """List tasks. Query params: ``kind`` ('task' or 'deadline'),
+        ``status``, ``priority``, ``limit`` (1-200, default 100),
+        ``offset`` (>=0)."""
         try:
             limit = int(request.args.get("limit", 100))
             offset = int(request.args.get("offset", 0))
@@ -706,104 +753,115 @@ def _register_routes(app: Flask) -> None:
                             "detail": "limit must be 1..200"}), 400
         if offset < 0:
             return jsonify({"error": "invalid_offset"}), 400
+        kind = request.args.get("kind") or None
         status = request.args.get("status") or None
         priority = request.args.get("priority") or None
         try:
-            todos, total = current_app_todos_service().list(
-                status=status, priority=priority,
+            tasks, total = current_app_tasks_service().list(
+                kind=kind, status=status, priority=priority,
                 limit=limit, offset=offset,
             )
         except ValueError as exc:
             return jsonify({"error": "invalid_payload",
                             "detail": str(exc)}), 400
         return jsonify({
-            "todos": [_todo_to_dict(t) for t in todos],
+            "tasks": [_task_to_dict(t) for t in tasks],
             "total": total,
             "limit": limit,
             "offset": offset,
+            "kind": kind,
             "status": status,
             "priority": priority,
         })
 
-    @app.post("/api/v1/todos")
-    def api_create_todo() -> Any:
-        """Create a todo. Body: ``{title, body_md?, priority?, due_at?}``.
+    @app.post("/api/v1/tasks")
+    def api_create_task() -> Any:
+        """Create a task. Body: ``{title, kind, body_md?, description?,
+        priority?, due_at?, source?, source_ref?, source_offset_ms?,
+        course_id?, pinned?}``.
 
-        ``priority`` defaults to ``"medium"`` if not supplied.
-        ``due_at`` is optional ISO-8601 (with or without trailing Z);
-        pass ``null`` or omit for no due date.
+        ``kind`` is 'task' (personal) or 'deadline' (course-linked,
+        requires ``due_at``). ``priority`` defaults to 'medium'.
         """
         payload = request.get_json(silent=True) or {}
         try:
-            todo = current_app_todos_service().create(
+            task = current_app_tasks_service().create(
                 title=payload.get("title", ""),
                 body_md=payload.get("body_md"),
+                description=payload.get("description"),
                 priority=payload.get("priority") or "medium",
+                kind=payload.get("kind") or "task",
+                due_at=payload.get("due_at"),
                 source=payload.get("source") or "manual",
                 source_ref=payload.get("source_ref"),
-                due_at=payload.get("due_at"),
+                source_offset_ms=payload.get("source_offset_ms"),
+                course_id=payload.get("course_id"),
+                pinned=bool(payload.get("pinned", False)),
             )
         except ValueError as exc:
             return jsonify({"error": "invalid_payload",
                             "detail": str(exc)}), 400
-        return jsonify({"todo": _todo_to_dict(todo)}), 201
+        return jsonify({"task": _task_to_dict(task)}), 201
 
-    @app.get("/api/v1/todos/<todo_id>")
-    def api_get_todo(todo_id: str) -> Any:
-        todo = current_app_todos_service().get(todo_id)
-        if todo is None:
+    @app.get("/api/v1/tasks/<task_id>")
+    def api_get_task(task_id: str) -> Any:
+        task = current_app_tasks_service().get(task_id)
+        if task is None:
             return jsonify({"error": "not_found"}), 404
-        return jsonify({"todo": _todo_to_dict(todo)})
+        return jsonify({"task": _task_to_dict(task)})
 
-    @app.patch("/api/v1/todos/<todo_id>")
-    def api_update_todo(todo_id: str) -> Any:
-        """Partial update. Body: any of ``{title, body_md, priority, due_at}``.
+    @app.patch("/api/v1/tasks/<task_id>")
+    def api_update_task(task_id: str) -> Any:
+        """Partial update. Body: any of ``{title, body_md, description,
+        priority, kind, due_at, source_offset_ms, course_id, pinned}``.
 
-        Pass ``due_at=null`` explicitly to clear the date. Status is
-        changed via ``POST /api/v1/todos/<id>/status`` so the
+        Pass ``due_at=null`` explicitly to clear the date. ``kind`` can
+        also be changed (e.g. from 'task' to 'deadline'); if the new
+        kind is 'deadline' and there's no ``due_at``, the request is
+        rejected. Status is changed via the status endpoint so
         transition rules are enforced.
         """
         payload = request.get_json(silent=True) or {}
         kwargs: dict[str, Any] = {}
-        if "title" in payload:
-            kwargs["title"] = payload["title"]
-        if "body_md" in payload:
-            kwargs["body_md"] = payload["body_md"]
-        if "priority" in payload:
-            kwargs["priority"] = payload["priority"]
-        if "due_at" in payload:
-            # Pass through to the service, which validates. ``None``
-            # means "clear the date".
-            kwargs["due_at"] = payload["due_at"]
+        for field in ("title", "body_md", "description", "priority",
+                      "kind"):
+            if field in payload:
+                kwargs[field] = payload[field]
+        # Sentinel-friendly fields: pass through, the service handles
+        # ``None`` as "clear".
+        for field in ("due_at", "source_offset_ms", "course_id",
+                      "pinned"):
+            if field in payload:
+                kwargs[field] = payload[field]
         try:
-            todo = current_app_todos_service().update(todo_id, **kwargs)
+            task = current_app_tasks_service().update(task_id, **kwargs)
         except KeyError:
             return jsonify({"error": "not_found"}), 404
         except ValueError as exc:
             return jsonify({"error": "invalid_payload",
                             "detail": str(exc)}), 400
-        return jsonify({"todo": _todo_to_dict(todo)})
+        return jsonify({"task": _task_to_dict(task)})
 
-    @app.post("/api/v1/todos/<todo_id>/status")
-    def api_set_todo_status(todo_id: str) -> Any:
-        """Transition a todo's status. Body: ``{status: "open"|"done"|"cancelled"}``."""
+    @app.post("/api/v1/tasks/<task_id>/status")
+    def api_set_task_status(task_id: str) -> Any:
+        """Transition a task's status. Body: ``{status: "open"|"done"|"cancelled"}``."""
         payload = request.get_json(silent=True) or {}
         status = payload.get("status")
         if status is None:
             return jsonify({"error": "invalid_payload",
                             "detail": "field 'status' is required"}), 400
         try:
-            todo = current_app_todos_service().set_status(todo_id, status)
+            task = current_app_tasks_service().set_status(task_id, status)
         except KeyError:
             return jsonify({"error": "not_found"}), 404
         except ValueError as exc:
             return jsonify({"error": "invalid_payload",
                             "detail": str(exc)}), 400
-        return jsonify({"todo": _todo_to_dict(todo)})
+        return jsonify({"task": _task_to_dict(task)})
 
-    @app.delete("/api/v1/todos/<todo_id>")
-    def api_delete_todo(todo_id: str) -> Any:
-        deleted = current_app_todos_service().delete(todo_id)
+    @app.delete("/api/v1/tasks/<task_id>")
+    def api_delete_task(task_id: str) -> Any:
+        deleted = current_app_tasks_service().delete(task_id)
         if not deleted:
             return jsonify({"error": "not_found"}), 404
         return ("", 204)

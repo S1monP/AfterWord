@@ -1,14 +1,14 @@
 {% extends "base.html" %}
 
-{% block title %}Todos &middot; Lecture Recorder{% endblock %}
+{% block title %}Tasks &middot; Lecture Recorder{% endblock %}
 
 {% block content %}
 <div class="lr-page">
   <header class="lr-page__header">
     <div>
-      <h1 class="lr-page__title">Todos</h1>
+      <h1 class="lr-page__title">Tasks</h1>
       <div class="lr-page__sub">
-        Tasks. {{ open_count }} open / {{ total }} total.
+        Personal tasks. {{ open_count }} open / {{ total }} total.
         {% if status_filter %}Filtered to <span class="lr-mono">{{ status_filter }}</span>.{% endif %}
       </div>
     </div>
@@ -40,9 +40,9 @@
       </form>
 
       <div class="lr-card__body">
-        {% if todos %}
+        {% if tasks %}
           <ul class="lr-todo-list" id="lr-todo-list">
-            {% for t in todos %}
+            {% for t in tasks %}
               {% set overdue = t.status == 'open' and t.due_at and is_overdue(t.due_at, now_iso) %}
               {% set due_today = t.status == 'open' and t.due_at and is_due_today(t.due_at, now_iso) and not overdue %}
               <li class="lr-todo {% if t.status == 'done' %}is-done{% endif %} {% if t.status == 'cancelled' %}is-cancelled{% endif %} {% if overdue %}is-overdue{% endif %}"
@@ -76,17 +76,14 @@
     <section class="lr-card" style="flex: 1 1 360px; min-width: 320px;">
       <header class="lr-card__header">
         <h2 class="lr-card__title">Deadlines</h2>
-        <span class="lr-badge">Coming soon</span>
+        <a class="lr-card__action" href="{{ url_for('ui_deadlines') }}">Open page &rarr;</a>
       </header>
       <div class="lr-card__body">
-        <div class="lr-empty-card">
-          <p>No deadlines yet.</p>
-          <p style="margin-top: var(--lr-s-2); font-size: var(--lr-fs-xs); color: var(--lr-text-faint);">
-            Milestone 6 will add manual and lecture-extracted deadlines here.
-            Clicking a deadline opens the source recording at the moment
-            the LLM heard it.
-          </p>
-        </div>
+        <p style="color: var(--lr-text-faint); font-size: var(--lr-fs-sm);">
+          Course-level deadlines live on the <a href="{{ url_for('ui_deadlines') }}">Deadlines page</a>.
+          Click a deadline to jump to the moment in the recording where
+          it was heard.
+        </p>
       </div>
     </section>
   </div>

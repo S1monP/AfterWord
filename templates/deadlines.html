@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+
+{% block title %}Deadlines &middot; Lecture Recorder{% endblock %}
+
+{% block content %}
+<div class="lr-page">
+  <header class="lr-page__header">
+    <div>
+      <h1 class="lr-page__title">Deadlines</h1>
+      <div class="lr-page__sub">
+        Course deadlines. {{ open_count }} open / {{ total }} total.
+        {% if status_filter %}Filtered to <span class="lr-mono">{{ status_filter }}</span>.{% endif %}
+        Deadlines must have a due date; auto-extracted ones get a deep-link
+        to the recording.
+      </div>
+    </div>
+  </header>
+
+  <div class="lr-row" style="gap: var(--lr-s-5); align-items: flex-start; flex-wrap: wrap;">
+    <section class="lr-card" style="flex: 1 1 360px; min-width: 320px;">
+      <header class="lr-card__header">
+        <h2 class="lr-card__title">Deadlines</h2>
+        <div class="lr-card__actions">
+          <a class="lr-card__action {% if status_filter == '' %}is-active{% endif %}" href="{{ url_for('ui_deadlines') }}">All</a>
+          <a class="lr-card__action {% if status_filter == 'open' %}is-active{% endif %}" href="{{ url_for('ui_deadlines', status='open') }}">Open</a>
+          <a class="lr-card__action {% if status_filter == 'done' %}is-active{% endif %}" href="{{ url_for('ui_deadlines', status='done') }}">Done</a>
+        </div>
+      </header>
+
+      <form class="lr-card__quickadd" method="post" action="{{ url_for('ui_deadlines_quick') }}">
+        <input class="lr-input" type="text" name="title" required maxlength="200"
+               placeholder="Add a deadline and press Enter..." autocomplete="off">
+        <input class="lr-input lr-input--narrow" type="date" name="due_at"
+               required title="Due date" aria-label="Due date">
+        <select class="lr-input lr-input--narrow" name="priority" aria-label="Priority" title="Priority">
+          <option value="low">Low</option>
+          <option value="medium" selected>Medium</option>
+          <option value="high">High</option>
+          <option value="urgent">Urgent</option>
+        </select>
+        <button class="lr-btn lr-btn--primary" type="submit">+ Add</button>
+      </form>
+
+      <div class="lr-card__body">
+        {% if deadlines %}
+          <ul class="lr-todo-list" id="lr-todo-list">
+            {% for d in deadlines %}
+              {% set overdue = d.status == 'open' and is_overdue(d.due_at, now_iso) %}
+              {% set due_today = d.status == 'open' and not overdue and is_due_today(d.due_at, now_iso) %}
+              <li class="lr-todo lr-deadline {% if d.status == 'done' %}is-done{% endif %} {% if d.status == 'cancelled' %}is-cancelled{% endif %} {% if overdue %}is-overdue{% endif %}"
+                  data-todo-id="{{ d.id }}" data-status="{{ d.status }}" data-priority="{{ d.priority }}">
+                <input class="lr-todo__check" type="checkbox"
+                       {% if d.status == 'done' %}checked{% endif %}
+                       aria-label="Mark as done">
+                <span class="lr-todo__title" tabindex="0">{{ d.title }}</span>
+                <span class="lr-todo__due lr-badge {% if overdue %}lr-badge--danger{% elif due_today %}lr-badge--warning{% else %}lr-badge--info{% endif %}"
+                      title="{{ d.due_at }}">
+                  {% if overdue %}overdue&middot;{% elif due_today %}today&middot;{% endif %}{{ d.due_at[:10] }}
+                </span>
+                <span class="lr-todo__priority lr-badge lr-badge--{{ d.priority }}">{{ d.priority }}</span>
+                <button class="lr-todo__del" type="button" aria-label="Delete">&times;</button>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <div class="lr-empty-card">
+            <div class="lr-empty-card__title">
+              {% if status_filter %}No {{ status_filter }} deadlines{% else %}No deadlines yet{% endif %}
+            </div>
+            <p>Add a deadline above. The due date is required.</p>
+            <p style="margin-top: var(--lr-s-2); font-size: var(--lr-fs-xs); color: var(--lr-text-faint);">
+              Future Milestone 8 will auto-extract deadlines from your
+              lecture recordings here, with deep-links to the moment
+              each one was mentioned.
+            </p>
+          </div>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="lr-card" style="flex: 1 1 360px; min-width: 320px;">
+      <header class="lr-card__header">
+        <h2 class="lr-card__title">Personal tasks</h2>
+        <a class="lr-card__action" href="{{ url_for('ui_todos') }}">Open page &rarr;</a>
+      </header>
+      <div class="lr-card__body">
+        <p style="color: var(--lr-text-faint); font-size: var(--lr-fs-sm);">
+          Personal tasks (with no required due date) live on the
+          <a href="{{ url_for('ui_todos') }}">Tasks page</a>.
+        </p>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/todos.js') }}" defer></script>
+{% endblock %}

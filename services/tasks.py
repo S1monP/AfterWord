@@ -1,10 +1,13 @@
-"""Todos service.
+"""Tasks service: the merged todos + deadlines.
 
-Tier 1: no due dates (per spec). Priorities are an enum-string.
-Status is ``open`` | ``done`` | ``cancelled``. The user can transition
-``open -> done`` and ``open -> cancelled`` only. Re-opening a done
-todo is allowed (Tier 1 lets you un-check a checkbox), but cancelling
-a done todo is not. The service is the gatekeeper for these rules.
+A row is either a personal todo (``kind = 'task'``) or a course
+deadline (``kind = 'deadline'``). The shape is the same; the
+differences are:
+
+* ``kind='task'``: ``due_at`` is optional. No course linkage. Pinned
+  flag is meaningful.
+* ``kind='deadline'``: ``due_at`` is required. Optional
+  ``course_id`` and ``source_offset_ms`` for the recording deep-link.
 
 The service is constructed with a :class:`storage.Storage` instance
 so it can be tested without a Flask app.
@@ -13,30 +16,28 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import datetime
 from typing import Any, Optional
 
 import storage
-from storage import Todo
+from storage import Task
 
 
 # --- Limits -----------------------------------------------------------------
 
 MAX_TITLE_LEN = 200
-MAX_BODY_MD_LEN = 50_000  # 50 KB; smaller than notes because todos are short
+MAX_BODY_MD_LEN = 200_000   # matches notes
+MAX_DESCRIPTION_LEN = 4_000
 
 PRIORITIES: frozenset[str] = frozenset({"low", "medium", "high", "urgent"})
 STATUSES: frozenset[str] = frozenset({"open", "done", "cancelled"})
+KINDS: frozenset[str] = frozenset({"task", "deadline"})
 
 VALID_SOURCES = ("manual", "extracted", "imported")
 
 
-# Allowed transitions for ``set_status``.
-# - open -> done | cancelled (normal user actions)
-# - done -> open (uncheck, allowed)
-# - done -> cancelled (rare; mark a finished task as cancelled instead)
-# - cancelled -> open (re-open; allowed)
-# - cancelled -> done (allowed)
+# Allowed status transitions. Same for both kinds. A done task can
+# be re-opened (un-checked), and a cancelled task can be re-opened
+# or marked done.
 ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
     "open": frozenset({"done", "cancelled"}),
     "done": frozenset({"open", "cancelled"}),
@@ -73,6 +74,18 @@ def _validate_body(body_md: object) -> Optional[str]:
     return body_md
 
 
+def _validate_description(description: object) -> Optional[str]:
+    if description is None or description == "":
+        return None
+    if not isinstance(description, str):
+        raise ValueError("description must be a string")
+    if len(description) > MAX_DESCRIPTION_LEN:
+        raise ValueError(
+            f"description must be at most {MAX_DESCRIPTION_LEN} chars"
+        )
+    return description
+
+
 def _validate_priority(priority: object) -> str:
     if priority is None:
         return "medium"
@@ -97,6 +110,18 @@ def _validate_status(status: object) -> str:
     return status
 
 
+def _validate_kind(kind: object) -> str:
+    if kind is None:
+        return "task"
+    if not isinstance(kind, str):
+        raise ValueError("kind must be a string")
+    if kind not in KINDS:
+        raise ValueError(
+            f"kind must be one of {sorted(KINDS)}; got {kind!r}"
+        )
+    return kind
+
+
 def _validate_source(source: object) -> str:
     if source is None:
         return "manual"
@@ -117,6 +142,26 @@ def _validate_source_ref(source_ref: object) -> Optional[str]:
     if len(source_ref) > 256:
         raise ValueError("source_ref must be at most 256 chars")
     return source_ref
+
+
+def _validate_course_id(course_id: object) -> Optional[str]:
+    if course_id is None or course_id == "":
+        return None
+    if not isinstance(course_id, str):
+        raise ValueError("course_id must be a string")
+    if len(course_id) > 64:
+        raise ValueError("course_id must be at most 64 chars")
+    return course_id
+
+
+def _validate_source_offset_ms(offset: object) -> Optional[int]:
+    if offset is None:
+        return None
+    if isinstance(offset, bool) or not isinstance(offset, int):
+        raise ValueError("source_offset_ms must be an integer or null")
+    if offset < 0:
+        raise ValueError("source_offset_ms must be >= 0")
+    return int(offset)
 
 
 def _validate_due_at(due_at: object) -> Optional[str]:
@@ -140,8 +185,6 @@ def _validate_due_at(due_at: object) -> Optional[str]:
         raise ValueError("due_at is too long")
     from datetime import datetime
     try:
-        # Tolerate a trailing Z. ``fromisoformat`` in 3.11+ accepts
-        # this directly; in older versions we strip and re-add.
         cleaned = due_at
         if cleaned.endswith("Z"):
             cleaned = cleaned[:-1]
@@ -150,70 +193,30 @@ def _validate_due_at(due_at: object) -> Optional[str]:
         raise ValueError(
             f"due_at is not a valid ISO-8601 timestamp: {due_at!r}"
         ) from exc
-    # Canonical form: UTC, no microseconds, with trailing Z.
     return parsed.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def is_overdue(todo_due_at: Optional[str], now_iso: str) -> bool:
-    """True iff the todo has a due_at strictly before the supplied
+def is_overdue(task_due_at: Optional[str], now_iso: str) -> bool:
+    """True iff the task has a due_at strictly before the supplied
     'now' timestamp (string comparison is fine because both are
     ISO-8601 in UTC, same lexicographic and chronological order)."""
-    if not todo_due_at:
+    if not task_due_at:
         return False
-    return todo_due_at < now_iso
+    return task_due_at < now_iso
 
 
-def is_due_today(todo_due_at: Optional[str], now_iso: str) -> bool:
-    """True iff the todo's due_at is on the same UTC date as now."""
-    if not todo_due_at:
+def is_due_today(task_due_at: Optional[str], now_iso: str) -> bool:
+    """True iff the task's due_at is on the same UTC date as now."""
+    if not task_due_at:
         return False
-    return todo_due_at[:10] == now_iso[:10]
-
-
-# --- Age buckets ------------------------------------------------------------
-
-
-def _parse_iso(ts: str) -> Optional[datetime]:
-    """Parse the storage's ISO-8601 timestamps. Returns None on failure."""
-    try:
-        # The storage uses ``%Y-%m-%dT%H:%M:%SZ`` (UTC).
-        return datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ")
-    except (TypeError, ValueError):
-        return None
-
-
-def age_bucket(created_at: str, now_iso: str) -> str:
-    """Classify a todo's age for the UI.
-
-    Returns one of:
-
-    * ``'new'``  -- under 1 day old
-    * ``'aging'`` -- 1 to 7 days old
-    * ``'stale'`` -- over 7 days old
-    * ``'unknown'`` -- if the timestamps can't be parsed
-
-    Pure function so the templates can render the badge without the
-    service doing a query.
-    """
-    created = _parse_iso(created_at)
-    now = _parse_iso(now_iso)
-    if created is None or now is None:
-        return "unknown"
-    delta = now - created
-    if delta.days < 0:
-        return "new"  # clock skew shouldn't surprise the UI
-    if delta.days < 1:
-        return "new"
-    if delta.days < 7:
-        return "aging"
-    return "stale"
+    return task_due_at[:10] == now_iso[:10]
 
 
 # --- Service ----------------------------------------------------------------
 
 
-class TodosService:
-    """Coordinates validation, transition rules, and storage for todos."""
+class TasksService:
+    """Coordinates validation, transition rules, and storage for tasks."""
 
     def __init__(self, store: storage.Storage) -> None:
         self._store = store
@@ -223,82 +226,138 @@ class TodosService:
         *,
         title: str,
         body_md: Optional[str] = None,
+        description: Optional[str] = None,
         priority: str = "medium",
+        status: str = "open",
+        kind: str = "task",
+        due_at: Optional[str] = None,
         source: str = "manual",
         source_ref: Optional[str] = None,
-        due_at: Optional[str] = None,
-    ) -> Todo:
+        source_offset_ms: Optional[int] = None,
+        course_id: Optional[str] = None,
+        pinned: bool = False,
+    ) -> Task:
         title = _validate_title(title)
         body_md = _validate_body(body_md)
+        description = _validate_description(description)
         priority = _validate_priority(priority)
+        status = _validate_status(status)
+        kind = _validate_kind(kind)
         source = _validate_source(source)
         source_ref = _validate_source_ref(source_ref)
+        source_offset_ms = _validate_source_offset_ms(source_offset_ms)
+        course_id = _validate_course_id(course_id)
         due_at = _validate_due_at(due_at)
-        todo_id = uuid.uuid4().hex
-        return self._store.create_todo(
-            todo_id,
+
+        # Deadlines require a due date. Personal tasks can be date-less.
+        if kind == "deadline" and due_at is None:
+            raise ValueError(
+                "deadlines require a due_at; pass an ISO-8601 timestamp"
+            )
+
+        task_id = uuid.uuid4().hex
+        return self._store.create_task(
+            task_id,
             title=title,
             body_md=body_md,
+            description=description,
             priority=priority,
-            status="open",
+            status=status,
+            kind=kind,
+            due_at=due_at,
             source=source,
             source_ref=source_ref,
-            due_at=due_at,
+            source_offset_ms=source_offset_ms,
+            course_id=course_id,
+            pinned=pinned,
         )
 
     def update(
         self,
-        todo_id: str,
+        task_id: str,
         *,
         title: Optional[str] = None,
         body_md: Any = storage._UNSET,
+        description: Any = storage._UNSET,
         priority: Optional[str] = None,
+        kind: Optional[str] = None,
         due_at: Any = storage._UNSET,
-    ) -> Todo:
-        if not isinstance(todo_id, str) or not todo_id:
-            raise ValueError("todo_id is required")
-        if self._store.get_todo(todo_id) is None:
-            raise KeyError(todo_id)
+        source_offset_ms: Any = storage._UNSET,
+        course_id: Any = storage._UNSET,
+        pinned: Any = storage._UNSET,
+    ) -> Task:
+        if not isinstance(task_id, str) or not task_id:
+            raise ValueError("task_id is required")
+        existing = self._store.get_task(task_id)
+        if existing is None:
+            raise KeyError(task_id)
         new_title: Optional[str] = None
         new_body: Any = storage._UNSET
+        new_description: Any = storage._UNSET
         new_priority: Optional[str] = None
+        new_kind: Optional[str] = None
         new_due_at: Any = storage._UNSET
+        new_source_offset_ms: Any = storage._UNSET
+        new_course_id: Any = storage._UNSET
+        new_pinned: Any = storage._UNSET
         if title is not None:
             new_title = _validate_title(title)
         if body_md is not storage._UNSET:
-            # ``None`` is a valid value here (clears the column);
-            # otherwise validate as a normal string.
             new_body = _validate_body(body_md)
+        if description is not storage._UNSET:
+            new_description = _validate_description(description)
         if priority is not None:
             new_priority = _validate_priority(priority)
+        if kind is not None:
+            new_kind = _validate_kind(kind)
         if due_at is not storage._UNSET:
-            # ``None`` clears the date; otherwise validate and
-            # canonicalise to UTC ISO-8601.
             new_due_at = _validate_due_at(due_at)
-        return self._store.update_todo(
-            todo_id,
+        if source_offset_ms is not storage._UNSET:
+            new_source_offset_ms = _validate_source_offset_ms(source_offset_ms)
+        if course_id is not storage._UNSET:
+            new_course_id = _validate_course_id(course_id)
+        if pinned is not storage._UNSET:
+            new_pinned = bool(pinned)
+        # If the resulting kind is 'deadline', due_at must be set.
+        # (Only validate when the user actually changed kind or due_at;
+        # otherwise trust the existing row.)
+        resulting_kind = new_kind if new_kind is not None else existing.kind
+        resulting_due_at = (
+            new_due_at if new_due_at is not storage._UNSET
+            else existing.due_at
+        )
+        if resulting_kind == "deadline" and resulting_due_at is None:
+            raise ValueError(
+                "deadlines require a due_at; pass an ISO-8601 timestamp"
+            )
+        return self._store.update_task(
+            task_id,
             title=new_title,
             body_md=new_body,
+            description=new_description,
             priority=new_priority,
+            kind=new_kind,
             due_at=new_due_at,
+            source_offset_ms=new_source_offset_ms,
+            course_id=new_course_id,
+            pinned=new_pinned,
         )
 
-    def set_status(self, todo_id: str, status: str) -> Todo:
-        """Transition a todo to a new status.
+    def set_status(self, task_id: str, status: str) -> Task:
+        """Transition a task to a new status.
 
-        Enforces :data:`ALLOWED_TRANSITIONS`. Sets ``completed_at`` to
-        the current time when transitioning to ``done`` from any other
-        state, and clears it when transitioning from ``done`` to
-        anything else.
+        Enforces :data:`ALLOWED_TRANSITIONS`. Sets ``completed_at``
+        to the current time when transitioning to ``done`` from any
+        other state, and clears it when transitioning from ``done``
+        to anything else.
         """
-        if not isinstance(todo_id, str) or not todo_id:
-            raise ValueError("todo_id is required")
+        if not isinstance(task_id, str) or not task_id:
+            raise ValueError("task_id is required")
         status = _validate_status(status)
-        existing = self._store.get_todo(todo_id)
+        existing = self._store.get_task(task_id)
         if existing is None:
-            raise KeyError(todo_id)
+            raise KeyError(task_id)
         if status == existing.status:
-            # No-op: same status, just return the row.
             return existing
         if status not in ALLOWED_TRANSITIONS[existing.status]:
             raise ValueError(
@@ -313,28 +372,31 @@ class TodosService:
             completed_at = None
         else:
             completed_at = existing.completed_at
-        return self._store.update_todo(
-            todo_id, status=status, completed_at=completed_at,
+        return self._store.update_task(
+            task_id, status=status, completed_at=completed_at,
         )
 
-    def delete(self, todo_id: str) -> bool:
-        if not isinstance(todo_id, str) or not todo_id:
-            raise ValueError("todo_id is required")
-        return self._store.delete_todo(todo_id)
+    def delete(self, task_id: str) -> bool:
+        if not isinstance(task_id, str) or not task_id:
+            raise ValueError("task_id is required")
+        return self._store.delete_task(task_id)
 
-    def get(self, todo_id: str) -> Optional[Todo]:
-        if not isinstance(todo_id, str) or not todo_id:
+    def get(self, task_id: str) -> Optional[Task]:
+        if not isinstance(task_id, str) or not task_id:
             return None
-        return self._store.get_todo(todo_id)
+        return self._store.get_task(task_id)
 
     def list(
         self,
         *,
+        kind: Optional[str] = None,
         status: Optional[str] = None,
         priority: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> tuple[list[Todo], int]:
+    ) -> tuple[list[Task], int]:
+        if kind is not None:
+            kind = _validate_kind(kind)
         if status is not None:
             status = _validate_status(status)
         if priority is not None:
@@ -343,6 +405,7 @@ class TodosService:
             raise ValueError("limit must be a positive int")
         if not isinstance(offset, int) or offset < 0:
             raise ValueError("offset must be a non-negative int")
-        return self._store.list_todos(
-            status=status, priority=priority, limit=limit, offset=offset,
+        return self._store.list_tasks(
+            kind=kind, status=status, priority=priority,
+            limit=limit, offset=offset,
         )

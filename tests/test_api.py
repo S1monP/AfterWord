@@ -201,10 +201,10 @@ class WebUITests(LRTestCase):
                          b"Todos", b"Calendar"):
             self.assertIn(nav_link, body)
         # Old nav items should NOT be there.
-        self.assertNotIn(b"\">Home<", body)
-        self.assertNotIn(b"\">Recs<", body)
+        self.assertNotIn(b"\">Home</a>", body)  # no nav link to Home (page is the Home)
+        self.assertNotIn(b"\">Recs</a>", body)  # no nav link to Recs (removed earlier)
         # Deadlines card now points to /todos (unified page).
-        self.assertIn(b"View on Todos", body)
+        self.assertIn(b"Open &rarr;", body)  # the deadlines card Open arrow link
         # Lectures card has a "View all" link to /lectures.
         self.assertIn(b'href="/lectures"', body)
         # Page wrapper has the with-gap modifier for the top breathing room.

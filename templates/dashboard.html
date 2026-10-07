@@ -1,138 +1,178 @@
 {% extends "base.html" %}
-{% import "_macros.html" as ui %}
 
 {% block title %}Home &middot; Lecture Recorder{% endblock %}
 
-{% block content %}
-{# Top-level bento grid.
-   Left column:    Calendar (full height, list view).
-   Middle column:  Search bar on top, three inner cards (Notes /
-                   Lectures / Meetings) below.
-   Right column:   Deadlines and Todos stacked, equal height.
-   All heights are CSS grid fractions; the dashboard fills the
-   viewport below the top bar. #}
-<div class="lr-page lr-page--with-gap lr-page--full">
-<div class="lr-dashboard">
+{% block extrascripts %}
+<script src="{{ url_for('static', filename='js/todos.js') }}" defer></script>
+{% endblock %}
 
-  {# --- Calendar (left, full height) --- #}
-  <section class="lr-card lr-dashboard__calendar" aria-label="Calendar">
-    <header class="lr-card__header">
-      <h2 class="lr-card__title">Calendar</h2>
-      <a class="lr-card__action" href="/calendar">Full calendar →</a>
-    </header>
-    <div class="lr-card__body">
-      <div class="lr-cal-list">
+{% block content %}
+<div class="lr-page lr-page--with-gap lr-page--full">
+  <header class="lr-page__header">
+    <div>
+      <h1 class="lr-page__title">Home</h1>
+      <div class="lr-page__sub">Your recordings, tasks, and deadlines at a glance.</div>
+    </div>
+  </header>
+
+  <div class="lr-dashboard">
+    {# --- Left column: Calendar (full height) --- #}
+    <section class="lr-card lr-dashboard__calendar" aria-label="Calendar">
+      <header class="lr-card__header">
+        <h2 class="lr-card__title">Calendar</h2>
+        <a class="lr-card__action" href="{{ url_for('ui_calendar') }}">Open &rarr;</a>
+      </header>
+      <div class="lr-card__body">
         <div class="lr-cal-section">
           <div class="lr-cal-section__label">Today</div>
           <div class="lr-empty-card">
             <div class="lr-empty-card__title">Nothing scheduled</div>
-            <p>Add lectures and meetings so recordings can match them automatically.</p>
+            <p>Events land here as you add them.</p>
           </div>
         </div>
         <div class="lr-cal-section">
           <div class="lr-cal-section__label">This week</div>
           <div class="lr-empty-card">
-            <p>No events in the next 7 days.</p>
+            <div class="lr-empty-card__title">No events</div>
+            <p>Deadlines show up here as the due date approaches.</p>
           </div>
         </div>
-      </div>
-    </div>
-  </section>
-
-  {# --- Middle column: search + three inner cards --- #}
-  <div class="lr-dashboard__middle">
-    {# Search bar #}
-    <section class="lr-card lr-dashboard__search" aria-label="Search">
-      <div class="lr-search">
-        <span class="lr-search__icon" aria-hidden="true">🔍</span>
-        <input class="lr-search__input" type="search"
-               placeholder="Search recordings, transcripts, notes…"
-               aria-label="Search">
-        <span class="lr-search__shortcut" aria-hidden="true">/</span>
       </div>
     </section>
 
-    {# Inner row: Notes, Lectures, Meetings #}
-    <div class="lr-dashboard__inner">
-      {# Notes #}
-      <section class="lr-card" aria-label="Notes">
+    {# --- Middle column: Search + Notes/Lectures/Meetings --- #}
+    <div class="lr-dashboard__middle">
+      <section class="lr-card lr-dashboard__search" aria-label="Search">
+        <form class="lr-search" method="get" action="{{ url_for('ui_dashboard') }}" role="search">
+          <input class="lr-input" type="search" name="q" value="{{ request.args.get('') or '' }}"
+                 placeholder="Search recordings, transcripts, notes&hellip;" aria-label="Search recordings, transcripts, notes">
+          <span class="lr-search__shortcut" aria-hidden="true">/</span>
+          <button class="lr-btn" type="submit">Search</button>
+        </form>
+      </section>
+
+      {# Inner row: Notes, Lectures, Meetings #}
+      <div class="lr-dashboard__inner">
+        {# Notes #}
+        <section class="lr-card" aria-label="Notes">
+          <header class="lr-card__header">
+            <h2 class="lr-card__title">Notes</h2>
+            <a class="lr-card__action" href="{{ url_for('ui_notes_new') }}">+ New</a>
+          </header>
+          <div class="lr-card__body">
+            {% if recent_notes %}
+              <ul class="lr-list lr-list--compact">{% for n in recent_notes %}<li class="lr-list__row"><a class="lr-list__title" href="{{ url_for('ui_note_detail', note_id=n.id) }}">{{ n.title }}</a><span class="lr-list__meta lr-mono" title="{{ n.updated_at }}">{{ n.updated_at }}</span></li>{% endfor %}</ul>
+            {% else %}
+              <div class="lr-empty-card">
+                <div class="lr-empty-card__title">No notes yet</div>
+                <p>Capture ideas here, or have them extracted from your recordings.</p>
+              </div>
+            {% endif %}
+          </div>
+          <div class="lr-card__footer">
+            <a class="lr-card__action" href="{{ url_for('ui_notes') }}">View all &rarr;</a>
+          </div>
+        </section>
+
+        {# Lectures #}
+        <section class="lr-card" aria-label="Lectures">
+          <header class="lr-card__header">
+            <h2 class="lr-card__title">Lectures</h2>
+            <a class="lr-card__action" href="{{ url_for('ui_lectures') }}">+ New</a>
+          </header>
+          <div class="lr-card__body">
+            <div class="lr-empty-card">
+              <div class="lr-empty-card__title">No lectures yet</div>
+              <p>Recordings tagged as <code>lecture</code> show up here.</p>
+            </div>
+          </div>
+          <div class="lr-card__footer">
+            <a class="lr-card__action" href="{{ url_for('ui_lectures') }}">View all &rarr;</a>
+          </div>
+        </section>
+
+        {# Meetings #}
+        <section class="lr-card" aria-label="Meetings">
+          <header class="lr-card__header">
+            <h2 class="lr-card__title">Meetings</h2>
+            <a class="lr-card__action" href="{{ url_for('ui_meetings') }}">+ New</a>
+          </header>
+          <div class="lr-card__body">
+            <div class="lr-empty-card">
+              <div class="lr-empty-card__title">No meetings recorded</div>
+              <p>Voice memos show up here. Tag them after recording.</p>
+            </div>
+          </div>
+          <div class="lr-card__footer">
+            <a class="lr-card__action" href="{{ url_for('ui_meetings') }}">View all &rarr;</a>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    {# --- Right column: Deadlines + Tasks (equal height, stacked) --- #}
+    <div class="lr-dashboard__deadtodos">
+      <section class="lr-card" aria-label="Deadlines">
         <header class="lr-card__header">
-          <h2 class="lr-card__title">Notes</h2>
-          <a class="lr-card__action" href="{{ url_for('ui_notes_new') }}">+ New</a>
+          <h2 class="lr-card__title">Deadlines</h2>
+          <a class="lr-card__action" href="{{ url_for('ui_deadlines') }}">Open &rarr;</a>
         </header>
-        <div class="lr-card__body">{% if recent_notes %}<ul class="lr-list lr-list--compact">{% for n in recent_notes %}<li class="lr-list__row"><a class="lr-list__title" href="{{ url_for('ui_note_detail', note_id=n.id) }}">{{ n.title }}</a><span class="lr-list__meta lr-mono">{{ n.updated_at }}</span></li>{% endfor %}</ul>{% else %}<div class="lr-empty-card"><div class="lr-empty-card__title">No notes yet</div><p>Capture ideas here, or have them extracted from your recordings.</p></div>{% endif %}</div>
-        <div class="lr-card__footer">
-          <a class="lr-card__action" href="/notes">View all →</a>
+        <div class="lr-card__body">
+          {% if open_deadlines %}
+            <ul class="lr-todo-list">
+              {% for d in open_deadlines %}
+                <li class="lr-todo lr-deadline {% if is_overdue(d.due_at, now_iso) %}is-overdue{% endif %}" data-todo-id="{{ d.id }}">
+                  <input class="lr-todo__check" type="checkbox" aria-label="Mark as done">
+                  <span class="lr-todo__title">{{ d.title }}</span>
+                  <span class="lr-todo__due lr-badge {% if is_overdue(d.due_at, now_iso) %}lr-badge--danger{% elif is_due_today(d.due_at, now_iso) %}lr-badge--warning{% else %}lr-badge--info{% endif %}" title="{{ d.due_at }}">{{ d.due_at[:10] }}</span>
+                  <span class="lr-todo__priority lr-badge lr-badge--{{ d.priority }}">{{ d.priority }}</span>
+                  <button class="lr-todo__del" type="button" aria-label="Delete">&times;</button>
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <div class="lr-empty-card">
+              <div class="lr-empty-card__title">Nothing due</div>
+              <p>Add a deadline on the <a href="{{ url_for('ui_deadlines') }}">Deadlines page</a>.</p>
+              <p style="margin-top: var(--lr-s-3);"><a class="lr-btn" href="{{ url_for('ui_deadlines') }}">+ New deadline</a></p>
+            </div>
+          {% endif %}
         </div>
       </section>
 
-      {# Lectures #}
-      <section class="lr-card" aria-label="Lectures">
+      <section class="lr-card" aria-label="Tasks">
         <header class="lr-card__header">
-          <h2 class="lr-card__title">Lectures</h2>
+          <h2 class="lr-card__title">Tasks</h2>
+          <span class="lr-badge">{{ open_task_count }} open</span>
         </header>
         <div class="lr-card__body">
-          <div class="lr-empty-card">
-            <div class="lr-empty-card__title">No lectures yet</div>
-            <p>Recordings tagged as <code>lecture</code> show up here.</p>
-          </div>
+          {% if open_tasks %}
+            <ul class="lr-todo-list">
+              {% for t in open_tasks %}
+                <li class="lr-todo {% if t.due_at and is_overdue(t.due_at, now_iso) %}is-overdue{% endif %}" data-todo-id="{{ t.id }}">
+                  <input class="lr-todo__check" type="checkbox" aria-label="Mark as done">
+                  <span class="lr-todo__title">{{ t.title }}</span>
+                  {% if t.due_at %}
+                    <span class="lr-todo__due lr-badge {% if is_overdue(t.due_at, now_iso) %}lr-badge--danger{% elif is_due_today(t.due_at, now_iso) %}lr-badge--warning{% else %}lr-badge--info{% endif %}" title="{{ t.due_at }}">{{ t.due_at[:10] }}</span>
+                  {% endif %}
+                  <span class="lr-todo__priority lr-badge lr-badge--{{ t.priority }}">{{ t.priority }}</span>
+                  <button class="lr-todo__del" type="button" aria-label="Delete">&times;</button>
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <div class="lr-empty-card">
+              <div class="lr-empty-card__title">All clear</div>
+              <p>Nothing on your plate. Talk to your recordings or add a task.</p>
+              <p style="margin-top: var(--lr-s-3);"><a class="lr-btn" href="{{ url_for('ui_todos') }}">+ New todo</a></p>
+            </div>
+          {% endif %}
         </div>
         <div class="lr-card__footer">
-          <a class="lr-card__action" href="{{ url_for('ui_lectures') }}">View all →</a>
-        </div>
-      </section>
-
-      {# Meetings #}
-      <section class="lr-card" aria-label="Meetings">
-        <header class="lr-card__header">
-          <h2 class="lr-card__title">Meetings</h2>
-        </header>
-        <div class="lr-card__body">
-          <div class="lr-empty-card">
-            <div class="lr-empty-card__title">No meetings recorded</div>
-            <p>Meetings show up here automatically once recordings are tagged.</p>
-          </div>
-        </div>
-        <div class="lr-card__footer">
-          <a class="lr-card__action" href="/recordings">Browse recordings →</a>
+          <a class="lr-card__action" href="{{ url_for('ui_todos') }}">View all &rarr;</a>
         </div>
       </section>
     </div>
   </div>
-
-  {# --- Right column: Deadlines + Todos (equal height, stacked) --- #}
-  <div class="lr-dashboard__deadtodos">
-    <section class="lr-card" aria-label="Deadlines">
-      <header class="lr-card__header">
-        <h2 class="lr-card__title">Deadlines</h2>
-        <span class="lr-badge">0 this week</span>
-      </header>
-      <div class="lr-card__body">
-        <div class="lr-empty-card">
-          <div class="lr-empty-card__title">Nothing due</div>
-          <p>Deadlines live on the Todos page alongside your tasks.</p>
-          <p style="margin-top: var(--lr-s-3);">
-            <a class="lr-btn" href="{{ url_for('ui_todos') }}">+ New deadline</a>
-          </p>
-        </div>
-      </div>
-      <div class="lr-card__footer">
-        <a class="lr-card__action" href="{{ url_for('ui_todos') }}">View on Todos →</a>
-      </div>
-    </section>
-
-    <section class="lr-card" aria-label="Todos">
-      <header class="lr-card__header">
-        <h2 class="lr-card__title">Todos</h2>
-        <span class="lr-badge">{{ open_todo_count }} open</span>
-      </header>
-      <div class="lr-card__body">{% if open_todos %}<ul class="lr-todo-list">{% for t in open_todos %}<li class="lr-todo {% if t.due_at and is_overdue(t.due_at, now_iso) %}is-overdue{% endif %}" data-todo-id="{{ t.id }}"><input class="lr-todo__check" type="checkbox" aria-label="Mark as done"><span class="lr-todo__title">{{ t.title }}</span>{% if t.due_at %}<span class="lr-todo__due lr-badge {% if is_overdue(t.due_at, now_iso) %}lr-badge--danger{% elif is_due_today(t.due_at, now_iso) %}lr-badge--warning{% else %}lr-badge--info{% endif %}" title="{{ t.due_at }}">{{ t.due_at[:10] }}</span>{% endif %}<span class="lr-todo__priority lr-badge lr-badge--{{ t.priority }}">{{ t.priority }}</span><button class="lr-todo__del" type="button" aria-label="Delete">&times;</button></li>{% endfor %}</ul>{% else %}<div class="lr-empty-card"><div class="lr-empty-card__title">All clear</div><p>Nothing on your plate. Talk to your recordings or add a task.</p><p style="margin-top: var(--lr-s-3);"><a class="lr-btn" href="{{ url_for('ui_todos') }}">+ New todo</a></p></div>{% endif %}</div>
-      <div class="lr-card__footer">
-        <a class="lr-card__action" href="{{ url_for('ui_todos') }}">View all →</a>
-      </div>
-    </section>
-  </div>
-
 </div>
-</div>
-{% endblock %}{% block extrascripts %}<script src="{{ url_for('static', filename='js/todos.js') }}" defer></script>{% endblock %}
+{% endblock %}
