@@ -52,7 +52,14 @@
                 <input class="lr-todo__check" type="checkbox"
                        {% if d.status == 'done' %}checked{% endif %}
                        aria-label="Mark as done">
-                <span class="lr-todo__title" tabindex="0">{{ d.title }}</span>
+                {% if d.source_ref %}
+                  {% set offset_ms = d.source_offset_ms or 0 %}
+                  <a class="lr-todo__title lr-todo__title--linked"
+                     href="{{ url_for('ui_session', session_id=d.source_ref) }}?t={{ offset_ms }}"
+                     title="Jump to this moment in the recording">{{ d.title }}</a>
+                {% else %}
+                  <span class="lr-todo__title" tabindex="0">{{ d.title }}</span>
+                {% endif %}
                 <span class="lr-todo__due lr-badge {% if overdue %}lr-badge--danger{% elif due_today %}lr-badge--warning{% else %}lr-badge--info{% endif %}"
                       title="{{ d.due_at }}">
                   {% if overdue %}overdue&middot;{% elif due_today %}today&middot;{% endif %}{{ d.due_at[:10] }}
@@ -69,9 +76,9 @@
             </div>
             <p>Add a deadline above. The due date is required.</p>
             <p style="margin-top: var(--lr-s-2); font-size: var(--lr-fs-xs); color: var(--lr-text-faint);">
-              Future Milestone 8 will auto-extract deadlines from your
-              lecture recordings here, with deep-links to the moment
-              each one was mentioned.
+              Once AI extraction is wired up (later milestone), deadlines
+              pulled from recordings will land here with a deep-link to
+              the moment each one was mentioned.
             </p>
           </div>
         {% endif %}

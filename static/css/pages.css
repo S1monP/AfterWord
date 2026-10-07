@@ -167,6 +167,17 @@
   color: var(--lr-text-faint);
   font-style: italic;
 }
+/* A linked title on a deadline row points at a deep-link into a
+   recording. Subtle accent underline so it doesn't look like a
+   normal link. */
+.lr-todo__title--linked {
+  text-decoration: underline dotted var(--lr-accent);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.lr-todo__title--linked:hover {
+  color: var(--lr-accent);
+}
 .lr-todo__priority {
   font-family: var(--lr-font-mono);
   font-size: var(--lr-fs-xs);

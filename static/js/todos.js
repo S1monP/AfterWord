@@ -30,7 +30,7 @@
       var id = li.getAttribute("data-todo-id");
       var newStatus = box.checked ? "done" : "open";
       box.disabled = true;
-      api("/api/v1/todos/" + encodeURIComponent(id) + "/status", {
+      api("/api/v1/tasks/" + encodeURIComponent(id) + "/status", {
         method: "POST",
         body: JSON.stringify({status: newStatus})
       }).then(function (r) {
@@ -55,7 +55,7 @@
       var id = li.getAttribute("data-todo-id");
       if (!confirm("Delete this task? This cannot be undone.")) return;
       del.disabled = true;
-      api("/api/v1/todos/" + encodeURIComponent(id), {method: "DELETE"})
+      api("/api/v1/tasks/" + encodeURIComponent(id), {method: "DELETE"})
         .then(function (r) {
           if (r.ok || r.status === 204) {
             li.parentNode.removeChild(li);

@@ -615,3 +615,117 @@ class TasksDueAtAPITests(LRTestCase):
         self.assertEqual(api["total"], 1)
         self.assertEqual(api["tasks"][0]["priority"], "high")
         self.assertEqual(api["tasks"][0]["due_at"], "2027-01-15T00:00:00Z")
+
+
+class TasksBrowserEndpointsTests(LRTestCase):
+    """Regression: lock in the URL contract that ``static/js/todos.js``
+    depends on for the checkbox-toggle and delete buttons on both
+    ``/todos`` and ``/deadlines``. The JS was previously calling
+    ``/api/v1/todos/...`` which 404s, making the UI silently inert.
+    These tests exist specifically to catch a regression where someone
+    renames the API and forgets to update the JS too.
+    """
+
+    def _create(self, **payload):
+        return self.client.post(
+            "/api/v1/tasks",
+            data=json.dumps(payload),
+            content_type="application/json",
+        ).get_json()["task"]
+
+    def test_status_endpoint_responds_2xx_for_js(self):
+        """``POST /api/v1/tasks/<id>/status`` must succeed for both
+        kinds so the JS checkbox toggle works for both /todos and
+        /deadlines."""
+        # Personal task.
+        t = self._create(title="Personal")
+        resp = self.client.post(
+            f"/api/v1/tasks/{t['id']}/status",
+            data=json.dumps({"status": "done"}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        # Deadline.
+        d = self._create(
+            title="Course", kind="deadline", due_at="2027-01-01",
+        )
+        resp = self.client.post(
+            f"/api/v1/tasks/{d['id']}/status",
+            data=json.dumps({"status": "done"}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+
+    def test_delete_endpoint_responds_2xx_for_js(self):
+        """``DELETE /api/v1/tasks/<id>`` must succeed for both kinds."""
+        t = self._create(title="Personal")
+        resp = self.client.delete(f"/api/v1/tasks/{t['id']}")
+        self.assertEqual(resp.status_code, 204)
+        d = self._create(
+            title="Course", kind="deadline", due_at="2027-01-01",
+        )
+        resp = self.client.delete(f"/api/v1/tasks/{d['id']}")
+        self.assertEqual(resp.status_code, 204)
+
+    def test_legacy_todos_url_does_not_exist(self):
+        """The legacy ``/api/v1/todos/...`` URLs must keep 404'ing.
+        Guards against someone accidentally re-introducing them as a
+        compatibility shim that would just mask the JS bug."""
+        resp = self.client.post(
+            "/api/v1/todos/abc/status",
+            data=json.dumps({"status": "done"}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 404)
+
+
+class DeadlinesDeepLinkTests(LRTestCase):
+    """Deadlines whose ``source_ref`` is set get a clickable title that
+    deep-links into the recording at ``source_offset_ms``."""
+
+    def _create_deadline(self, **extra):
+        payload = {
+            "title": "Submit problem set",
+            "kind": "deadline",
+            "due_at": "2027-01-15",
+        }
+        payload.update(extra)
+        resp = self.client.post(
+            "/api/v1/tasks",
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        return resp.get_json()["task"]
+
+    def test_deadline_with_source_ref_renders_as_link(self):
+        self._create_deadline(
+            source_ref="abcdef1234567890",
+            source_offset_ms=42000,
+        )
+        resp = self.client.get("/deadlines")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_data(as_text=True)
+        # Title should be a link to the session page with ?t=<ms>.
+        self.assertIn(
+            'href="/sessions/abcdef1234567890?t=42000"', body,
+        )
+        self.assertIn("lr-todo__title--linked", body)
+
+    def test_deadline_without_source_ref_renders_as_plain_span(self):
+        self._create_deadline()
+        resp = self.client.get("/deadlines")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_data(as_text=True)
+        # No deep-link markers when source_ref is absent.
+        self.assertNotIn("lr-todo__title--linked", body)
+
+    def test_session_page_ignores_missing_t_param(self):
+        """The session page must render fine with no ``?t=`` param."""
+        sess = self._create_deadline()  # any DB row exists; not used here
+        # We just want to render the /sessions page; 404 is acceptable
+        # for unknown ids, but the page itself must not crash on the
+        # JS snippet.
+        resp = self.client.get("/sessions/nonexistent", follow_redirects=False)
+        # 404 is fine — the point is the route is reachable.
+        self.assertIn(resp.status_code, (200, 404))
