@@ -401,3 +401,231 @@ class TodosWebUITests(LRTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# Due-date and priority field tests
+# ---------------------------------------------------------------------------
+
+
+class TodosDueAtTests(LRTestCase):
+    def _service(self):
+        return self.app.config["LR_TODOS_SERVICE"]
+
+    def test_create_with_due_at_persists(self):
+        svc = self._service()
+        t = svc.create(title="Submit essay", due_at="2026-12-31")
+        self.assertEqual(t.due_at, "2026-12-31T00:00:00Z")
+        again = svc.get(t.id)
+        self.assertEqual(again.due_at, "2026-12-31T00:00:00Z")
+
+    def test_create_without_due_at_is_none(self):
+        svc = self._service()
+        t = svc.create(title="A")
+        self.assertIsNone(t.due_at)
+
+    def test_create_with_empty_due_at_is_none(self):
+        svc = self._service()
+        t = svc.create(title="A", due_at="")
+        self.assertIsNone(t.due_at)
+
+    def test_create_with_none_due_at_is_none(self):
+        svc = self._service()
+        t = svc.create(title="A", due_at=None)
+        self.assertIsNone(t.due_at)
+
+    def test_create_validates_iso8601(self):
+        svc = self._service()
+        with self.assertRaises(ValueError):
+            svc.create(title="A", due_at="not a date")
+        with self.assertRaises(ValueError):
+            svc.create(title="A", due_at="2026-13-99")
+
+    def test_create_rejects_non_string_due_at(self):
+        svc = self._service()
+        with self.assertRaises(ValueError):
+            svc.create(title="A", due_at=12345)
+
+    def test_create_canonicalises_iso8601(self):
+        svc = self._service()
+        # With timezone designator: stripped, canonicalised to Z form.
+        t = svc.create(title="A", due_at="2026-12-31T15:30:00+00:00")
+        self.assertEqual(t.due_at, "2026-12-31T15:30:00Z")
+
+    def test_create_default_priority_is_medium(self):
+        svc = self._service()
+        t = svc.create(title="A")
+        self.assertEqual(t.priority, "medium")
+
+    def test_create_with_priority_persists(self):
+        svc = self._service()
+        t = svc.create(title="A", priority="urgent")
+        self.assertEqual(t.priority, "urgent")
+
+    def test_create_validates_priority(self):
+        svc = self._service()
+        with self.assertRaises(ValueError):
+            svc.create(title="A", priority="highest")
+        with self.assertRaises(ValueError):
+            svc.create(title="A", priority="")
+        with self.assertRaises(ValueError):
+            svc.create(title="A", priority=123)
+
+    def test_update_due_at_sets_value(self):
+        svc = self._service()
+        t = svc.create(title="A")
+        updated = svc.update(t.id, due_at="2027-01-15")
+        self.assertEqual(updated.due_at, "2027-01-15T00:00:00Z")
+
+    def test_update_due_at_none_clears(self):
+        svc = self._service()
+        t = svc.create(title="A", due_at="2026-12-31")
+        self.assertIsNotNone(t.due_at)
+        updated = svc.update(t.id, due_at=None)
+        self.assertIsNone(updated.due_at)
+
+    def test_update_unset_preserves_due_at(self):
+        svc = self._service()
+        t = svc.create(title="A", due_at="2026-12-31")
+        updated = svc.update(t.id, title="B")
+        self.assertEqual(updated.title, "B")
+        self.assertEqual(updated.due_at, "2026-12-31T00:00:00Z")
+
+    def test_update_validates_due_at(self):
+        svc = self._service()
+        t = svc.create(title="A")
+        with self.assertRaises(ValueError):
+            svc.update(t.id, due_at="nope")
+
+    def test_list_orders_by_due_at(self):
+        svc = self._service()
+        # No date comes last.
+        a = svc.create(title="no date")
+        # Future date comes second.
+        b = svc.create(title="future", due_at="2099-01-01")
+        # Past date comes first within priority bucket.
+        c = svc.create(title="past", due_at="2020-01-01")
+        listed, _ = svc.list()
+        ids = [t.id for t in listed]
+        self.assertEqual(ids, [c.id, b.id, a.id])
+
+    def test_list_due_date_breaks_priority_tie(self):
+        # An urgent task with no date should still come AFTER a high
+        # task that's overdue (due date trumps priority within the
+        # open bucket).
+        svc = self._service()
+        overdue_high = svc.create(
+            title="overdue high", priority="high", due_at="2020-01-01",
+        )
+        nodate_urgent = svc.create(
+            title="no date urgent", priority="urgent",
+        )
+        listed, _ = svc.list()
+        self.assertEqual(listed[0].id, overdue_high.id)
+        self.assertEqual(listed[1].id, nodate_urgent.id)
+
+    def test_is_overdue_helper(self):
+        from services.todos import is_overdue
+        self.assertTrue(is_overdue("2020-01-01T00:00:00Z", "2026-10-06T10:00:00Z"))
+        self.assertFalse(is_overdue("2099-01-01T00:00:00Z", "2026-10-06T10:00:00Z"))
+        self.assertFalse(is_overdue(None, "2026-10-06T10:00:00Z"))
+        self.assertFalse(is_overdue("", "2026-10-06T10:00:00Z"))
+        # Exactly equal: not overdue.
+        self.assertFalse(is_overdue("2026-10-06T10:00:00Z", "2026-10-06T10:00:00Z"))
+
+    def test_is_due_today_helper(self):
+        from services.todos import is_due_today
+        self.assertTrue(is_due_today("2026-10-06T15:00:00Z", "2026-10-06T10:00:00Z"))
+        self.assertFalse(is_due_today("2026-10-05T15:00:00Z", "2026-10-06T10:00:00Z"))
+        self.assertFalse(is_due_today("2026-10-07T15:00:00Z", "2026-10-06T10:00:00Z"))
+        self.assertFalse(is_due_today(None, "2026-10-06T10:00:00Z"))
+
+
+# ---------------------------------------------------------------------------
+# API tests for due_at / priority
+# ---------------------------------------------------------------------------
+
+
+class TodosDueAtAPITests(LRTestCase):
+    def _create(self, **payload):
+        return self.client.post(
+            "/api/v1/todos",
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+    def test_api_create_with_due_at(self):
+        resp = self._create(title="A", due_at="2026-12-31")
+        self.assertEqual(resp.status_code, 201)
+        body = resp.get_json()
+        self.assertEqual(body["todo"]["due_at"], "2026-12-31T00:00:00Z")
+
+    def test_api_create_default_priority(self):
+        resp = self._create(title="A")
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.get_json()["todo"]["priority"], "medium")
+
+    def test_api_create_with_explicit_priority(self):
+        resp = self._create(title="A", priority="urgent")
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.get_json()["todo"]["priority"], "urgent")
+
+    def test_api_create_with_bad_due_at(self):
+        resp = self._create(title="A", due_at="not a date")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_api_create_with_bad_priority(self):
+        resp = self._create(title="A", priority="highest")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_api_update_due_at(self):
+        create = self._create(title="A").get_json()
+        resp = self.client.patch(
+            f"/api/v1/todos/{create['todo']['id']}",
+            data=json.dumps({"due_at": "2027-06-15"}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()["todo"]["due_at"], "2027-06-15T00:00:00Z")
+
+    def test_api_update_due_at_null_clears(self):
+        create = self._create(title="A", due_at="2027-06-15").get_json()
+        self.assertIsNotNone(create["todo"]["due_at"])
+        resp = self.client.patch(
+            f"/api/v1/todos/{create['todo']['id']}",
+            data=json.dumps({"due_at": None}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIsNone(resp.get_json()["todo"]["due_at"])
+
+    def test_api_update_omitted_due_at_preserves(self):
+        create = self._create(title="A", due_at="2027-06-15").get_json()
+        resp = self.client.patch(
+            f"/api/v1/todos/{create['todo']['id']}",
+            data=json.dumps({"title": "B"}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()["todo"]
+        self.assertEqual(body["title"], "B")
+        self.assertEqual(body["due_at"], "2027-06-15T00:00:00Z")
+
+    def test_api_quick_add_with_priority_and_due_at(self):
+        resp = self.client.post(
+            "/todos/quick",
+            data={"title": "Form task", "priority": "high", "due_at": "2027-01-15"},
+            follow_redirects=True,
+        )
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_data(as_text=True)
+        self.assertIn("Form task", body)
+        # The new task should appear with high priority and the due date.
+        # We don't have a direct API fetch in this test, but the list
+        # view shows the title; the badges are present but not
+        # asserted on string match. A follow-up test using the API
+        # directly checks the persistence.
+        api = self.client.get("/api/v1/todos").get_json()
+        self.assertEqual(api["total"], 1)
+        self.assertEqual(api["todos"][0]["priority"], "high")
+        self.assertEqual(api["todos"][0]["due_at"], "2027-01-15T00:00:00Z")

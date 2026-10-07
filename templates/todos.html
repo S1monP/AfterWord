@@ -28,6 +28,14 @@
       <form class="lr-card__quickadd" method="post" action="{{ url_for('ui_todos_quick') }}">
         <input class="lr-input" type="text" name="title" required maxlength="200"
                placeholder="Add a task and press Enter..." autocomplete="off">
+        <select class="lr-input lr-input--narrow" name="priority" aria-label="Priority" title="Priority">
+          <option value="low">Low</option>
+          <option value="medium" selected>Medium</option>
+          <option value="high">High</option>
+          <option value="urgent">Urgent</option>
+        </select>
+        <input class="lr-input lr-input--narrow" type="date" name="due_at"
+               title="Due date (optional)" aria-label="Due date">
         <button class="lr-btn lr-btn--primary" type="submit">+ Add</button>
       </form>
 
@@ -35,12 +43,20 @@
         {% if todos %}
           <ul class="lr-todo-list" id="lr-todo-list">
             {% for t in todos %}
-              <li class="lr-todo {% if t.status == 'done' %}is-done{% endif %} {% if t.status == 'cancelled' %}is-cancelled{% endif %}"
+              {% set overdue = t.status == 'open' and t.due_at and is_overdue(t.due_at, now_iso) %}
+              {% set due_today = t.status == 'open' and t.due_at and is_due_today(t.due_at, now_iso) and not overdue %}
+              <li class="lr-todo {% if t.status == 'done' %}is-done{% endif %} {% if t.status == 'cancelled' %}is-cancelled{% endif %} {% if overdue %}is-overdue{% endif %}"
                   data-todo-id="{{ t.id }}" data-status="{{ t.status }}" data-priority="{{ t.priority }}">
                 <input class="lr-todo__check" type="checkbox"
                        {% if t.status == 'done' %}checked{% endif %}
                        aria-label="Mark as done">
                 <span class="lr-todo__title" tabindex="0">{{ t.title }}</span>
+                {% if t.due_at %}
+                  <span class="lr-todo__due lr-badge {% if overdue %}lr-badge--danger{% elif due_today %}lr-badge--warning{% else %}lr-badge--info{% endif %}"
+                        title="{{ t.due_at }}">
+                    {% if overdue %}overdue&middot;{% elif due_today %}today&middot;{% endif %}{{ t.due_at[:10] }}
+                  </span>
+                {% endif %}
                 <span class="lr-todo__priority lr-badge lr-badge--{{ t.priority }}">{{ t.priority }}</span>
                 <button class="lr-todo__del" type="button" aria-label="Delete">&times;</button>
               </li>

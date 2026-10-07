@@ -76,8 +76,14 @@ def create_app(config: Optional[config_mod.Config] = None) -> Flask:
             )
         except Exception:
             count = 0
+        # Helpers for todo date rendering. Available in every template.
+        from services.todos import is_due_today as _is_due_today
+        from services.todos import is_overdue as _is_overdue
         return {
             "unsorted_count": min(count, 99),
+            "now_iso": storage.now_iso(),
+            "is_overdue": _is_overdue,
+            "is_due_today": _is_due_today,
         }
 
     _register_filters(app)
@@ -336,12 +342,25 @@ def _register_routes(app: Flask) -> None:
     def ui_todos_quick() -> Any:
         """Quick-add a single todo from the form. Redirects back to
         /todos. The JSON API is the canonical path; this is a thin
-        shortcut so the no-JS form works."""
+        shortcut so the no-JS form works.
+
+        Optional form fields: ``priority`` (low/medium/high/urgent,
+        defaults to medium), ``due_at`` (ISO-8601 date or datetime,
+        empty means no date).
+        """
         title = (request.form.get("title") or "").strip()
         if not title:
             return redirect(url_for("ui_todos"))
+        priority = (request.form.get("priority") or "medium").strip()
+        # The form sends either a date (``YYYY-MM-DD``) or a
+        # datetime. The service accepts ISO-8601; the browser date
+        # input is a valid date prefix, which ``fromisoformat``
+        # handles.
+        due_at_raw = (request.form.get("due_at") or "").strip()
         try:
-            current_app_todos_service().create(title=title)
+            current_app_todos_service().create(
+                title=title, priority=priority, due_at=due_at_raw or None,
+            )
         except ValueError:
             return redirect(url_for("ui_todos"))
         return redirect(url_for("ui_todos"))
@@ -708,7 +727,12 @@ def _register_routes(app: Flask) -> None:
 
     @app.post("/api/v1/todos")
     def api_create_todo() -> Any:
-        """Create a todo. Body: ``{title, body_md?, priority?}``."""
+        """Create a todo. Body: ``{title, body_md?, priority?, due_at?}``.
+
+        ``priority`` defaults to ``"medium"`` if not supplied.
+        ``due_at`` is optional ISO-8601 (with or without trailing Z);
+        pass ``null`` or omit for no due date.
+        """
         payload = request.get_json(silent=True) or {}
         try:
             todo = current_app_todos_service().create(
@@ -717,6 +741,7 @@ def _register_routes(app: Flask) -> None:
                 priority=payload.get("priority") or "medium",
                 source=payload.get("source") or "manual",
                 source_ref=payload.get("source_ref"),
+                due_at=payload.get("due_at"),
             )
         except ValueError as exc:
             return jsonify({"error": "invalid_payload",
@@ -732,10 +757,11 @@ def _register_routes(app: Flask) -> None:
 
     @app.patch("/api/v1/todos/<todo_id>")
     def api_update_todo(todo_id: str) -> Any:
-        """Partial update. Body: any of ``{title, body_md, priority}``.
+        """Partial update. Body: any of ``{title, body_md, priority, due_at}``.
 
-        Status is changed via ``POST /api/v1/todos/<id>/status`` so
-        the transition rules are enforced.
+        Pass ``due_at=null`` explicitly to clear the date. Status is
+        changed via ``POST /api/v1/todos/<id>/status`` so the
+        transition rules are enforced.
         """
         payload = request.get_json(silent=True) or {}
         kwargs: dict[str, Any] = {}
@@ -745,6 +771,10 @@ def _register_routes(app: Flask) -> None:
             kwargs["body_md"] = payload["body_md"]
         if "priority" in payload:
             kwargs["priority"] = payload["priority"]
+        if "due_at" in payload:
+            # Pass through to the service, which validates. ``None``
+            # means "clear the date".
+            kwargs["due_at"] = payload["due_at"]
         try:
             todo = current_app_todos_service().update(todo_id, **kwargs)
         except KeyError:

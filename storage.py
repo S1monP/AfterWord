@@ -180,8 +180,10 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_notes_updated ON notes(updated_at DESC)",
-    # Todos: no due date (you said no deadlines on todos). Priority + status.
-    # Age buckets (new/aging/stale) are derived at render time from created_at.
+    # Todos: optional due_at (was originally no due date; user asked
+    # for a personal "by when" date, so the column was added later).
+    # Priority + status. Age buckets (new/aging/stale) are derived at
+    # render time from created_at.
     """
     CREATE TABLE IF NOT EXISTS todos (
         id          TEXT PRIMARY KEY,
@@ -191,6 +193,7 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
         status      TEXT NOT NULL DEFAULT 'open',
         source      TEXT NOT NULL DEFAULT 'manual',
         source_ref  TEXT,
+        due_at      TEXT,
         created_at  TEXT NOT NULL,
         updated_at  TEXT NOT NULL,
         completed_at TEXT
@@ -198,6 +201,7 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
     """,
     "CREATE INDEX IF NOT EXISTS idx_todos_status ON todos(status, updated_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_todos_priority ON todos(priority, status)",
+    "CREATE INDEX IF NOT EXISTS idx_todos_due ON todos(due_at)",
     # Deadlines: extracted from lectures + voice memos + manual.
     # source_offset_ms lets the UI deep-link to a moment in the recording.
     """
@@ -250,6 +254,8 @@ SCHEMA_ALTERS: tuple[str, ...] = (
     "ALTER TABLE sessions ADD COLUMN kind TEXT",
     "ALTER TABLE sessions ADD COLUMN kind_confidence REAL",
     "ALTER TABLE sessions ADD COLUMN kind_set_at TEXT",
+    # todos: optional personal due date (added in M5 follow-up).
+    "ALTER TABLE todos ADD COLUMN due_at TEXT",
 )
 
 
@@ -460,6 +466,7 @@ class Todo:
     status: str
     source: str
     source_ref: Optional[str]
+    due_at: Optional[str]
     created_at: str
     updated_at: str
     completed_at: Optional[str]
@@ -473,6 +480,7 @@ class Todo:
             "status": self.status,
             "source": self.source,
             "source_ref": self.source_ref,
+            "due_at": self.due_at,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "completed_at": self.completed_at,
@@ -941,6 +949,7 @@ class Storage:
         status: str = "open",
         source: str = "manual",
         source_ref: Optional[str] = None,
+        due_at: Optional[str] = None,
     ) -> Todo:
         now = now_iso()
         with self._tx() as conn:
@@ -948,11 +957,12 @@ class Storage:
                 """
                 INSERT INTO todos
                     (id, title, body_md, priority, status, source,
-                     source_ref, created_at, updated_at, completed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     source_ref, due_at, created_at, updated_at,
+                     completed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (todo_id, title, body_md, priority, status, source,
-                 source_ref, now, now,
+                 source_ref, due_at, now, now,
                  now if status == "done" else None),
             )
         return self.get_todo(todo_id)  # type: ignore[return-value]
@@ -971,17 +981,19 @@ class Storage:
         todo_id: str,
         *,
         title: Optional[str] = None,
-        body_md: Optional[str] = None,
+        body_md: Any = _UNSET,
         priority: Optional[str] = None,
         status: Optional[str] = None,
         completed_at: Any = _UNSET,
+        due_at: Any = _UNSET,
     ) -> Todo:
         """Partial update.
 
-        ``body_md`` and ``completed_at`` use a sentinel so the caller
-        can pass ``None`` to clear them explicitly. ``title``,
-        ``priority``, ``status`` use the simpler None-means-don't-touch
-        convention because their None value is never valid anyway.
+        ``body_md``, ``completed_at``, and ``due_at`` use a sentinel
+        so the caller can pass ``None`` to clear them explicitly.
+        ``title``, ``priority``, ``status`` use the simpler
+        None-means-don't-touch convention because their None value
+        is never valid anyway.
         """
         sets: list[str] = []
         params: list[Any] = []
@@ -1000,6 +1012,9 @@ class Storage:
         if completed_at is not _UNSET:
             sets.append("completed_at = ?")
             params.append(completed_at)
+        if due_at is not _UNSET:
+            sets.append("due_at = ?")
+            params.append(due_at)
         if not sets:
             existing = self.get_todo(todo_id)
             if existing is None:
@@ -1033,8 +1048,9 @@ class Storage:
         offset: int = 0,
     ) -> tuple[list[Todo], int]:
         """List todos, open ones first then by priority (urgent first),
-        then by created_at DESC. ``status`` and ``priority`` are optional
-        filters; both single-valued (Tier 1 doesn't expose multi-select)."""
+        then by due date (overdue first, then no-due-date, then
+        future), then by created_at DESC. ``status`` and ``priority``
+        are optional filters; both single-valued."""
         if limit < 1:
             raise ValueError("limit must be >= 1")
         if offset < 0:
@@ -1064,6 +1080,12 @@ class Storage:
                         WHEN 'done' THEN 2
                         ELSE 3
                     END,
+                    -- Todos with a due date sort before those without
+                    -- (an overdue task is more urgent than any
+                    -- no-date task at any priority). Within the
+                    -- dated bucket, earlier dates come first.
+                    CASE WHEN due_at IS NULL THEN 1 ELSE 0 END,
+                    due_at ASC,
                     CASE priority
                         WHEN 'urgent' THEN 0
                         WHEN 'high'   THEN 1
@@ -1087,6 +1109,7 @@ class Storage:
             status=row["status"],
             source=row["source"],
             source_ref=row["source_ref"],
+            due_at=row["due_at"] if "due_at" in row.keys() else None,
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             completed_at=row["completed_at"],

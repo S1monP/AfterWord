@@ -119,6 +119,57 @@ def _validate_source_ref(source_ref: object) -> Optional[str]:
     return source_ref
 
 
+def _validate_due_at(due_at: object) -> Optional[str]:
+    """Parse and validate a due_at timestamp.
+
+    Accepts anything ``datetime.fromisoformat`` can parse (in Python
+    3.11+ that includes most ISO-8601 strings). Empty string and
+    ``None`` both mean "no due date". Returns the canonical
+    ``YYYY-MM-DDTHH:MM:SSZ`` form so the storage always sees a
+    consistent shape.
+
+    No timezone is assumed on input; we treat naive datetimes as
+    UTC. This is a personal-use app, so being strict about TZ
+    semantics isn't worth the friction.
+    """
+    if due_at is None or due_at == "":
+        return None
+    if not isinstance(due_at, str):
+        raise ValueError("due_at must be a string")
+    if len(due_at) > 64:
+        raise ValueError("due_at is too long")
+    from datetime import datetime
+    try:
+        # Tolerate a trailing Z. ``fromisoformat`` in 3.11+ accepts
+        # this directly; in older versions we strip and re-add.
+        cleaned = due_at
+        if cleaned.endswith("Z"):
+            cleaned = cleaned[:-1]
+        parsed = datetime.fromisoformat(cleaned)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"due_at is not a valid ISO-8601 timestamp: {due_at!r}"
+        ) from exc
+    # Canonical form: UTC, no microseconds, with trailing Z.
+    return parsed.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def is_overdue(todo_due_at: Optional[str], now_iso: str) -> bool:
+    """True iff the todo has a due_at strictly before the supplied
+    'now' timestamp (string comparison is fine because both are
+    ISO-8601 in UTC, same lexicographic and chronological order)."""
+    if not todo_due_at:
+        return False
+    return todo_due_at < now_iso
+
+
+def is_due_today(todo_due_at: Optional[str], now_iso: str) -> bool:
+    """True iff the todo's due_at is on the same UTC date as now."""
+    if not todo_due_at:
+        return False
+    return todo_due_at[:10] == now_iso[:10]
+
+
 # --- Age buckets ------------------------------------------------------------
 
 
@@ -175,12 +226,14 @@ class TodosService:
         priority: str = "medium",
         source: str = "manual",
         source_ref: Optional[str] = None,
+        due_at: Optional[str] = None,
     ) -> Todo:
         title = _validate_title(title)
         body_md = _validate_body(body_md)
         priority = _validate_priority(priority)
         source = _validate_source(source)
         source_ref = _validate_source_ref(source_ref)
+        due_at = _validate_due_at(due_at)
         todo_id = uuid.uuid4().hex
         return self._store.create_todo(
             todo_id,
@@ -190,6 +243,7 @@ class TodosService:
             status="open",
             source=source,
             source_ref=source_ref,
+            due_at=due_at,
         )
 
     def update(
@@ -199,6 +253,7 @@ class TodosService:
         title: Optional[str] = None,
         body_md: Any = storage._UNSET,
         priority: Optional[str] = None,
+        due_at: Any = storage._UNSET,
     ) -> Todo:
         if not isinstance(todo_id, str) or not todo_id:
             raise ValueError("todo_id is required")
@@ -207,6 +262,7 @@ class TodosService:
         new_title: Optional[str] = None
         new_body: Any = storage._UNSET
         new_priority: Optional[str] = None
+        new_due_at: Any = storage._UNSET
         if title is not None:
             new_title = _validate_title(title)
         if body_md is not storage._UNSET:
@@ -215,11 +271,16 @@ class TodosService:
             new_body = _validate_body(body_md)
         if priority is not None:
             new_priority = _validate_priority(priority)
+        if due_at is not storage._UNSET:
+            # ``None`` clears the date; otherwise validate and
+            # canonicalise to UTC ISO-8601.
+            new_due_at = _validate_due_at(due_at)
         return self._store.update_todo(
             todo_id,
             title=new_title,
             body_md=new_body,
             priority=new_priority,
+            due_at=new_due_at,
         )
 
     def set_status(self, todo_id: str, status: str) -> Todo:
