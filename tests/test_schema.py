@@ -63,8 +63,9 @@ class SchemaShapeTests(LRTestCase):
                     "PRAGMA table_info(todos)"
                 ).fetchall()
             }
-        # We agreed: no due_at on todos. Confirm.
-        self.assertNotIn("due_at", cols)
+        # Note: due_at was added to todos (M5 follow-up). The two-table
+        # split is going away in Milestone 5 part 2.
+        self.assertIn("due_at", cols)
         for c in ("id", "title", "priority", "status",
                   "source", "created_at", "updated_at", "completed_at"):
             self.assertIn(c, cols)
