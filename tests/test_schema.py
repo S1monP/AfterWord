@@ -249,11 +249,19 @@ class ServiceStubTests(unittest.TestCase):
             "EventsService.__init__ should take (self, store)",
         )
 
-    def test_classification_service_is_stub(self) -> None:
+    def test_classification_service_is_real(self) -> None:
+        """Classification is the fourth service to land (Milestone 6).
+        The constructor takes a Storage instance; manual override
+        works against the real DB. The LLM path is stubbed (returns
+        None) until Milestone 8; full coverage lives in
+        ``tests/test_classification.py``."""
         from services.classification import ClassificationService
-        s = ClassificationService()
-        with self.assertRaises(NotImplementedError):
-            s.classify_session("abc")
+        import inspect
+        sig = inspect.signature(ClassificationService.__init__)
+        self.assertGreaterEqual(
+            len(sig.parameters), 2,
+            "ClassificationService.__init__ should take (self, store)",
+        )
 
     def test_events_kinds_constant(self) -> None:
         from services.events import KINDS

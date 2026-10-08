@@ -2,32 +2,125 @@
 
 {% block title %}Sort recordings &middot; Lecture Recorder{% endblock %}
 
+{% block extrahead %}
+  <style>
+    /* Per-row layout: title, dropdown, save button. */
+    .lr-sort__row {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      align-items: center;
+      gap: var(--lr-s-3);
+      padding: var(--lr-s-3) var(--lr-pad-card);
+      border-bottom: 1px solid var(--lr-border);
+      transition: opacity 200ms ease, transform 200ms ease;
+    }
+    .lr-sort__row:last-child { border-bottom: 0; }
+    .lr-sort__row.is-leaving {
+      opacity: 0;
+      transform: translateX(-12px);
+    }
+    .lr-sort__row.is-error { box-shadow: inset 0 0 0 2px var(--lr-danger); }
+    .lr-sort__meta {
+      font-size: var(--lr-fs-xs);
+      color: var(--lr-text-faint);
+      font-family: var(--lr-font-mono);
+    }
+    .lr-sort__title { font-size: var(--lr-fs-md); font-weight: 600; }
+    .lr-sort__hint {
+      margin-top: var(--lr-s-3);
+      font-size: var(--lr-fs-xs);
+      color: var(--lr-text-faint);
+    }
+    .lr-sort__toast {
+      display: none;
+      margin-top: var(--lr-s-3);
+      padding: var(--lr-s-3);
+      border-radius: var(--lr-radius-md);
+      background: var(--lr-surface);
+      color: var(--lr-text);
+      font-size: var(--lr-fs-sm);
+    }
+    .lr-sort__toast.is-visible { display: block; }
+    .lr-sort__toast--info { border-left: 3px solid var(--lr-info); }
+  </style>
+{% endblock %}
+
 {% block content %}
 <div class="lr-page">
   <header class="lr-page__header">
     <div>
       <h1 class="lr-page__title">Sort recordings</h1>
       <div class="lr-page__sub">
-        Tag each recording with a kind (lecture, voice memo, meeting, other)
-        so it lands in the right place on the dashboard.
+        Tag each recording with a kind (lecture, voice memo, meeting,
+        other). Currently {{ total }} unclassified
+        recording{{ '' if total == 1 else 's' }}.
       </div>
     </div>
+    <button id="lr-sort-bulk" class="lr-btn lr-btn--primary"
+            type="button" disabled>
+      Classify all with AI
+    </button>
   </header>
 
-  <div class="lr-card">
-    <div class="lr-empty-card">
-      <div class="lr-empty-card__title">No recordings to sort</div>
-      <p>
-        Once you have recordings that haven't been tagged with a kind
-        yet, they show up here. For now everything is sorted, or
-        nothing has finished uploading.
-      </p>
-      <p style="margin-top: var(--lr-s-3); font-size: var(--lr-fs-xs); color: var(--lr-text-faint);">
-        The bulk-sort UI lands in Milestone 8. The
-        <code>POST /api/v1/sessions/&lt;id&gt;/kind</code> route
-        already works for manual override.
-      </p>
+  <div id="lr-sort-toast" class="lr-sort__toast lr-sort__toast--info"
+       role="status" aria-live="polite"></div>
+
+  {% if sessions %}
+    <div class="lr-card lr-card--padded">
+      <ul class="lr-sort__list" style="list-style: none; padding: 0; margin: 0;">
+        {% for s in sessions %}
+          <li class="lr-sort__row"
+              data-session-id="{{ s.id }}"
+              data-status="{{ s.status }}">
+            <div>
+              <div class="lr-sort__title">
+                {{ s.title or '(untitled)' }}
+              </div>
+              <div class="lr-sort__meta">
+                {{ s.id[:8] }}&hellip; &middot;
+                started {{ s.started_at|iso_local }} &middot;
+                {{ s.received_chunks }}/{{ s.expected_count }} chunk{{ '' if s.expected_count == 1 else 's' }}
+              </div>
+            </div>
+            <select class="lr-input lr-input--narrow lr-sort__select"
+                    aria-label="Kind">
+              <option value="" selected>&mdash; pick kind &mdash;</option>
+              {% for k in kinds %}
+                <option value="{{ k }}">{{ k.replace('_', ' ') }}</option>
+              {% endfor %}
+            </select>
+            <button class="lr-btn lr-sort__save" type="button"
+                    data-session-id="{{ s.id }}"
+                    disabled>
+              Save
+            </button>
+          </li>
+        {% endfor %}
+      </ul>
     </div>
-  </div>
+    <div class="lr-sort__hint">
+      Pick a kind from the dropdown, then click Save. The AI button
+      on the top right is a placeholder &mdash; it lights up once the
+      LLM classifier is wired in a later milestone.
+    </div>
+  {% else %}
+    <div class="lr-card">
+      <div class="lr-empty-card">
+        <div class="lr-empty-card__title">All recordings are sorted</div>
+        <p>
+          Once you have recordings that haven't been tagged with a kind
+          yet, they show up here. For now everything is sorted, or
+          nothing has finished uploading.
+        </p>
+        <p class="lr-sort__hint">
+          The &ldquo;Classify all with AI&rdquo; button will appear in
+          a later milestone once the LLM classifier is wired up.
+        </p>
+      </div>
+    </div>
+  {% endif %}
 </div>
+
+<script src="{{ url_for('static', filename='js/unsorted.js') }}"
+        defer></script>
 {% endblock %}

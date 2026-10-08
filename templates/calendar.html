@@ -7,9 +7,7 @@
     .lr-cal {
       display: grid;
       grid-template-columns: repeat(7, 1fr);
-      gap: 1px;
-      background: var(--lr-border);
-      border: 1px solid var(--lr-border);
+      border: 1px solid var(--lr-border-hi);
       border-radius: var(--lr-radius-md);
       overflow: hidden;
       margin-top: var(--lr-s-4);
@@ -23,6 +21,7 @@
       padding: var(--lr-s-2) 0;
       text-transform: uppercase;
       letter-spacing: 0.04em;
+      border-bottom: 1px solid var(--lr-border-hi);
     }
     .lr-cal__cell {
       background: var(--lr-surface);
@@ -32,7 +31,13 @@
       flex-direction: column;
       gap: 4px;
       position: relative;
+      border-right: 1px solid var(--lr-border-hi);
+      border-bottom: 1px solid var(--lr-border-hi);
     }
+    /* Last column and last row have no right/bottom border; the
+       outer container provides the rightmost/bottommost edge. */
+    .lr-cal__cell:nth-child(7n) { border-right: 0; }
+    .lr-cal__cell:nth-last-child(-n+7) { border-bottom: 0; }
     .lr-cal__cell--out { opacity: 0.45; }
     .lr-cal__cell--today { box-shadow: inset 0 0 0 2px var(--lr-accent); }
     .lr-cal__daynum {

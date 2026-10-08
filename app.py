@@ -30,6 +30,7 @@ import services
 import services.notes  # noqa: F401  (exposes NotesService, render_html, constants)
 import services.tasks  # noqa: F401  (exposes TasksService, KINDS, ALLOWED_TRANSITIONS)
 import services.events  # noqa: F401  (exposes EventsService, compute_month_grid, suggest_match_confidence)
+import services.classification  # noqa: F401  (exposes ClassificationService, VALID_KINDS, LLM_NOT_IMPLEMENTED)
 import storage
 from services import processing, transcode
 
@@ -55,6 +56,11 @@ def create_app(config: Optional[config_mod.Config] = None) -> Flask:
     )
     app.config["LR_EVENTS_SERVICE"] = services.events.EventsService(
         app.config["LR_STORAGE"]
+    )
+    app.config["LR_CLASSIFICATION_SERVICE"] = (
+        services.classification.ClassificationService(
+            app.config["LR_STORAGE"]
+        )
     )
     app.secret_key = os.environ.get("LR_SECRET", "lr-dev-secret-not-for-prod")
 
@@ -113,6 +119,13 @@ def current_app_tasks_service() -> services.tasks.TasksService:
 def current_app_events_service() -> services.events.EventsService:
     """Pull the EventsService off the active Flask app."""
     return current_app.config["LR_EVENTS_SERVICE"]
+
+
+def current_app_classification_service() -> (
+    services.classification.ClassificationService
+):
+    """Pull the ClassificationService off the active Flask app."""
+    return current_app.config["LR_CLASSIFICATION_SERVICE"]
 
 
 # ---------------------------------------------------------------------------
@@ -591,7 +604,18 @@ def _register_routes(app: Flask) -> None:
 
     @app.get("/unsorted")
     def ui_unsorted() -> Any:
-        return render_template("unsorted.html")
+        """Bulk-sort page: list ready sessions whose ``kind`` is
+        still NULL, with a dropdown + Save button per row to
+        manually assign a kind.
+        """
+        sessions, total = current_app_classification_service(
+        ).list_unclassified(limit=100, offset=0)
+        return render_template(
+            "unsorted.html",
+            sessions=sessions,
+            total=total,
+            kinds=sorted(services.classification.VALID_KINDS),
+        )
 
     @app.get("/sessions/<session_id>")
     def ui_session(session_id: str) -> Any:
@@ -775,6 +799,75 @@ def _register_routes(app: Flask) -> None:
         except ValueError as exc:
             return jsonify({"error": "invalid_payload", "detail": str(exc)}), 400
         return jsonify({"session": sess.to_api_dict()})
+
+    @app.post("/api/v1/sessions/<session_id>/classify")
+    def api_classify_session(session_id: str) -> Any:
+        """LLM classify a single session. **Currently a stub**
+        (Milestone 6): always returns ``{kind: null, confidence: null,
+        reason: "llm_not_implemented"}`` so the UI knows the AI path
+        isn't ready yet. Returns 404 if the session doesn't exist.
+        """
+        if current_app_storage().get_session(session_id) is None:
+            return jsonify({"error": "not_found"}), 404
+        outcome = current_app_classification_service().classify_session(
+            session_id,
+        )
+        if outcome is None:
+            return jsonify({
+                "kind": None,
+                "confidence": None,
+                "reason": services.classification.LLM_NOT_IMPLEMENTED,
+            })
+        kind, confidence = outcome
+        sess = current_app_storage().set_kind(
+            session_id, kind, confidence=confidence,
+        )
+        return jsonify({
+            "kind": sess.kind,
+            "confidence": sess.kind_confidence,
+            "reason": "classified",
+        })
+
+    @app.post("/api/v1/classifications/bulk")
+    def api_bulk_classify() -> Any:
+        """Bulk classify a list of session ids.
+
+        Body: ``{"session_ids": [...]}``. Returns
+        ``{"results": {session_id: null | {kind, confidence, reason}}}``.
+        Unknown session ids are silently omitted. **Currently a stub**:
+        every value is the ``llm_not_implemented`` placeholder.
+        """
+        payload = request.get_json(silent=True) or {}
+        session_ids = payload.get("session_ids")
+        if not isinstance(session_ids, list):
+            return jsonify({
+                "error": "invalid_payload",
+                "detail": "'session_ids' must be a list",
+            }), 400
+        svc = current_app_classification_service()
+        store = current_app_storage()
+        results: dict[str, Any] = {}
+        for sid in session_ids:
+            if not isinstance(sid, str) or not sid:
+                continue
+            if store.get_session(sid) is None:
+                continue
+            outcome = svc.classify_session(sid)
+            if outcome is None:
+                results[sid] = {
+                    "kind": None,
+                    "confidence": None,
+                    "reason": services.classification.LLM_NOT_IMPLEMENTED,
+                }
+            else:
+                k, c = outcome
+                sess = store.set_kind(sid, k, confidence=c)
+                results[sid] = {
+                    "kind": sess.kind,
+                    "confidence": sess.kind_confidence,
+                    "reason": "classified",
+                }
+        return jsonify({"results": results})
 
     # --- API: search (Phase A stub returns []) -------------------------
     @app.get("/api/v1/search")
