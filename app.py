@@ -29,6 +29,7 @@ import search
 import services
 import services.notes  # noqa: F401  (exposes NotesService, render_html, constants)
 import services.tasks  # noqa: F401  (exposes TasksService, KINDS, ALLOWED_TRANSITIONS)
+import services.events  # noqa: F401  (exposes EventsService, compute_month_grid, suggest_match_confidence)
 import storage
 from services import processing, transcode
 
@@ -50,6 +51,9 @@ def create_app(config: Optional[config_mod.Config] = None) -> Flask:
         app.config["LR_STORAGE"]
     )
     app.config["LR_TASKS_SERVICE"] = services.tasks.TasksService(
+        app.config["LR_STORAGE"]
+    )
+    app.config["LR_EVENTS_SERVICE"] = services.events.EventsService(
         app.config["LR_STORAGE"]
     )
     app.secret_key = os.environ.get("LR_SECRET", "lr-dev-secret-not-for-prod")
@@ -104,6 +108,11 @@ def current_app_notes_service() -> services.notes.NotesService:
 def current_app_tasks_service() -> services.tasks.TasksService:
     """Pull the TasksService off the active Flask app."""
     return current_app.config["LR_TASKS_SERVICE"]
+
+
+def current_app_events_service() -> services.events.EventsService:
+    """Pull the EventsService off the active Flask app."""
+    return current_app.config["LR_EVENTS_SERVICE"]
 
 
 # ---------------------------------------------------------------------------

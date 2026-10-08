@@ -4,35 +4,169 @@ Events are user-owned, not extracted by the LLM. The LLM matches
 sessions to events based on time proximity (10 minutes before
 ``starts_at`` through ``ends_at``).
 
-Tier 1: stub. All public methods raise :class:`NotImplementedError`,
-except :meth:`suggest_match_for_session` which is a pure function and
-implemented now so the data model is testable.
+The service layer owns three concerns the storage layer doesn't:
+
+* Input validation (title, kind, source, ISO timestamp normalisation,
+  ``ends_at`` ordering, control-character rejection).
+* The pure ``suggest_match_confidence`` function, exposed both as a
+  free function and used by :meth:`EventsService.suggest_match`.
+* Parsing .ics files into a stream of ``Event`` rows, used by
+  :meth:`EventsService.import_ics`.
+* Building the month-grid matrix used by the ``/calendar`` UI;
+  :func:`compute_month_grid` is a pure function so the layout math
+  is unit-tested without rendering.
+
+The service is constructed with a :class:`storage.Storage` instance
+so it can be tested without a Flask app. Routes get the service via
+``app.current_app_events_service``.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Optional
+import datetime as _dt
+import re
+import uuid
+from typing import Any, Optional
 
+import storage
+from storage import Event, Storage
+
+
+# --- Limits -----------------------------------------------------------------
+
+MAX_TITLE_LEN = 200
+MAX_DESCRIPTION_LEN = 2000
+MAX_LOCATION_LEN = 200
+MAX_SOURCE_REF_LEN = 256
 
 KINDS: frozenset[str] = frozenset({"lecture", "meeting", "other"})
+SOURCES: frozenset[str] = frozenset({"manual", "ical_import"})
+
+# Match window for session→event matching. A session that started up
+# to 10 minutes before ``event_starts_at`` is still considered a
+# plausible match (the user might have pressed record slightly early).
+MATCH_PRE_WINDOW = _dt.timedelta(minutes=10)
 
 
-@dataclass
-class Event:
-    id: str
-    title: str
-    description: Optional[str]
-    kind: str
-    starts_at: str
-    ends_at: Optional[str]
-    location: Optional[str]
-    source: str               # 'manual' | 'ical_import'
-    source_ref: Optional[str]
-    matched_session_id: Optional[str]
-    match_confidence: Optional[float]
-    created_at: str
-    updated_at: str
+# Reject control characters except common whitespace (\t, \n, \r).
+_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
+
+# --- ISO timestamp helpers --------------------------------------------------
+
+# Accept anything that ``datetime.fromisoformat`` can parse, then
+# normalise to a UTC ISO-8601 string with a trailing ``Z``. This
+# covers the three input shapes:
+#
+#   "2027-03-15"                       → "2027-03-15T00:00:00Z" (date-only)
+#   "2027-03-15T14:30"                → "2027-03-15T14:30:00Z" (naive)
+#   "2027-03-15T14:30:00Z"             → pass-through
+#   "2027-03-15T14:30:00+01:00"        → converted to UTC then Z
+#
+# The :class:`datetime` module's ``fromisoformat`` is permissive enough
+# in Python 3.11+ to accept all of these without a third-party parser.
+
+def _normalise_iso(value: object, *, field: str) -> str:
+    """Validate and normalise a user-supplied timestamp string.
+
+    Raises :class:`ValueError` with a clear field name if the input
+    is not a parseable ISO-8601 date or datetime.
+    """
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{field} must be a non-empty ISO-8601 string")
+    try:
+        dt = _dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(
+            f"{field} must be ISO-8601 (e.g. '2027-03-15' or "
+            f"'2027-03-15T14:30:00Z'); got {value!r}"
+        ) from exc
+    if dt.tzinfo is None:
+        # Naive: assume UTC. This is the right default for a personal
+        # server where the user does not bother to type a timezone.
+        dt = dt.replace(tzinfo=_dt.timezone.utc)
+    else:
+        dt = dt.astimezone(_dt.timezone.utc)
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _parse_iso(ts: str) -> _dt.datetime:
+    """Parse an ISO-8601 string into an aware UTC datetime."""
+    return _dt.datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(
+        _dt.timezone.utc
+    )
+
+
+# --- Validators -------------------------------------------------------------
+
+def _validate_title(title: object) -> str:
+    if not isinstance(title, str):
+        raise ValueError("title must be a string")
+    title = title.strip()
+    if not title:
+        raise ValueError("title is required")
+    if len(title) > MAX_TITLE_LEN:
+        raise ValueError(f"title must be at most {MAX_TITLE_LEN} chars")
+    if _CONTROL_CHARS.search(title):
+        raise ValueError("title contains control characters")
+    return title
+
+
+def _validate_kind(kind: object) -> str:
+    if not isinstance(kind, str):
+        raise ValueError("kind must be a string")
+    if kind not in KINDS:
+        raise ValueError(f"kind must be one of {sorted(KINDS)}; got {kind!r}")
+    return kind
+
+
+def _validate_source(source: object) -> str:
+    if source is None:
+        return "manual"
+    if not isinstance(source, str):
+        raise ValueError("source must be a string")
+    if source not in SOURCES:
+        raise ValueError(
+            f"source must be one of {sorted(SOURCES)}; got {source!r}"
+        )
+    return source
+
+
+def _validate_optional_text(
+    value: object, *, field: str, max_len: int,
+) -> Optional[str]:
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be a string")
+    if len(value) > max_len:
+        raise ValueError(f"{field} must be at most {max_len} chars")
+    if _CONTROL_CHARS.search(value):
+        raise ValueError(f"{field} contains control characters")
+    return value
+
+
+def _validate_source_ref(source_ref: object) -> Optional[str]:
+    return _validate_optional_text(
+        source_ref, field="source_ref", max_len=MAX_SOURCE_REF_LEN,
+    )
+
+
+def _validate_starts_at(value: object) -> str:
+    return _normalise_iso(value, field="starts_at")
+
+
+def _validate_ends_at(
+    value: object, *, starts_at: str,
+) -> Optional[str]:
+    if value is None or value == "":
+        return None
+    normalised = _normalise_iso(value, field="ends_at")
+    if normalised <= starts_at:
+        raise ValueError("ends_at must be strictly after starts_at")
+    return normalised
+
+
+# --- Match confidence math --------------------------------------------------
 
 def suggest_match_confidence(
     session_started_at: str,
@@ -43,46 +177,444 @@ def suggest_match_confidence(
     to an event.
 
     Returns ``None`` if the session started outside the
-    [event_starts_at - 10 min, event_ends_at] window. Otherwise returns
-    1.0 if the session started at exactly event_starts_at, decaying
-    linearly to 0.5 at the window edges.
+    ``[event_starts_at - 10 min, event_ends_at]`` window. Otherwise
+    returns ``1.0`` if the session started at exactly
+    ``event_starts_at``, decaying linearly to ``0.5`` at the window
+    edges. When ``event_ends_at`` is ``None``, the window's right
+    edge is one hour past ``event_starts_at`` (a sensible default for
+    events without a declared duration).
 
     Pure function — no DB, no clock side-effects, takes ISO-8601
     strings so the caller decides the comparison time.
     """
-    raise NotImplementedError
+    try:
+        session_dt = _parse_iso(session_started_at)
+        start_dt = _parse_iso(event_starts_at)
+        if event_ends_at is not None:
+            end_dt = _parse_iso(event_ends_at)
+        else:
+            end_dt = start_dt + _dt.timedelta(hours=1)
+    except ValueError:
+        return None
 
+    window_start = start_dt - MATCH_PRE_WINDOW
+    if session_dt < window_start or session_dt > end_dt:
+        return None
+
+    # Tent shape: peak at event_starts_at (1.0), falling linearly to
+    # 0.5 at both edges (window_start on the left, end_dt on the
+    # right). This matches the docstring.
+    left_span = (start_dt - window_start).total_seconds()
+    right_span = (end_dt - start_dt).total_seconds()
+    if session_dt <= start_dt:
+        if left_span <= 0:
+            # Degenerate: event_start == window_start. Anything inside
+            # the pre-window scores 0.7; outside scores None.
+            return 0.7 if session_dt >= window_start else None
+        pos = (session_dt - window_start).total_seconds() / left_span
+        pos = max(0.0, min(1.0, pos))
+        return 0.5 + 0.5 * pos
+    else:
+        if right_span <= 0:
+            # Event start == event end: only an instant at event start.
+            return 1.0 if session_dt == start_dt else (
+                0.5 if session_dt > window_start else None
+            )
+        pos = (end_dt - session_dt).total_seconds() / right_span
+        pos = max(0.0, min(1.0, pos))
+        return 0.5 + 0.5 * pos
+
+
+# --- Month grid math --------------------------------------------------------
+
+def compute_month_grid(
+    year: int, month: int, events: list[Event], *,
+    max_per_cell: int = 3,
+) -> list[list[dict[str, Any]]]:
+    """Build a 6-row × 7-column calendar grid for ``(year, month)``.
+
+    Each cell is a dict with::
+
+        {"date": date, "in_month": bool, "weekday": int,
+         "events": list[Event], "overflow": int}
+
+    - ``date`` is a :class:`datetime.date`.
+    - ``in_month`` is True for cells belonging to ``(year, month)``;
+      leading/trailing cells are filled with days from the previous
+      and next month.
+    - ``weekday`` is 0 (Mon) … 6 (Sun), matching ``date.weekday()``.
+    - ``events`` is sorted by ``starts_at`` and capped at
+      ``max_per_cell``; the rest of the events for that day are
+      reflected in ``overflow`` (an int count) so the template can
+      render a "+N more" affordance.
+
+    The grid always has 6 rows (42 cells) so the layout doesn't jump
+    around as the user navigates months.
+
+    Events not on any of the 42 dates in the grid are ignored — by
+    construction that can't happen if ``events`` is the result of
+    :func:`Storage.list_events` with the right date bounds, but the
+    caller is free to pass any list.
+    """
+    first_of_month = _dt.date(year, month, 1)
+    # weekday(): Mon=0. We want Monday on the left edge of the grid.
+    leading = first_of_month.weekday()
+    grid_start = first_of_month - _dt.timedelta(days=leading)
+
+    # Group events by date, ignoring any whose date is not on the grid.
+    by_date: dict[_dt.date, list[Event]] = {}
+    for ev in events:
+        try:
+            ev_date = _parse_iso(ev.starts_at).date()
+        except (ValueError, AttributeError):
+            continue
+        if grid_start <= ev_date <= grid_start + _dt.timedelta(days=41):
+            by_date.setdefault(ev_date, []).append(ev)
+
+    rows: list[list[dict[str, Any]]] = []
+    for r in range(6):
+        row: list[dict[str, Any]] = []
+        for c in range(7):
+            cell_date = grid_start + _dt.timedelta(days=r * 7 + c)
+            day_events = by_date.get(cell_date, [])
+            day_events_sorted = sorted(
+                day_events, key=lambda e: e.starts_at,
+            )
+            overflow = max(0, len(day_events_sorted) - max_per_cell)
+            row.append({
+                "date": cell_date,
+                "in_month": cell_date.month == month,
+                "weekday": cell_date.weekday(),
+                "events": day_events_sorted[:max_per_cell],
+                "overflow": overflow,
+            })
+        rows.append(row)
+    return rows
+
+
+# --- Service ----------------------------------------------------------------
 
 class EventsService:
-    def create(self, *, title: str, kind: str, starts_at: str,
-               description: Optional[str] = None,
-               ends_at: Optional[str] = None,
-               location: Optional[str] = None,
-               source: str = "manual",
-               source_ref: Optional[str] = None) -> Event:
-        raise NotImplementedError
+    """Coordinates validation, normalisation, and storage for events."""
 
-    def update(self, event_id: str, **fields) -> Event:
-        raise NotImplementedError
+    def __init__(self, store: Storage) -> None:
+        self._store = store
 
-    def delete(self, event_id: str) -> None:
-        raise NotImplementedError
+    def create(
+        self,
+        *,
+        title: str,
+        kind: str,
+        starts_at: str,
+        ends_at: Optional[str] = None,
+        description: Optional[str] = None,
+        location: Optional[str] = None,
+        source: str = "manual",
+        source_ref: Optional[str] = None,
+    ) -> Event:
+        title = _validate_title(title)
+        kind = _validate_kind(kind)
+        source = _validate_source(source)
+        starts_at_norm = _validate_starts_at(starts_at)
+        ends_at_norm = _validate_ends_at(ends_at, starts_at=starts_at_norm)
+        description = _validate_optional_text(
+            description, field="description", max_len=MAX_DESCRIPTION_LEN,
+        )
+        location = _validate_optional_text(
+            location, field="location", max_len=MAX_LOCATION_LEN,
+        )
+        source_ref = _validate_source_ref(source_ref)
+        event_id = uuid.uuid4().hex
+        return self._store.create_event(
+            event_id,
+            title=title,
+            kind=kind,
+            starts_at=starts_at_norm,
+            ends_at=ends_at_norm,
+            description=description,
+            location=location,
+            source=source,
+            source_ref=source_ref,
+        )
+
+    def update(self, event_id: str, **fields: Any) -> Event:
+        if not isinstance(event_id, str) or not event_id:
+            raise ValueError("event_id is required")
+        if self._store.get_event(event_id) is None:
+            raise KeyError(event_id)
+        cleaned: dict[str, Any] = {}
+        if "title" in fields:
+            cleaned["title"] = _validate_title(fields["title"])
+        if "kind" in fields:
+            cleaned["kind"] = _validate_kind(fields["kind"])
+        if "source" in fields:
+            cleaned["source"] = _validate_source(fields["source"])
+        if "starts_at" in fields:
+            cleaned["starts_at"] = _validate_starts_at(fields["starts_at"])
+        if "ends_at" in fields:
+            effective_starts = (
+                cleaned.get("starts_at")
+                or self._store.get_event(event_id).starts_at
+            )
+            cleaned["ends_at"] = _validate_ends_at(
+                fields["ends_at"], starts_at=effective_starts,
+            )
+        if "description" in fields:
+            cleaned["description"] = _validate_optional_text(
+                fields["description"],
+                field="description", max_len=MAX_DESCRIPTION_LEN,
+            )
+        if "location" in fields:
+            cleaned["location"] = _validate_optional_text(
+                fields["location"],
+                field="location", max_len=MAX_LOCATION_LEN,
+            )
+        if "source_ref" in fields:
+            cleaned["source_ref"] = _validate_source_ref(
+                fields["source_ref"]
+            )
+        if not cleaned:
+            existing = self._store.get_event(event_id)
+            assert existing is not None
+            return existing
+        return self._store.update_event(event_id, **cleaned)
+
+    def delete(self, event_id: str) -> bool:
+        if not isinstance(event_id, str) or not event_id:
+            raise ValueError("event_id is required")
+        return self._store.delete_event(event_id)
 
     def get(self, event_id: str) -> Optional[Event]:
-        raise NotImplementedError
+        if not isinstance(event_id, str) or not event_id:
+            return None
+        return self._store.get_event(event_id)
 
-    def list(self, *, kind: Optional[str] = None,
-             starts_after: Optional[str] = None,
-             starts_before: Optional[str] = None) -> list[Event]:
-        raise NotImplementedError
+    def list(
+        self,
+        *,
+        kind: Optional[str] = None,
+        starts_after: Optional[str] = None,
+        starts_before: Optional[str] = None,
+        limit: int = 500,
+        offset: int = 0,
+    ) -> tuple[list[Event], int]:
+        if kind is not None:
+            kind = _validate_kind(kind)
+        if starts_after is not None:
+            starts_after = _normalise_iso(starts_after, field="starts_after")
+        if starts_before is not None:
+            starts_before = _normalise_iso(
+                starts_before, field="starts_before",
+            )
+        if not isinstance(limit, int) or limit < 1:
+            raise ValueError("limit must be a positive int")
+        if not isinstance(offset, int) or offset < 0:
+            raise ValueError("offset must be a non-negative int")
+        return self._store.list_events(
+            kind=kind,
+            starts_after=starts_after,
+            starts_before=starts_before,
+            limit=limit,
+            offset=offset,
+        )
 
     def suggest_match(self, session_id: str) -> Optional[Event]:
-        raise NotImplementedError
+        """Find the best event whose window covers the session's
+        ``started_at``. Returns ``None`` if the session doesn't exist
+        or no event matches.
 
-    def match_session(self, event_id: str, session_id: str,
-                      confidence: float) -> None:
-        raise NotImplementedError
+        ``matched_session_id`` on the event is NOT touched here —
+        this is read-only. Use :meth:`match_session` to commit.
+        """
+        if not isinstance(session_id, str) or not session_id:
+            raise ValueError("session_id is required")
+        sess = self._store.get_session(session_id)
+        if sess is None:
+            return None
+        session_start_dt = _parse_iso(sess.started_at)
+        window_lo = (
+            session_start_dt - _dt.timedelta(hours=12)
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        window_hi = (
+            session_start_dt + _dt.timedelta(hours=12)
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        candidates, _ = self._store.list_events(
+            starts_after=window_lo, starts_before=window_hi, limit=500,
+        )
+        best: Optional[tuple[float, Event]] = None
+        for ev in candidates:
+            conf = suggest_match_confidence(
+                sess.started_at, ev.starts_at, ev.ends_at,
+            )
+            if conf is None:
+                continue
+            if best is None or conf > best[0]:
+                best = (conf, ev)
+        return best[1] if best else None
+
+    def match_session(
+        self, event_id: str, session_id: str, confidence: float,
+    ) -> Event:
+        """Mark ``event_id`` as the match for ``session_id`` with the
+        given confidence. Any other event that was pointing at the
+        same session is cleared, enforcing one-event-per-session.
+
+        Raises :class:`KeyError` if the event or session doesn't exist.
+        """
+        if not isinstance(event_id, str) or not event_id:
+            raise ValueError("event_id is required")
+        if not isinstance(session_id, str) or not session_id:
+            raise ValueError("session_id is required")
+        if not isinstance(confidence, (int, float)):
+            raise ValueError("confidence must be a number")
+        if not (0.0 <= float(confidence) <= 1.0):
+            raise ValueError("confidence must be in [0, 1]")
+        if self._store.get_event(event_id) is None:
+            raise KeyError(event_id)
+        if self._store.get_session(session_id) is None:
+            raise KeyError(session_id)
+        self._store.clear_event_match_for_session(session_id)
+        return self._store.update_event(
+            event_id,
+            matched_session_id=session_id,
+            match_confidence=float(confidence),
+        )
+
+    # -- .ics import -----------------------------------------------------
 
     def import_ics(self, ics_bytes: bytes) -> int:
-        """Parse an .ics file and create events. Returns count imported."""
-        raise NotImplementedError
+        """Parse an .ics file and create events from each ``VEVENT``.
+
+        Returns the count of events imported. Non-datetime events
+        (e.g. all-day events without a DTEND) are still imported with
+        a noon start time. Events with no SUMMARY are skipped (they
+        can't be displayed).
+
+        Each imported event is created with ``kind='meeting'`` (the
+        ``icalendar`` format doesn't carry our kind concept; the user
+        can reclassify individual events after import). The
+        ``source_ref`` is set to the event's UID for traceability.
+        """
+        try:
+            from icalendar import Calendar
+        except ImportError as exc:  # pragma: no cover
+            raise RuntimeError(
+                "icalendar package not installed; run "
+                "'pip install icalendar'"
+            ) from exc
+        if not isinstance(ics_bytes, (bytes, bytearray)):
+            raise ValueError("ics_bytes must be bytes")
+        if not ics_bytes:
+            return 0
+        try:
+            cal = Calendar.from_ical(bytes(ics_bytes))
+        except (ValueError, TypeError):
+            # Not a parseable .ics file; nothing imported, no error.
+            return 0
+        imported = 0
+        for component in cal.walk("VEVENT"):
+            try:
+                title = str(component.get("SUMMARY", "")).strip()
+                if not title:
+                    continue
+                dtstart = component.get("DTSTART")
+                if dtstart is None:
+                    continue
+                dtstart_dt = dtstart.dt
+                if isinstance(dtstart_dt, _dt.date) and not isinstance(
+                    dtstart_dt, _dt.datetime,
+                ):
+                    # All-day event with no time component: noon UTC.
+                    dtstart_dt = _dt.datetime.combine(
+                        dtstart_dt, _dt.time(12, 0),
+                        tzinfo=_dt.timezone.utc,
+                    )
+                elif isinstance(dtstart_dt, _dt.datetime):
+                    if dtstart_dt.tzinfo is None:
+                        dtstart_dt = dtstart_dt.replace(
+                            tzinfo=_dt.timezone.utc,
+                        )
+                    dtstart_dt = dtstart_dt.astimezone(_dt.timezone.utc)
+                starts_at = dtstart_dt.strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                )
+
+                ends_at: Optional[str] = None
+                dtend = component.get("DTEND")
+                if dtend is not None:
+                    dtend_dt = dtend.dt
+                    if isinstance(dtend_dt, _dt.date) and not isinstance(
+                        dtend_dt, _dt.datetime,
+                    ):
+                        # All-day DTEND: in our model an event runs
+                        # noon-to-midnight of its start day. If DTEND
+                        # equals DTSTART (single-day event), set
+                        # ends_at to 23:59 of that day so it sorts
+                        # after the noon start. Multi-day events get
+                        # noon of the DTEND day as their end.
+                        start_day = (
+                            dtstart_dt.date()
+                            if isinstance(dtstart_dt, _dt.datetime)
+                            else dtstart_dt
+                        )
+                        if dtend_dt == start_day:
+                            dtend_dt = _dt.datetime.combine(
+                                dtend_dt,
+                                _dt.time(23, 59, 59),
+                                tzinfo=_dt.timezone.utc,
+                            )
+                        else:
+                            dtend_dt = _dt.datetime.combine(
+                                dtend_dt,
+                                _dt.time(12, 0),
+                                tzinfo=_dt.timezone.utc,
+                            )
+                    elif isinstance(dtend_dt, _dt.datetime):
+                        if dtend_dt.tzinfo is None:
+                            dtend_dt = dtend_dt.replace(
+                                tzinfo=_dt.timezone.utc,
+                            )
+                        dtend_dt = dtend_dt.astimezone(
+                            _dt.timezone.utc,
+                        )
+                    ends_at = dtend_dt.strftime(
+                        "%Y-%m-%dT%H:%M:%SZ"
+                    )
+
+                location = component.get("LOCATION")
+                location_str = (
+                    str(location).strip() if location is not None else None
+                )
+                description = component.get("DESCRIPTION")
+                description_str = (
+                    str(description).strip()
+                    if description is not None else None
+                )
+                uid = str(component.get("UID", "")) or None
+
+                self.create(
+                    title=title,
+                    kind="meeting",
+                    starts_at=starts_at,
+                    ends_at=ends_at,
+                    description=description_str,
+                    location=location_str,
+                    source="ical_import",
+                    source_ref=uid,
+                )
+                imported += 1
+            except (ValueError, TypeError, AttributeError):
+                # Skip malformed VEVENTs rather than failing the whole
+                # import. The user can re-import after fixing their
+                # .ics file.
+                continue
+        return imported
+
+
+__all__ = [
+    "Event",
+    "KINDS",
+    "EventsService",
+    "suggest_match_confidence",
+    "compute_month_grid",
+]

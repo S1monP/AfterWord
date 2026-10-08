@@ -493,6 +493,48 @@ class Task:
         }
 
 
+@dataclass
+class Event:
+    """In-memory view of an events-table row.
+
+    Events are user-owned, not extracted by the LLM. The LLM matches
+    sessions to events based on time proximity (10 minutes before
+    ``starts_at`` through ``ends_at``). ``starts_at`` and ``ends_at``
+    are stored as ISO-8601 strings with a trailing ``Z``; ``ends_at``
+    is optional (a lecture with no declared end).
+    """
+    id: str
+    title: str
+    description: Optional[str]
+    kind: str                          # 'lecture' | 'meeting' | 'other'
+    starts_at: str
+    ends_at: Optional[str]
+    location: Optional[str]
+    source: str                        # 'manual' | 'ical_import'
+    source_ref: Optional[str]
+    matched_session_id: Optional[str]
+    match_confidence: Optional[float]
+    created_at: str
+    updated_at: str
+
+    def to_api_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "description": self.description,
+            "kind": self.kind,
+            "starts_at": self.starts_at,
+            "ends_at": self.ends_at,
+            "location": self.location,
+            "source": self.source,
+            "source_ref": self.source_ref,
+            "matched_session_id": self.matched_session_id,
+            "match_confidence": self.match_confidence,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
 # ---------------------------------------------------------------------------
 # Storage facade
 # ---------------------------------------------------------------------------
@@ -800,6 +842,19 @@ class Storage:
     # Allowed values for sessions.kind. ``None`` means "unclassified".
     RECORDING_KINDS: frozenset[str] = frozenset(
         {"lecture", "voice_memo", "meeting", "other"}
+    )
+
+    # Allowed values for events.kind. Events are user-owned calendar
+    # entries (a lecture slot, a meeting slot) — there's no "unclassified"
+    # equivalent; the LLM matches sessions to events, not the other way.
+    EVENT_KINDS: frozenset[str] = frozenset(
+        {"lecture", "meeting", "other"}
+    )
+
+    # Allowed values for events.source. ``manual`` is created in the UI,
+    # ``ical_import`` is bulk-imported from a .ics file.
+    EVENT_SOURCES: frozenset[str] = frozenset(
+        {"manual", "ical_import"}
     )
 
     def set_kind(
@@ -1446,6 +1501,205 @@ class Storage:
             pass
 
         return full_final.stat().st_size
+
+    # --- events -----------------------------------------------------------
+
+    def create_event(
+        self,
+        event_id: str,
+        *,
+        title: str,
+        kind: str,
+        starts_at: str,
+        ends_at: Optional[str] = None,
+        description: Optional[str] = None,
+        location: Optional[str] = None,
+        source: str = "manual",
+        source_ref: Optional[str] = None,
+        matched_session_id: Optional[str] = None,
+        match_confidence: Optional[float] = None,
+    ) -> Event:
+        """Insert a new event. All validation is the caller's job
+        (the service layer is responsible)."""
+        now = now_iso()
+        with self._tx() as conn:
+            conn.execute(
+                """
+                INSERT INTO events
+                    (id, title, description, kind, starts_at, ends_at,
+                     location, source, source_ref, matched_session_id,
+                     match_confidence, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (event_id, title, description, kind, starts_at, ends_at,
+                 location, source, source_ref, matched_session_id,
+                 match_confidence, now, now),
+            )
+        return self.get_event(event_id)  # type: ignore[return-value]
+
+    def get_event(self, event_id: str) -> Optional[Event]:
+        with self._tx() as conn:
+            row = conn.execute(
+                "SELECT * FROM events WHERE id = ?", (event_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            return self._row_to_event(row)
+
+    def update_event(
+        self,
+        event_id: str,
+        *,
+        title: Optional[str] = None,
+        description: Any = _UNSET,
+        kind: Optional[str] = None,
+        starts_at: Optional[str] = None,
+        ends_at: Any = _UNSET,
+        location: Any = _UNSET,
+        source: Optional[str] = None,
+        source_ref: Any = _UNSET,
+        matched_session_id: Any = _UNSET,
+        match_confidence: Any = _UNSET,
+    ) -> Event:
+        """Partial update. ``title``, ``kind``, ``starts_at``, ``source``
+        use the simple None-means-don't-touch convention. The other
+        fields use ``_UNSET`` so callers can pass ``None`` to explicitly
+        clear them.
+        """
+        sets: list[str] = []
+        params: list[Any] = []
+        if title is not None:
+            sets.append("title = ?"); params.append(title)
+        if description is not _UNSET:
+            sets.append("description = ?"); params.append(description)
+        if kind is not None:
+            sets.append("kind = ?"); params.append(kind)
+        if starts_at is not None:
+            sets.append("starts_at = ?"); params.append(starts_at)
+        if ends_at is not _UNSET:
+            sets.append("ends_at = ?"); params.append(ends_at)
+        if location is not _UNSET:
+            sets.append("location = ?"); params.append(location)
+        if source is not None:
+            sets.append("source = ?"); params.append(source)
+        if source_ref is not _UNSET:
+            sets.append("source_ref = ?"); params.append(source_ref)
+        if matched_session_id is not _UNSET:
+            sets.append("matched_session_id = ?")
+            params.append(matched_session_id)
+        if match_confidence is not _UNSET:
+            sets.append("match_confidence = ?")
+            params.append(match_confidence)
+        if not sets:
+            existing = self.get_event(event_id)
+            if existing is None:
+                raise KeyError(event_id)
+            return existing
+        sets.append("updated_at = ?")
+        params.append(now_iso())
+        params.append(event_id)
+        with self._tx() as conn:
+            cur = conn.execute(
+                f"UPDATE events SET {', '.join(sets)} WHERE id = ?",
+                params,
+            )
+            if cur.rowcount == 0:
+                raise KeyError(event_id)
+        updated = self.get_event(event_id)
+        assert updated is not None
+        return updated
+
+    def delete_event(self, event_id: str) -> bool:
+        with self._tx() as conn:
+            cur = conn.execute(
+                "DELETE FROM events WHERE id = ?", (event_id,)
+            )
+            return cur.rowcount > 0
+
+    def list_events(
+        self,
+        *,
+        kind: Optional[str] = None,
+        starts_after: Optional[str] = None,
+        starts_before: Optional[str] = None,
+        limit: int = 500,
+        offset: int = 0,
+    ) -> tuple[list[Event], int]:
+        """List events ordered by ``starts_at`` ascending. Both bounds
+        are inclusive. Returns ``(events, total)`` where ``total`` is
+        the count BEFORE limit/offset.
+        """
+        if limit < 1:
+            raise ValueError("limit must be >= 1")
+        if offset < 0:
+            raise ValueError("offset must be >= 0")
+        clauses: list[str] = []
+        where_params: list[Any] = []
+        if kind is not None:
+            clauses.append("kind = ?")
+            where_params.append(kind)
+        if starts_after is not None:
+            clauses.append("starts_at >= ?")
+            where_params.append(starts_after)
+        if starts_before is not None:
+            clauses.append("starts_at <= ?")
+            where_params.append(starts_before)
+        where_sql = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        with self._tx() as conn:
+            total = conn.execute(
+                f"SELECT COUNT(*) AS c FROM events {where_sql}",
+                where_params,
+            ).fetchone()["c"]
+            rows = conn.execute(
+                f"""
+                SELECT * FROM events
+                {where_sql}
+                ORDER BY starts_at ASC, id ASC
+                LIMIT ? OFFSET ?
+                """,
+                where_params + [limit, offset],
+            ).fetchall()
+        return [self._row_to_event(r) for r in rows], int(total)
+
+    def clear_event_match_for_session(self, session_id: str) -> int:
+        """Remove ``matched_session_id`` from any event that points at
+        ``session_id``. Returns count of rows cleared."""
+        with self._tx() as conn:
+            cur = conn.execute(
+                """
+                UPDATE events
+                SET matched_session_id = NULL,
+                    match_confidence = NULL,
+                    updated_at = ?
+                WHERE matched_session_id = ?
+                """,
+                (now_iso(), session_id),
+            )
+            return cur.rowcount
+
+    def _row_to_event(self, row: sqlite3.Row) -> Event:
+        keys = row.keys()
+        return Event(
+            id=row["id"],
+            title=row["title"],
+            description=row["description"],
+            kind=row["kind"],
+            starts_at=row["starts_at"],
+            ends_at=row["ends_at"],
+            location=row["location"],
+            source=row["source"],
+            source_ref=row["source_ref"] if "source_ref" in keys else None,
+            matched_session_id=(
+                row["matched_session_id"]
+                if "matched_session_id" in keys else None
+            ),
+            match_confidence=(
+                row["match_confidence"]
+                if "match_confidence" in keys else None
+            ),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
 
     # --- audio serving ----------------------------------------------------
 

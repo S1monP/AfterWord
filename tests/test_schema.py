@@ -236,11 +236,18 @@ class ServiceStubTests(unittest.TestCase):
             "TasksService.__init__ should take (self, store)",
         )
 
-    def test_events_service_is_stub(self) -> None:
+    def test_events_service_is_real(self) -> None:
+        """Events is the third service to land (Milestone 5). The
+        constructor takes a Storage instance; full behaviour
+        is covered in ``tests/test_events.py``.
+        """
         from services.events import EventsService
-        s = EventsService()
-        with self.assertRaises(NotImplementedError):
-            s.create(title="x", kind="lecture", starts_at="2026-10-04T12:00:00Z")
+        import inspect
+        sig = inspect.signature(EventsService.__init__)
+        self.assertGreaterEqual(
+            len(sig.parameters), 2,
+            "EventsService.__init__ should take (self, store)",
+        )
 
     def test_classification_service_is_stub(self) -> None:
         from services.classification import ClassificationService
