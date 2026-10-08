@@ -2,32 +2,244 @@
 
 {% block title %}Calendar &middot; Lecture Recorder{% endblock %}
 
+{% block extrahead %}
+  <style>
+    .lr-cal {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 1px;
+      background: var(--lr-border);
+      border: 1px solid var(--lr-border);
+      border-radius: var(--lr-radius-md);
+      overflow: hidden;
+      margin-top: var(--lr-s-4);
+    }
+    .lr-cal__head {
+      background: var(--lr-surface);
+      text-align: center;
+      font-size: var(--lr-fs-xs);
+      font-weight: 600;
+      color: var(--lr-text-faint);
+      padding: var(--lr-s-2) 0;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .lr-cal__cell {
+      background: var(--lr-surface);
+      min-height: 96px;
+      padding: var(--lr-s-2);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      position: relative;
+    }
+    .lr-cal__cell--out { opacity: 0.45; }
+    .lr-cal__cell--today { box-shadow: inset 0 0 0 2px var(--lr-accent); }
+    .lr-cal__daynum {
+      font-size: var(--lr-fs-sm);
+      color: var(--lr-text);
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .lr-cal__cell--out .lr-cal__daynum {
+      color: var(--lr-text-faint);
+      font-weight: 400;
+    }
+    .lr-cal__daynum:hover { color: var(--lr-accent); }
+    .lr-cal__chip {
+      display: block;
+      padding: 2px 6px;
+      border-radius: var(--lr-radius-sm);
+      font-size: var(--lr-fs-xs);
+      line-height: 1.25;
+      color: var(--lr-text);
+      background: var(--lr-surface-2, var(--lr-surface));
+      text-decoration: none;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      border-left: 3px solid var(--lr-text-faint);
+    }
+    .lr-cal__chip--lecture {
+      border-left-color: var(--lr-accent);
+      background: color-mix(in srgb, var(--lr-accent) 12%, var(--lr-surface));
+    }
+    .lr-cal__chip--meeting {
+      border-left-color: var(--lr-warning);
+      background: color-mix(in srgb, var(--lr-warning) 14%, var(--lr-surface));
+    }
+    .lr-cal__chip--other {
+      border-left-color: var(--lr-text-muted, var(--lr-text-faint));
+    }
+    .lr-cal__chip:hover {
+      background: var(--lr-surface-hover, var(--lr-surface-2));
+    }
+    .lr-cal__overflow {
+      font-size: var(--lr-fs-xs);
+      color: var(--lr-accent);
+      background: none;
+      border: 0;
+      cursor: pointer;
+      padding: 0;
+      margin-top: 2px;
+      text-align: left;
+    }
+    .lr-cal__overflow:hover { text-decoration: underline; }
+    .lr-cal__overflow-list {
+      list-style: none;
+      padding: 0;
+      margin: 4px 0 0;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .lr-import { margin-top: var(--lr-gap-card); }
+  </style>
+{% endblock %}
+
 {% block content %}
 <div class="lr-page">
   <header class="lr-page__header">
     <div>
       <h1 class="lr-page__title">Calendar</h1>
       <div class="lr-page__sub">
-        Lectures and meetings you schedule, used to match recordings.
+        Lectures and meetings you schedule. Sessions get linked here
+        once the AI pipeline matches them.
       </div>
     </div>
-    <button class="lr-btn lr-btn--primary" disabled>+ New event</button>
+    <a class="lr-btn lr-btn--primary"
+       href="{{ url_for('ui_event_new') }}">+ New event</a>
   </header>
 
-  <div class="lr-card">
-    <div class="lr-empty-card">
-      <div class="lr-empty-card__title">Coming in a later milestone</div>
-      <p>
-        The full calendar page (with month grid, list view, and
-        <code>.ics</code> import) lands in Milestone 7. The schema
-        and service stubs are already in place — see
-        <code>services/events.py</code>.
-      </p>
-      <p style="margin-top: var(--lr-s-2); font-size: var(--lr-fs-xs); color: var(--lr-text-faint);">
-        For now, the dashboard's Calendar panel shows Today and This week
-        directly, with no events.
-      </p>
+  <nav class="lr-row"
+       style="justify-content: space-between; align-items: center;
+              margin-top: var(--lr-s-3);">
+    <a class="lr-btn lr-btn--ghost"
+       href="{{ url_for('ui_calendar', year=prev_year, month=prev_month) }}">
+      &larr; Previous
+    </a>
+    <h2 style="font-size: var(--lr-fs-xl); margin: 0;">
+      {{ month_name }} {{ year }}
+    </h2>
+    <div style="display: flex; gap: var(--lr-s-2);">
+      {% if not is_current_month %}
+        <a class="lr-btn lr-btn--ghost"
+           href="{{ url_for('ui_calendar') }}">Today</a>
+      {% endif %}
+      <a class="lr-btn lr-btn--ghost"
+         href="{{ url_for('ui_calendar', year=next_year, month=next_month) }}">
+        Next &rarr;
+      </a>
     </div>
+  </nav>
+
+  <div class="lr-cal" role="grid"
+       aria-label="{{ month_name }} {{ year }}">
+    {% for wd in ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] %}
+      <div class="lr-cal__head" role="columnheader">{{ wd }}</div>
+    {% endfor %}
+
+    {% for row in grid %}
+      {% for cell in row %}
+        {% set iso_date = cell.date.isoformat() %}
+        {% set is_today = (iso_date == today_iso) %}
+        <div class="lr-cal__cell
+                    {% if not cell.in_month %}lr-cal__cell--out{% endif %}
+                    {% if is_today %}lr-cal__cell--today{% endif %}"
+             role="gridcell">
+          <a class="lr-cal__daynum"
+             href="{{ url_for('ui_event_new') }}?date={{ iso_date }}">
+            {{ cell.date.day }}
+          </a>
+          {% for ev in cell.events %}
+            <a class="lr-cal__chip lr-cal__chip--{{ ev.kind }}"
+               href="{{ url_for('ui_event_edit', event_id=ev.id) }}"
+               title="{{ ev.title }}">
+              <strong>{{ ev.starts_at[11:16] }}</strong>
+              {{ ev.title }}
+            </a>
+          {% endfor %}
+          {% if cell.overflow > 0 %}
+            <details>
+              <summary class="lr-cal__overflow">
+                + {{ cell.overflow }} more
+              </summary>
+              <ul class="lr-cal__overflow-list">
+                {% for ev in cell.events[3:] %}
+                  <li>
+                    <a class="lr-cal__chip lr-cal__chip--{{ ev.kind }}"
+                       href="{{ url_for('ui_event_edit', event_id=ev.id) }}"
+                       title="{{ ev.title }}">
+                      <strong>{{ ev.starts_at[11:16] }}</strong>
+                      {{ ev.title }}
+                    </a>
+                  </li>
+                {% endfor %}
+              </ul>
+            </details>
+          {% endif %}
+        </div>
+      {% endfor %}
+    {% endfor %}
   </div>
+
+  <section class="lr-card lr-import">
+    <header class="lr-card__header">
+      <h2 class="lr-card__title">Import .ics</h2>
+    </header>
+    <div class="lr-card__body">
+      <p style="color: var(--lr-text-faint); font-size: var(--lr-fs-sm);
+                margin-top: 0;">
+        Upload an iCalendar file (.ics) exported from your university
+        calendar or another scheduling tool. Events are added as meetings;
+        re-classify individual events afterwards.
+      </p>
+      <form method="post" action="{{ url_for('api_import_events_ics') }}"
+            enctype="multipart/form-data">
+        <div class="lr-row" style="gap: var(--lr-s-3); align-items: center;
+                                    flex-wrap: wrap;">
+          <input class="lr-input" type="file" name="file" accept=".ics"
+                 required>
+          <button class="lr-btn lr-btn--primary" type="submit">
+            Import
+          </button>
+        </div>
+      </form>
+      <div id="lr-import-result"
+           style="margin-top: var(--lr-s-3); font-size: var(--lr-fs-sm);"></div>
+    </div>
+  </section>
 </div>
+
+<script>
+  // Intercept the import form so we can show the imported count
+  // inline without a hard reload.
+  document.addEventListener("DOMContentLoaded", function () {
+    var form = document.querySelector(
+      "form[action='{{ url_for('api_import_events_ics') }}']"
+    );
+    if (!form) return;
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var data = new FormData(form);
+      var out = document.getElementById("lr-import-result");
+      fetch(form.action, {
+        method: "POST", body: data, credentials: "same-origin",
+      }).then(function (r) { return r.json(); }).then(function (j) {
+        if (j && typeof j.imported === "number" && j.imported > 0) {
+          out.textContent = "Imported " + j.imported + " event"
+            + (j.imported === 1 ? "" : "s") + ". Reloading…";
+          out.style.color = "var(--lr-success)";
+          setTimeout(function () { window.location.reload(); }, 600);
+        } else {
+          out.textContent = "No events imported (file may be empty or invalid).";
+          out.style.color = "var(--lr-warning)";
+        }
+      }).catch(function () {
+        out.textContent = "Import failed — see server logs.";
+        out.style.color = "var(--lr-danger)";
+      });
+    });
+  });
+</script>
 {% endblock %}

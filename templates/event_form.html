@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+
+{% block title %}
+  {% if mode == 'new' %}New event{% else %}Edit event{% endif %}
+  &middot; Lecture Recorder
+{% endblock %}
+
+{% block content %}
+<div class="lr-page">
+  <header class="lr-page__header">
+    <div>
+      <a class="lr-page__back" href="{{ url_for('ui_calendar') }}">
+        &larr; Calendar
+      </a>
+    </div>
+  </header>
+
+  <h1 class="lr-page__title">
+    {% if mode == 'new' %}New event{% else %}Edit event{% endif %}
+  </h1>
+  <div class="lr-page__sub">
+    {% if mode == 'new' %}
+      Fill in the details. Times are interpreted in your local timezone
+      by the browser; the server normalises everything to UTC.
+    {% else %}
+      Edit the event details and save.
+    {% endif %}
+  </div>
+
+  {% if error %}
+    <div class="lr-card"
+         style="border-color: var(--lr-danger); margin-top: var(--lr-s-3);">
+      <div class="lr-card__body"
+           style="color: var(--lr-danger); font-size: var(--lr-fs-sm);">
+        {{ error }}
+      </div>
+    </div>
+  {% endif %}
+
+  <form method="post"
+        action="{% if mode == 'new' %}{{ url_for('create_event_action') }}{% else %}{{ url_for('update_event_action', event_id=event.id) }}{% endif %}"
+        class="lr-card lr-card--padded"
+        style="margin-top: var(--lr-s-4);">
+    <label class="lr-field">
+      <span class="lr-field__label">Title</span>
+      <input class="lr-input" type="text" name="title" required
+             maxlength="200" autocomplete="off"
+             value="{{ event.title if event else '' }}">
+    </label>
+
+    <div class="lr-row" style="gap: var(--lr-s-3); flex-wrap: wrap;">
+      <label class="lr-field" style="flex: 1 1 200px;">
+        <span class="lr-field__label">Kind</span>
+        <select class="lr-input" name="kind">
+          {% set k = (event.kind if event else 'lecture') %}
+          <option value="lecture" {% if k == 'lecture' %}selected{% endif %}>Lecture</option>
+          <option value="meeting" {% if k == 'meeting' %}selected{% endif %}>Meeting</option>
+          <option value="other"   {% if k == 'other'   %}selected{% endif %}>Other</option>
+        </select>
+      </label>
+      <label class="lr-field" style="flex: 1 1 200px;">
+        <span class="lr-field__label">Location (optional)</span>
+        <input class="lr-input" type="text" name="location" maxlength="200"
+               autocomplete="off"
+               value="{{ event.location if event and event.location else '' }}">
+      </label>
+    </div>
+
+    <div class="lr-row" style="gap: var(--lr-s-3); flex-wrap: wrap;">
+      <label class="lr-field" style="flex: 1 1 200px;">
+        <span class="lr-field__label">Starts at</span>
+        <input class="lr-input" type="datetime-local" name="starts_at"
+               required value="{{ starts_at_default }}">
+      </label>
+      <label class="lr-field" style="flex: 1 1 200px;">
+        <span class="lr-field__label">Ends at (optional)</span>
+        <input class="lr-input" type="datetime-local" name="ends_at"
+               value="{{ ends_at_default }}">
+      </label>
+    </div>
+
+    <label class="lr-field">
+      <span class="lr-field__label">Description (optional)</span>
+      <textarea class="lr-input" name="description" rows="4"
+                maxlength="2000">{{ event.description if event and event.description else "" }}</textarea>
+    </label>
+
+    <div class="lr-form-actions">
+      <a class="lr-btn lr-btn--ghost"
+         href="{{ url_for('ui_calendar') }}">Cancel</a>
+      {% if mode == 'edit' %}
+        <form method="post"
+              action="{{ url_for('delete_event_action', event_id=event.id) }}"
+              style="display: inline;"
+              onsubmit="return confirm('Delete this event? This cannot be undone.');">
+          <button class="lr-btn lr-btn--danger" type="submit">Delete</button>
+        </form>
+      {% endif %}
+      <button class="lr-btn lr-btn--primary" type="submit">
+        {% if mode == 'new' %}Create event{% else %}Save changes{% endif %}
+      </button>
+    </div>
+  </form>
+</div>
+{% endblock %}

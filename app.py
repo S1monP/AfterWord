@@ -422,7 +422,172 @@ def _register_routes(app: Flask) -> None:
 
     @app.get("/calendar")
     def ui_calendar() -> Any:
-        return render_template("calendar.html")
+        """Month-grid calendar. Defaults to the current month if
+        ``?year=&month=`` are missing or invalid."""
+        import datetime as _dt
+        now = storage.now_iso()
+        cur = _dt.datetime.strptime(now, "%Y-%m-%dT%H:%M:%SZ")
+        try:
+            year = int(request.args.get("year", str(cur.year)))
+            month = int(request.args.get("month", str(cur.month)))
+        except ValueError:
+            year, month = cur.year, cur.month
+        if not (1 <= month <= 12):
+            month = cur.month
+        if not (1970 <= year <= 2100):
+            year = cur.year
+        # Load a 42-day window starting at grid_start so the grid has
+        # every event it might display.
+        first_of_month = _dt.date(year, month, 1)
+        leading = first_of_month.weekday()
+        grid_start = first_of_month - _dt.timedelta(days=leading)
+        window_lo = _dt.datetime.combine(
+            grid_start, _dt.time(0, 0), tzinfo=_dt.timezone.utc,
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        window_hi = _dt.datetime.combine(
+            grid_start + _dt.timedelta(days=42),
+            _dt.time(23, 59, 59),
+            tzinfo=_dt.timezone.utc,
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        events, _ = current_app_events_service().list(
+            starts_after=window_lo, starts_before=window_hi,
+            limit=500,
+        )
+        grid = services.events.compute_month_grid(year, month, events)
+        if month == 1:
+            prev_year, prev_month = year - 1, 12
+        else:
+            prev_year, prev_month = year, month - 1
+        if month == 12:
+            next_year, next_month = year + 1, 1
+        else:
+            next_year, next_month = year, month + 1
+        return render_template(
+            "calendar.html",
+            year=year, month=month,
+            grid=grid,
+            month_name=_dt.date(year, month, 1).strftime("%B"),
+            prev_year=prev_year, prev_month=prev_month,
+            next_year=next_year, next_month=next_month,
+            today_iso=now[:10],
+            is_current_month=(
+                year == cur.year and month == cur.month
+            ),
+        )
+
+    @app.get("/events/new")
+    def ui_event_new() -> Any:
+        """New event form. ``?date=YYYY-MM-DD`` prefills starts_at to
+        noon on that day. Without ``?date=`` we default to today noon."""
+        import datetime as _dt
+        date_str = request.args.get("date", "").strip()
+        if date_str:
+            try:
+                d = _dt.date.fromisoformat(date_str)
+            except ValueError:
+                d = _dt.datetime.strptime(
+                    storage.now_iso(), "%Y-%m-%dT%H:%M:%SZ",
+                ).date()
+        else:
+            d = _dt.datetime.strptime(
+                storage.now_iso(), "%Y-%m-%dT%H:%M:%SZ",
+            ).date()
+        starts_at_default = _dt.datetime.combine(
+            d, _dt.time(12, 0),
+        ).strftime("%Y-%m-%dT%H:%M")
+        return render_template(
+            "event_form.html",
+            mode="new", event=None,
+            starts_at_default=starts_at_default,
+            ends_at_default="",
+        )
+
+    @app.get("/events/<event_id>/edit")
+    def ui_event_edit(event_id: str) -> Any:
+        ev = current_app_events_service().get(event_id)
+        if ev is None:
+            abort(404)
+        # datetime-local inputs need "YYYY-MM-DDTHH:MM" (no seconds,
+        # no Z). Strip the trailing ":00Z" if present.
+        def _strip(iso):
+            if not iso:
+                return ""
+            return iso.rstrip("Z")[:16]
+        return render_template(
+            "event_form.html",
+            mode="edit", event=ev,
+            starts_at_default=_strip(ev.starts_at),
+            ends_at_default=_strip(ev.ends_at),
+        )
+
+    @app.post("/events/new")
+    def create_event_action() -> Any:
+        """HTML form action for the new-event page."""
+        payload = {
+            "title": (request.form.get("title") or "").strip(),
+            "kind": request.form.get("kind") or "lecture",
+            "starts_at": request.form.get("starts_at") or "",
+            "ends_at": request.form.get("ends_at") or None,
+            "description": (
+                request.form.get("description") or ""
+            ).strip() or None,
+            "location": (
+                request.form.get("location") or ""
+            ).strip() or None,
+        }
+        try:
+            current_app_events_service().create(**payload)
+        except ValueError as exc:
+            return (
+                render_template(
+                    "event_form.html",
+                    mode="new", event=None,
+                    starts_at_default=payload["starts_at"],
+                    ends_at_default=payload.get("ends_at") or "",
+                    error=str(exc),
+                ),
+                400,
+            )
+        return redirect(url_for("ui_calendar"))
+
+    @app.post("/events/<event_id>/edit")
+    def update_event_action(event_id: str) -> Any:
+        payload = {
+            "title": (request.form.get("title") or "").strip() or None,
+            "kind": request.form.get("kind") or None,
+            "starts_at": request.form.get("starts_at") or None,
+            "ends_at": request.form.get("ends_at") or None,
+            "description": (
+                request.form.get("description") or ""
+            ).strip() or None,
+            "location": (
+                request.form.get("location") or ""
+            ).strip() or None,
+        }
+        try:
+            current_app_events_service().update(event_id, **payload)
+        except KeyError:
+            abort(404)
+        except ValueError as exc:
+            ev = current_app_events_service().get(event_id)
+            return (
+                render_template(
+                    "event_form.html",
+                    mode="edit", event=ev,
+                    starts_at_default=payload.get("starts_at") or "",
+                    ends_at_default=payload.get("ends_at") or "",
+                    error=str(exc),
+                ),
+                400,
+            )
+        return redirect(url_for("ui_calendar"))
+
+    @app.post("/events/<event_id>/delete")
+    def delete_event_action(event_id: str) -> Any:
+        deleted = current_app_events_service().delete(event_id)
+        if not deleted:
+            abort(404)
+        return redirect(url_for("ui_calendar"))
 
     @app.get("/unsorted")
     def ui_unsorted() -> Any:
@@ -874,6 +1039,139 @@ def _register_routes(app: Flask) -> None:
         if not deleted:
             return jsonify({"error": "not_found"}), 404
         return ("", 204)
+
+    # --- API: events (calendar) -----------------------------------------
+    def _event_to_dict(ev: storage.Event) -> dict[str, Any]:
+        return ev.to_api_dict()
+
+    @app.get("/api/v1/events")
+    def api_list_events() -> Any:
+        """List events. Query params: ``kind`` (lecture/meeting/other),
+        ``starts_after``, ``starts_before`` (ISO-8601), ``limit``
+        (1-500, default 200), ``offset`` (>=0)."""
+        try:
+            limit = int(request.args.get("limit", 200))
+            offset = int(request.args.get("offset", 0))
+        except ValueError:
+            return jsonify({"error": "invalid_limit_or_offset"}), 400
+        if limit < 1 or limit > 500:
+            return jsonify({
+                "error": "invalid_limit", "detail": "limit must be 1..500",
+            }), 400
+        if offset < 0:
+            return jsonify({
+                "error": "invalid_offset", "detail": "offset must be >= 0",
+            }), 400
+        try:
+            events, total = current_app_events_service().list(
+                kind=request.args.get("kind") or None,
+                starts_after=request.args.get("starts_after") or None,
+                starts_before=request.args.get("starts_before") or None,
+                limit=limit,
+                offset=offset,
+            )
+        except ValueError as exc:
+            return jsonify({
+                "error": "invalid_payload", "detail": str(exc),
+            }), 400
+        return jsonify({
+            "events": [_event_to_dict(e) for e in events],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        })
+
+    @app.post("/api/v1/events")
+    def api_create_event() -> Any:
+        """Create an event. Body: ``{title, kind, starts_at, ends_at?,
+        description?, location?, source?, source_ref?}``."""
+        payload = request.get_json(silent=True) or {}
+        try:
+            ev = current_app_events_service().create(
+                title=payload.get("title", ""),
+                kind=payload.get("kind", ""),
+                starts_at=payload.get("starts_at", ""),
+                ends_at=payload.get("ends_at"),
+                description=payload.get("description"),
+                location=payload.get("location"),
+                source=payload.get("source") or "manual",
+                source_ref=payload.get("source_ref"),
+            )
+        except ValueError as exc:
+            return jsonify({
+                "error": "invalid_payload", "detail": str(exc),
+            }), 400
+        return jsonify({"event": _event_to_dict(ev)}), 201
+
+    @app.get("/api/v1/events/<event_id>")
+    def api_get_event(event_id: str) -> Any:
+        ev = current_app_events_service().get(event_id)
+        if ev is None:
+            return jsonify({"error": "not_found"}), 404
+        return jsonify({"event": _event_to_dict(ev)})
+
+    @app.patch("/api/v1/events/<event_id>")
+    def api_update_event(event_id: str) -> Any:
+        """Partial update. Body: any of ``{title, kind, starts_at,
+        ends_at, description, location, source, source_ref}``.
+        Pass ``ends_at=null`` explicitly to clear it; pass
+        ``description=null`` etc. to clear those too."""
+        payload = request.get_json(silent=True) or {}
+        kwargs: dict[str, Any] = {}
+        for field in ("title", "kind", "starts_at", "ends_at",
+                      "description", "location", "source",
+                      "source_ref"):
+            if field in payload:
+                kwargs[field] = payload[field]
+        try:
+            ev = current_app_events_service().update(event_id, **kwargs)
+        except KeyError:
+            return jsonify({"error": "not_found"}), 404
+        except ValueError as exc:
+            return jsonify({
+                "error": "invalid_payload", "detail": str(exc),
+            }), 400
+        return jsonify({"event": _event_to_dict(ev)})
+
+    @app.delete("/api/v1/events/<event_id>")
+    def api_delete_event(event_id: str) -> Any:
+        deleted = current_app_events_service().delete(event_id)
+        if not deleted:
+            return jsonify({"error": "not_found"}), 404
+        return ("", 204)
+
+    @app.post("/api/v1/events/import")
+    def api_import_events_ics() -> Any:
+        """Import events from a .ics file. Multipart field ``file``.
+
+        Returns ``{"imported": N}``. Bad files (unparseable) return
+        0 imported; only truly invalid requests (missing file, too
+        large) return 4xx."""
+        cfg = current_app.config["LR_CONFIG"]
+        if "file" not in request.files:
+            return jsonify({
+                "error": "missing_file",
+                "detail": "multipart field 'file' is required",
+            }), 400
+        upload = request.files["file"]
+        raw = upload.read()
+        if not raw:
+            return jsonify({"error": "empty_file"}), 400
+        if len(raw) > cfg.max_upload_bytes:
+            return jsonify({
+                "error": "file_too_large",
+                "detail": (
+                    f"file is {len(raw)} bytes; max is "
+                    f"{cfg.max_upload_bytes}"
+                ),
+            }), 413
+        try:
+            count = current_app_events_service().import_ics(raw)
+        except ValueError as exc:
+            return jsonify({
+                "error": "invalid_payload", "detail": str(exc),
+            }), 400
+        return jsonify({"imported": count})
 
     # --- API: web audio upload ------------------------------------------
     @app.post("/api/v1/uploads/audio")

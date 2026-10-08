@@ -323,6 +323,167 @@ class SearchStubTests(LRTestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.get_json()["hits"], [])
 
+class EventsApiTests(LRTestCase):
+    """HTTP surface for /api/v1/events/* (added in Milestone 5)."""
+
+    def _base(self, **overrides):
+        payload = {
+            "title": "Lecture",
+            "kind": "lecture",
+            "starts_at": "2027-03-15T10:00:00Z",
+            "ends_at": "2027-03-15T11:00:00Z",
+        }
+        payload.update(overrides)
+        return payload
+
+    def _create(self, **payload):
+        return self.client.post(
+            "/api/v1/events",
+            data=json.dumps(self._base(**payload)),
+            content_type="application/json",
+        )
+
+    def test_create_returns_201(self):
+        resp = self._create()
+        self.assertEqual(resp.status_code, 201)
+        body = resp.get_json()
+        self.assertEqual(body["event"]["title"], "Lecture")
+        self.assertEqual(
+            body["event"]["starts_at"], "2027-03-15T10:00:00Z",
+        )
+
+    def test_create_validates_title(self):
+        resp = self._create(title="")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_create_validates_kind(self):
+        resp = self._create(kind="gathering")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_create_validates_starts_at(self):
+        resp = self._create(starts_at="not-a-date")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_create_normalises_date_only(self):
+        resp = self._create(starts_at="2027-03-15")
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(
+            resp.get_json()["event"]["starts_at"],
+            "2027-03-15T00:00:00Z",
+        )
+
+    def test_list_returns_events_with_total(self):
+        self._create(title="A")
+        self._create(title="B")
+        resp = self.client.get("/api/v1/events")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertEqual(body["total"], 2)
+        self.assertEqual(len(body["events"]), 2)
+
+    def test_list_filter_by_kind(self):
+        self._create(title="L", kind="lecture")
+        self._create(title="M", kind="meeting")
+        resp = self.client.get("/api/v1/events?kind=lecture")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertEqual(body["total"], 1)
+        self.assertEqual(body["events"][0]["title"], "L")
+
+    def test_list_rejects_invalid_kind(self):
+        resp = self.client.get("/api/v1/events?kind=garbage")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_list_rejects_bad_limit(self):
+        resp = self.client.get("/api/v1/events?limit=abc")
+        self.assertEqual(resp.status_code, 400)
+        resp = self.client.get("/api/v1/events?limit=0")
+        self.assertEqual(resp.status_code, 400)
+        resp = self.client.get("/api/v1/events?limit=9999")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_get_returns_one(self):
+        create = self._create().get_json()
+        resp = self.client.get(
+            f"/api/v1/events/{create['event']['id']}"
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(
+            resp.get_json()["event"]["id"], create["event"]["id"],
+        )
+
+    def test_get_missing_returns_404(self):
+        resp = self.client.get("/api/v1/events/nope")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_update_partial(self):
+        create = self._create().get_json()
+        resp = self.client.patch(
+            f"/api/v1/events/{create['event']['id']}",
+            data=json.dumps({"title": "Calc III"}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()["event"]["title"], "Calc III")
+
+    def test_update_clear_ends_at(self):
+        create = self._create().get_json()
+        resp = self.client.patch(
+            f"/api/v1/events/{create['event']['id']}",
+            data=json.dumps({"ends_at": None}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIsNone(resp.get_json()["event"]["ends_at"])
+
+    def test_update_missing_returns_404(self):
+        resp = self.client.patch(
+            "/api/v1/events/nope",
+            data=json.dumps({"title": "X"}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 404)
+
+    def test_delete_returns_204(self):
+        create = self._create().get_json()
+        resp = self.client.delete(
+            f"/api/v1/events/{create['event']['id']}"
+        )
+        self.assertEqual(resp.status_code, 204)
+        self.assertEqual(
+            self.client.get(
+                f"/api/v1/events/{create['event']['id']}"
+            ).status_code,
+            404,
+        )
+
+    def test_import_requires_file_field(self):
+        resp = self.client.post("/api/v1/events/import")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_import_counts_events(self):
+        import io as _io
+        sample = (
+            b"BEGIN:VCALENDAR\r\n"
+            b"VERSION:2.0\r\n"
+            b"BEGIN:VEVENT\r\n"
+            b"UID:t1\r\nSUMMARY:Test 1\r\n"
+            b"DTSTART:20270315T100000Z\r\n"
+            b"DTEND:20270315T110000Z\r\n"
+            b"END:VEVENT\r\n"
+            b"BEGIN:VEVENT\r\n"
+            b"UID:t2\r\nSUMMARY:Test 2\r\n"
+            b"DTSTART:20270316T100000Z\r\n"
+            b"END:VEVENT\r\n"
+            b"END:VCALENDAR\r\n"
+        )
+        resp = self.client.post(
+            "/api/v1/events/import",
+            data={"file": (_io.BytesIO(sample), "cal.ics")},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()["imported"], 2)
 
 if __name__ == "__main__":
     unittest.main()
