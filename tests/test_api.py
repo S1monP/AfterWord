@@ -1,4 +1,4 @@
-"""API-layer tests using Flask's test client."""
+﻿"""API-layer tests using Flask's test client."""
 from __future__ import annotations
 
 import json
@@ -239,20 +239,6 @@ class WebUITests(LRTestCase):
     def test_session_page_404_for_unknown(self) -> None:
         r = self.client.get("/sessions/missing")
         self.assertEqual(r.status_code, 404)
-
-    def test_lectures_renders(self) -> None:
-        r = self.client.get("/lectures")
-        self.assertEqual(r.status_code, 200)
-        body = r.get_data()
-        self.assertIn(b"Lectures", body)
-        self.assertIn(b"Filter: lecture", body)
-
-    def test_meetings_renders(self) -> None:
-        r = self.client.get("/meetings")
-        self.assertEqual(r.status_code, 200)
-        body = r.get_data()
-        self.assertIn(b"Meetings", body)
-        self.assertIn(b"Filter: meeting", body)
 
     def test_todos_renders(self) -> None:
         r = self.client.get("/todos")

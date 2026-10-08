@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+
+{% block title %}Courses admin &middot; Lecture Recorder{% endblock %}
+
+{% block extrahead %}
+  <style>
+    .lr-courses-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .lr-courses-table th,
+    .lr-courses-table td {
+      padding: var(--lr-s-2) var(--lr-s-3);
+      border-bottom: 1px solid var(--lr-border);
+      text-align: left;
+      vertical-align: middle;
+    }
+    .lr-courses-table th {
+      color: var(--lr-text-faint);
+      font-size: var(--lr-fs-xs);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      font-weight: 600;
+    }
+    .lr-courses-table tr:last-child td { border-bottom: 0; }
+    .lr-swatch {
+      display: inline-block;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 1px solid var(--lr-border-hi);
+      vertical-align: middle;
+    }
+    .lr-courses-actions {
+      display: flex;
+      gap: var(--lr-s-2);
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+<div class="lr-page">
+  <header class="lr-page__header">
+    <div>
+      <h1 class="lr-page__title">Courses admin</h1>
+      <div class="lr-page__sub">
+        Create, edit, and delete the courses used by the
+        <a href="{{ url_for('ui_lectures') }}">Lectures</a> sidebar.
+        Bookmark this page &mdash; it is not linked from the top nav.
+      </div>
+    </div>
+    <a class="lr-btn lr-btn--primary"
+       href="{{ url_for('ui_course_new') }}">+ Add a course</a>
+  </header>
+
+  {% if courses %}
+    <div class="lr-card lr-card--padded">
+      <table class="lr-courses-table">
+        <thead>
+          <tr>
+            <th style="width: 40px;"></th>
+            <th>Name</th>
+            <th>Code</th>
+            <th>Sort</th>
+            <th style="text-align: right;">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in courses %}
+            <tr>
+              <td>
+                {% if c.color %}
+                  <span class="lr-swatch" style="background: {{ c.color }}"></span>
+                {% endif %}
+              </td>
+              <td>{{ c.name }}</td>
+              <td class="lr-mono">{{ c.code or '&mdash;' }}</td>
+              <td class="lr-mono">{{ c.sort_order }}</td>
+              <td style="text-align: right;">
+                <div class="lr-courses-actions" style="justify-content: flex-end;">
+                  <a class="lr-btn lr-btn--ghost"
+                     href="{{ url_for('ui_course_edit', course_id=c.id) }}">Edit</a>
+                  <form method="post"
+                        action="{{ url_for('delete_course_action', course_id=c.id) }}"
+                        style="display: inline;"
+                        onsubmit="return confirm('Delete this course? Sessions will be unlinked (not deleted).');">
+                    <button class="lr-btn lr-btn--danger" type="submit">
+                      Delete
+                    </button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="lr-page__sub" style="margin-top: var(--lr-s-3);">
+      {{ total }} course{{ '' if total == 1 else 's' }} total.
+    </div>
+  {% else %}
+    <div class="lr-card">
+      <div class="lr-empty-card">
+        <div class="lr-empty-card__title">No courses yet</div>
+        <p>
+          Click <strong>+ Add a course</strong> above to create your
+          first course (e.g. "Biology EP3456").
+        </p>
+      </div>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}Meetings &middot; Lecture Recorder{% endblock %}
+
+{% block content %}
+<div class="lr-page">
+  <header class="lr-page__header">
+    <div>
+      <h1 class="lr-page__title">Meetings</h1>
+      <div class="lr-page__sub">
+        All recorded meetings. Click one on the left to load it in
+        the right pane.
+      </div>
+    </div>
+  </header>
+
+  <div class="lr-twopane">
+    <aside class="lr-twopane__sidebar"
+           style="background: var(--lr-surface);
+                  border: 1px solid var(--lr-border);
+                  border-radius: var(--lr-radius-md);
+                  padding: var(--lr-s-3);">
+      <h2 style="font-size: var(--lr-fs-md); margin: 0 0 var(--lr-s-3);">
+        Meetings
+      </h2>
+      {% if meetings %}
+        <ul style="list-style: none; padding: 0; margin: 0;">
+          {% for m in meetings %}
+            <li>
+              <a class="lr-course__lecture"
+                 style="display: block; padding: var(--lr-s-2) var(--lr-s-3);
+                        border-radius: var(--lr-radius-sm);
+                        color: var(--lr-text);
+                        text-decoration: none;
+                        font-size: var(--lr-fs-sm);"
+                 href="{{ url_for('ui_meetings') }}?session={{ m.id }}"
+                 data-session-link="{{ m.id }}"
+                 data-kind="meeting"
+                 {% if m.id == selected_id %}
+                   class="lr-course__lecture is-active"
+                   style="display: block; padding: var(--lr-s-2) var(--lr-s-3);
+                          border-radius: var(--lr-radius-sm);
+                          background: color-mix(in srgb, var(--lr-warning) 18%, var(--lr-surface));
+                          color: var(--lr-warning);
+                          font-weight: 600;
+                          text-decoration: none;
+                          font-size: var(--lr-fs-sm);"
+                 {% endif %}>
+                {{ m.title or '(untitled)' }}
+              </a>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p style="color: var(--lr-text-faint); font-size: var(--lr-fs-sm); margin: 0;">
+          No meetings yet.
+        </p>
+      {% endif %}
+    </aside>
+
+    <section class="lr-twopane__main" id="lr-twopane-main"
+             style="min-height: 400px;">
+      {% include "_session_detail.html" %}
+    </section>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/meetings.js') }}"
+        defer></script>
+{% endblock %}

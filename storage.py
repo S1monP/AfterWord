@@ -535,6 +535,32 @@ class Event:
         }
 
 
+@dataclass
+class Course:
+    """In-memory view of a courses-table row.
+
+    ``color`` is a CSS hex string like ``#a3c4f3`` (or ``None``).
+    ``sort_order`` is an int used to order the sidebar; lower numbers
+    come first. ``created_at`` is ISO-8601 UTC.
+    """
+    id: str
+    name: str
+    code: Optional[str]
+    color: Optional[str]
+    sort_order: int
+    created_at: str
+
+    def to_api_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "code": self.code,
+            "color": self.color,
+            "sort_order": self.sort_order,
+            "created_at": self.created_at,
+        }
+
+
 # ---------------------------------------------------------------------------
 # Storage facade
 # ---------------------------------------------------------------------------
@@ -931,6 +957,220 @@ class Storage:
         if sess is None:
             raise KeyError(session_id)
         return sess
+
+    # --- courses ---------------------------------------------------------
+
+    def create_course(
+        self,
+        course_id: str,
+        *,
+        name: str,
+        code: Optional[str] = None,
+        color: Optional[str] = None,
+        sort_order: int = 0,
+    ) -> Course:
+        """Insert a new course. All validation is the caller's job
+        (the service layer is responsible)."""
+        now = now_iso()
+        with self._tx() as conn:
+            conn.execute(
+                """
+                INSERT INTO courses
+                    (id, name, code, color, sort_order, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (course_id, name, code, color, int(sort_order), now),
+            )
+        return self.get_course(course_id)  # type: ignore[return-value]
+
+    def get_course(self, course_id: str) -> Optional[Course]:
+        with self._tx() as conn:
+            row = conn.execute(
+                "SELECT * FROM courses WHERE id = ?", (course_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            return self._row_to_course(row)
+
+    def update_course(
+        self,
+        course_id: str,
+        *,
+        name: Optional[str] = None,
+        code: Any = _UNSET,
+        color: Any = _UNSET,
+        sort_order: Optional[int] = None,
+    ) -> Course:
+        """Partial update. ``name`` and ``sort_order`` use the simple
+        None-means-don't-touch convention. ``code`` and ``color`` use
+        ``_UNSET`` so callers can pass ``None`` to explicitly clear.
+        """
+        sets: list[str] = []
+        params: list[Any] = []
+        if name is not None:
+            sets.append("name = ?"); params.append(name)
+        if code is not _UNSET:
+            sets.append("code = ?"); params.append(code)
+        if color is not _UNSET:
+            sets.append("color = ?"); params.append(color)
+        if sort_order is not None:
+            sets.append("sort_order = ?"); params.append(int(sort_order))
+        if not sets:
+            existing = self.get_course(course_id)
+            if existing is None:
+                raise KeyError(course_id)
+            return existing
+        params.append(course_id)
+        with self._tx() as conn:
+            cur = conn.execute(
+                f"UPDATE courses SET {', '.join(sets)} WHERE id = ?",
+                params,
+            )
+            if cur.rowcount == 0:
+                raise KeyError(course_id)
+        updated = self.get_course(course_id)
+        assert updated is not None
+        return updated
+
+    def delete_course(self, course_id: str) -> bool:
+        with self._tx() as conn:
+            cur = conn.execute(
+                "DELETE FROM courses WHERE id = ?", (course_id,)
+            )
+            return cur.rowcount > 0
+
+    def list_courses(
+        self, *, limit: int = 200, offset: int = 0,
+    ) -> tuple[list[Course], int]:
+        """List courses: ``(sort_order ASC, created_at ASC, id ASC)``."""
+        if limit < 1:
+            raise ValueError("limit must be >= 1")
+        if offset < 0:
+            raise ValueError("offset must be >= 0")
+        with self._tx() as conn:
+            total = conn.execute(
+                "SELECT COUNT(*) AS c FROM courses"
+            ).fetchone()["c"]
+            rows = conn.execute(
+                """
+                SELECT * FROM courses
+                ORDER BY sort_order ASC, id ASC
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset),
+            ).fetchall()
+        return (
+            [self._row_to_course(r) for r in rows],
+            int(total),
+        )
+
+    def _row_to_course(self, row: sqlite3.Row) -> Course:
+        keys = row.keys()
+        return Course(
+            id=row["id"],
+            name=row["name"],
+            code=row["code"],
+            color=row["color"] if "color" in keys else None,
+            sort_order=row["sort_order"] if "sort_order" in keys else 0,
+            created_at=row["created_at"],
+        )
+
+    def list_sessions_by_course(
+        self, course_id: Optional[str], *,
+        status: Optional[str] = "ready",
+        kind: Optional[str] = None,
+    ) -> list[Session]:
+        """List sessions under a given course (or NULL course when
+        ``course_id is None``), newest first.
+
+        Filters by ``status`` (defaults to ready) and optionally by
+        ``kind``. Used by the /lectures sidebar.
+        """
+        clauses: list[str] = []
+        params: list[Any] = []
+        if course_id is None:
+            clauses.append("course_id IS NULL")
+        else:
+            clauses.append("course_id = ?")
+            params.append(course_id)
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status)
+        if kind is not None:
+            clauses.append("kind = ?")
+            params.append(kind)
+        where_sql = "WHERE " + " AND ".join(clauses)
+        with self._tx() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM sessions {where_sql} "
+                f"ORDER BY created_at DESC, id DESC",
+                params,
+            ).fetchall()
+        return [self._row_to_session(conn, r) for r in rows]
+
+    def set_session_course(
+        self, session_id: str, course_id: Optional[str],
+    ) -> Session:
+        """Assign or unassign a course on a session.
+
+        Raises ``KeyError`` if the session doesn't exist;
+        ``ValueError`` if the course doesn't exist (when
+        ``course_id`` is not None). The schema's
+        ``ON DELETE SET NULL`` keeps dangling references clean on
+        cascade delete.
+        """
+        sess = self.get_session(session_id)
+        if sess is None:
+            raise KeyError(session_id)
+        if course_id is not None and self.get_course(course_id) is None:
+            raise ValueError(f"course {course_id!r} does not exist")
+        now = now_iso()
+        with self._tx() as conn:
+            conn.execute(
+                "UPDATE sessions SET course_id = ?, updated_at = ? "
+                "WHERE id = ?",
+                (course_id, now, session_id),
+            )
+        sess = self.get_session(session_id)
+        assert sess is not None
+        return sess
+
+    def count_sessions_by_course(self, course_id: str) -> int:
+        """How many ready sessions are linked to this course. Shown
+        next to the course name in the /lectures sidebar."""
+        with self._tx() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS c FROM sessions "
+                "WHERE course_id = ? AND status = ?",
+                (course_id, STATUS_READY),
+            ).fetchone()
+        return int(row["c"])
+
+    def get_artifact(
+        self, session_id: str, kind: str,
+    ) -> Optional[dict[str, Any]]:
+        """Fetch one artifact for a session, by kind.
+
+        Returns ``{"kind", "content", "model", "created_at"}`` or
+        ``None`` if no such artifact exists yet. ``content`` may be
+        large. Used by the right-pane partial to render summary
+        and transcript blocks.
+        """
+        with self._tx() as conn:
+            row = conn.execute(
+                "SELECT kind, content, model, created_at "
+                "FROM artifacts WHERE session_id = ? AND kind = ? "
+                "ORDER BY created_at DESC LIMIT 1",
+                (session_id, kind),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "kind": row["kind"],
+            "content": row["content"],
+            "model": row["model"],
+            "created_at": row["created_at"],
+        }
 
     # --- notes ------------------------------------------------------------
 

@@ -1,0 +1,564 @@
+"""Tests for the CoursesService and the related API.
+
+Storage helpers (list_sessions_by_course, set_session_course,
+count_sessions_by_course, get_artifact) are exercised via the
+service tests and via the route tests below.
+"""
+from __future__ import annotations
+
+import json
+import unittest
+import uuid
+
+from tests.conftest import LRTestCase
+
+
+# ---------------------------------------------------------------------------
+# Service-level tests
+# ---------------------------------------------------------------------------
+
+
+class CoursesServiceTests(LRTestCase):
+    def _service(self):
+        return self.app.config["LR_COURSES_SERVICE"]
+
+    def test_create_persists_defaults(self):
+        c = self._service().create(name="Biology EP3456")
+        self.assertEqual(c.name, "Biology EP3456")
+        self.assertIsNone(c.code)
+        self.assertIsNone(c.color)
+        self.assertEqual(c.sort_order, 0)
+
+    def test_create_persists_each_field(self):
+        c = self._service().create(
+            name="Calc II",
+            code="MATH2341",
+            color="#a3c4f3",
+            sort_order=5,
+        )
+        self.assertEqual(c.name, "Calc II")
+        self.assertEqual(c.code, "MATH2341")
+        self.assertEqual(c.color, "#a3c4f3")
+        self.assertEqual(c.sort_order, 5)
+
+    def test_create_normalises_color_to_lowercase(self):
+        c = self._service().create(name="X", color="#A3C4F3")
+        self.assertEqual(c.color, "#a3c4f3")
+
+    def test_create_rejects_blank_name(self):
+        with self.assertRaises(ValueError):
+            self._service().create(name="   ")
+        with self.assertRaises(ValueError):
+            self._service().create(name="")
+
+    def test_create_rejects_too_long_name(self):
+        with self.assertRaises(ValueError):
+            self._service().create(name="x" * 201)
+
+    def test_create_rejects_bad_color(self):
+        for bad in ("red", "#xyzxyz", "#1234", "#aabbccdd", "aabbcc"):
+            with self.assertRaises(ValueError):
+                self._service().create(name="X", color=bad)
+
+    def test_create_accepts_3_digit_hex_color(self):
+        c = self._service().create(name="X", color="#abc")
+        self.assertEqual(c.color, "#abc")
+
+    def test_create_rejects_negative_sort_order(self):
+        with self.assertRaises(ValueError):
+            self._service().create(name="X", sort_order=-1)
+
+    def test_create_string_sort_order_coerced(self):
+        c = self._service().create(name="X", sort_order="3")
+        self.assertEqual(c.sort_order, 3)
+
+    def test_create_invalid_string_sort_order_raises(self):
+        with self.assertRaises(ValueError):
+            self._service().create(name="X", sort_order="abc")
+
+    def test_create_bool_sort_order_rejected(self):
+        # Bool is a subclass of int but shouldn't be accepted here.
+        with self.assertRaises(ValueError):
+            self._service().create(name="X", sort_order=True)
+
+    def test_update_partial_fields(self):
+        c = self._service().create(name="Old")
+        updated = self._service().update(
+            c.id, code="CODE101", color="#ff00ff", sort_order=10,
+        )
+        self.assertEqual(updated.name, "Old")
+        self.assertEqual(updated.code, "CODE101")
+        self.assertEqual(updated.color, "#ff00ff")
+        self.assertEqual(updated.sort_order, 10)
+
+    def test_update_clears_optional_fields_with_none(self):
+        c = self._service().create(
+            name="X", code="C", color="#abc",
+        )
+        cleared = self._service().update(
+            c.id, code=None, color=None,
+        )
+        self.assertIsNone(cleared.code)
+        self.assertIsNone(cleared.color)
+
+    def test_update_missing_raises_keyerror(self):
+        with self.assertRaises(KeyError):
+            self._service().update("nope", name="X")
+
+    def test_update_validates_inputs(self):
+        c = self._service().create(name="X")
+        with self.assertRaises(ValueError):
+            self._service().update(c.id, name="")
+        with self.assertRaises(ValueError):
+            self._service().update(c.id, color="not-a-color")
+
+    def test_delete_removes_row(self):
+        c = self._service().create(name="X")
+        self.assertTrue(self._service().delete(c.id))
+        self.assertIsNone(self._service().get(c.id))
+        self.assertFalse(self._service().delete(c.id))
+
+    def test_get_returns_none_for_missing(self):
+        self.assertIsNone(self._service().get("nope"))
+
+    def test_list_orders_by_sort_order_then_created(self):
+        a = self._service().create(name="Z", sort_order=5)
+        b = self._service().create(name="A", sort_order=0)
+        c = self._service().create(name="M", sort_order=0)
+        names = [x.name for x in self._service().list()[0]]
+        self.assertEqual(names, ["A", "M", "Z"])
+
+    def test_list_respects_limit(self):
+        for i in range(3):
+            self._service().create(name=f"C{i}")
+        items, total = self._service().list(limit=2)
+        self.assertEqual(total, 3)
+        self.assertEqual(len(items), 2)
+
+    def test_list_validates_inputs(self):
+        with self.assertRaises(ValueError):
+            self._service().list(limit=0)
+        with self.assertRaises(ValueError):
+            self._service().list(offset=-1)
+def _seed_session(
+    self, *, status: str = "ready", kind: str = "lecture",
+    course_id: object = None,
+) -> str:
+    sid = uuid.uuid4().hex
+    store = self.app.config["LR_STORAGE"]
+    store.upsert_session(
+        sid,
+        title="test",
+        expected_count=1,
+        sample_rate=22050,
+        channels=1,
+        bits_per_sample=32,
+        started_at="2026-01-15T10:00:00Z",
+    )
+    if status != "receiving" or kind != "lecture" or course_id is not None:
+        with store._tx() as conn:
+            conn.execute(
+                "UPDATE sessions SET status = ?, kind = ?, course_id = ? "
+                "WHERE id = ?",
+                (status, kind, course_id, sid),
+            )
+    return sid
+
+
+class CourseSessionRelationTests(LRTestCase):
+    def _store(self):
+        return self.app.config["LR_STORAGE"]
+
+    def _svc(self):
+        return self.app.config["LR_COURSES_SERVICE"]
+
+    def test_set_session_course_assigns(self):
+        c = self._svc().create(name="X")
+        sid = _seed_session(self)
+        sess = self._store().set_session_course(sid, c.id)
+        self.assertEqual(sess.course_id, c.id)
+
+    def test_set_session_course_unassigns_with_none(self):
+        c = self._svc().create(name="X")
+        sid = _seed_session(self)
+        self._store().set_session_course(sid, c.id)
+        sess = self._store().set_session_course(sid, None)
+        self.assertIsNone(sess.course_id)
+
+    def test_set_session_course_missing_session_raises(self):
+        c = self._svc().create(name="X")
+        with self.assertRaises(KeyError):
+            self._store().set_session_course("nope", c.id)
+
+    def test_set_session_course_missing_course_raises(self):
+        sid = _seed_session(self)
+        with self.assertRaises(ValueError):
+            self._store().set_session_course(sid, "nope")
+
+    def test_list_sessions_by_course_returns_only_matching(self):
+        c = self._svc().create(name="X")
+        a = _seed_session(self, course_id=c.id)
+        b = _seed_session(self, course_id=None)
+        rows = self._store().list_sessions_by_course(c.id)
+        ids = {r.id for r in rows}
+        self.assertIn(a, ids)
+        self.assertNotIn(b, ids)
+
+    def test_list_sessions_by_course_with_none_returns_uncategorised(self):
+        a = _seed_session(self, course_id=None)
+        b = _seed_session(self, course_id=None)
+        # This third one is status='receiving' so it must NOT match
+        # the default filter. Use it to verify the filter excludes
+        # non-ready sessions.
+        c = _seed_session(self, status="receiving", course_id=None)
+        rows = self._store().list_sessions_by_course(None)
+        ids = {r.id for r in rows}
+        self.assertIn(a, ids)
+        self.assertIn(b, ids)
+        self.assertNotIn(c, ids)
+
+    def test_count_sessions_by_course(self):
+        c = self._svc().create(name="X")
+        _seed_session(self, course_id=c.id)
+        _seed_session(self, course_id=c.id)
+        _seed_session(self, course_id=None)
+        self.assertEqual(
+            self._store().count_sessions_by_course(c.id), 2,
+        )
+
+
+class GetArtifactTests(LRTestCase):
+    def test_get_artifact_returns_none_when_empty(self):
+        sid = uuid.uuid4().hex
+        self.app.config["LR_STORAGE"].upsert_session(
+            sid, title="t", expected_count=1, sample_rate=22050,
+            channels=1, bits_per_sample=32,
+            started_at="2026-01-15T10:00:00Z",
+        )
+        self.assertIsNone(
+            self.app.config["LR_STORAGE"].get_artifact(sid, "summary"),
+        )
+
+    def test_get_artifact_returns_record_when_present(self):
+        sid = uuid.uuid4().hex
+        store = self.app.config["LR_STORAGE"]
+        store.upsert_session(
+            sid, title="t", expected_count=1, sample_rate=22050,
+            channels=1, bits_per_sample=32,
+            started_at="2026-01-15T10:00:00Z",
+        )
+        with store._tx() as conn:
+            conn.execute(
+                "INSERT INTO artifacts (id, session_id, kind, content, "
+                "model, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                ("a1", sid, "summary", "Hello world", "test-model",
+                 "2026-01-15T10:00:00Z"),
+            )
+        art = store.get_artifact(sid, "summary")
+        self.assertIsNotNone(art)
+        self.assertEqual(art["content"], "Hello world")
+        self.assertEqual(art["model"], "test-model")
+        self.assertEqual(art["kind"], "summary")
+class CoursesApiTests(LRTestCase):
+    def _create(self, **payload):
+        return self.client.post(
+            "/api/v1/courses",
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+    def test_create_returns_201(self):
+        resp = self._create(name="Calc II")
+        self.assertEqual(resp.status_code, 201)
+        body = resp.get_json()
+        self.assertEqual(body["course"]["name"], "Calc II")
+        self.assertIn("id", body["course"])
+
+    def test_create_validates_name(self):
+        resp = self._create(name="")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_create_validates_color(self):
+        resp = self._create(name="X", color="not-a-color")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_list_returns_total(self):
+        self._create(name="A")
+        self._create(name="B")
+        resp = self.client.get("/api/v1/courses")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertEqual(body["total"], 2)
+        self.assertEqual(len(body["courses"]), 2)
+
+    def test_list_rejects_bad_limit(self):
+        resp = self.client.get("/api/v1/courses?limit=abc")
+        self.assertEqual(resp.status_code, 400)
+        resp = self.client.get("/api/v1/courses?limit=0")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_get_missing_returns_404(self):
+        resp = self.client.get("/api/v1/courses/nope")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_update_partial(self):
+        c = self._create(name="Old").get_json()["course"]
+        resp = self.client.patch(
+            f"/api/v1/courses/{c['id']}",
+            data=json.dumps({"code": "EP101"}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()["course"]["code"], "EP101")
+
+    def test_update_missing_returns_404(self):
+        resp = self.client.patch(
+            "/api/v1/courses/nope",
+            data=json.dumps({"name": "X"}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 404)
+
+    def test_delete_returns_204(self):
+        c = self._create(name="X").get_json()["course"]
+        resp = self.client.delete(f"/api/v1/courses/{c['id']}")
+        self.assertEqual(resp.status_code, 204)
+
+    def test_delete_missing_returns_404(self):
+        resp = self.client.delete("/api/v1/courses/nope")
+        self.assertEqual(resp.status_code, 404)
+
+
+class SessionCourseAssignApiTests(LRTestCase):
+    def _seed(self):
+        sid = uuid.uuid4().hex
+        self.app.config["LR_STORAGE"].upsert_session(
+            sid, title="t", expected_count=1, sample_rate=22050,
+            channels=1, bits_per_sample=32,
+            started_at="2026-01-15T10:00:00Z",
+        )
+        return sid
+
+    def test_assign_course_to_session(self):
+        sid = self._seed()
+        c = self.client.post(
+            "/api/v1/courses",
+            data=json.dumps({"name": "X"}),
+            content_type="application/json",
+        ).get_json()["course"]
+        resp = self.client.post(
+            f"/api/v1/sessions/{sid}/course",
+            data=json.dumps({"course_id": c["id"]}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(
+            resp.get_json()["session"]["course_id"], c["id"],
+        )
+
+    def test_unassign_course(self):
+        sid = self._seed()
+        resp = self.client.post(
+            f"/api/v1/sessions/{sid}/course",
+            data=json.dumps({"course_id": None}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIsNone(resp.get_json()["session"]["course_id"])
+
+    def test_assign_unknown_course_returns_400(self):
+        sid = self._seed()
+        resp = self.client.post(
+            f"/api/v1/sessions/{sid}/course",
+            data=json.dumps({"course_id": "nope"}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_assign_unknown_session_returns_404(self):
+        resp = self.client.post(
+            "/api/v1/sessions/nope/course",
+            data=json.dumps({"course_id": None}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 404)
+
+    def test_assign_requires_course_id_field(self):
+        sid = self._seed()
+        resp = self.client.post(
+            f"/api/v1/sessions/{sid}/course",
+            data=json.dumps({}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 400)
+class LecturesUiTests(LRTestCase):
+    def test_lectures_renders_with_two_pane(self):
+        resp = self.client.get("/lectures")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_data(as_text=True)
+        self.assertIn("lr-twopane", body)
+        self.assertIn("Courses", body)
+        self.assertIn("courses admin", body)
+
+    def test_lectures_renders_courses_in_sidebar(self):
+        svc = self.app.config["LR_COURSES_SERVICE"]
+        svc.create(name="Calc II", code="MBX101", color="#ff0000")
+        svc.create(name="Biology EP3456")
+        resp = self.client.get("/lectures")
+        body = resp.get_data(as_text=True)
+        self.assertIn("Calc II", body)
+        self.assertIn("Biology EP3456", body)
+        self.assertIn("(MBX101)", body)
+
+    def test_lectures_renders_selected_session_in_right_pane(self):
+        svc = self.app.config["LR_COURSES_SERVICE"]
+        course = svc.create(name="X")
+        sid = _seed_session(self, course_id=course.id)
+        resp = self.client.get(f"/lectures?session={sid}")
+        body = resp.get_data(as_text=True)
+        self.assertIn("lr-detail", body)
+        self.assertIn(sid[:8], body)
+
+    def test_lectures_soft_nav_returns_only_detail_partial(self):
+        sid = _seed_session(self)
+        resp = self.client.get(
+            f"/lectures?session={sid}",
+            headers={"X-Soft-Nav": "1"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_data(as_text=True)
+        # The detail block is rendered (a real session was passed).
+        self.assertIn("lr-detail", body)
+        self.assertIn(sid[:8], body)
+        # The sidebar markup is NOT rendered at all (soft-nav
+        # strips everything except the right pane).
+        self.assertNotIn("lr-twopane__sidebar", body)
+        self.assertNotIn("Courses", body)
+
+
+class MeetingsUiTests(LRTestCase):
+    def test_meetings_renders_with_two_pane(self):
+        resp = self.client.get("/meetings")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_data(as_text=True)
+        self.assertIn("lr-twopane", body)
+        self.assertIn("Meetings", body)
+
+    def test_meetings_soft_nav_returns_only_detail_partial(self):
+        sid = _seed_session(self, kind="meeting")
+        resp = self.client.get(
+            f"/meetings?session={sid}",
+            headers={"X-Soft-Nav": "1"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_data(as_text=True)
+        self.assertIn("lr-detail", body)
+        self.assertIn(sid[:8], body)
+        self.assertNotIn("lr-twopane__sidebar", body)
+
+    def test_meetings_soft_nav_with_unknown_session_shows_empty(self):
+        # When the session id is unknown, the right pane renders
+        # the empty-state placeholder (no lr-detail block).
+        resp = self.client.get(
+            "/meetings?session=nope",
+            headers={"X-Soft-Nav": "1"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_data(as_text=True)
+        self.assertNotIn("lr-detail", body)
+        self.assertIn("Pick a meeting", body)
+
+
+class CoursesAdminUiTests(LRTestCase):
+    def test_admin_lists_all_courses(self):
+        svc = self.app.config["LR_COURSES_SERVICE"]
+        svc.create(name="A")
+        svc.create(name="B")
+        resp = self.client.get("/courses/admin")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_data(as_text=True)
+        self.assertIn("A", body)
+        self.assertIn("B", body)
+        self.assertIn("+ Add a course", body)
+
+    def test_new_course_form_renders(self):
+        resp = self.client.get("/courses/new")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_data(as_text=True)
+        self.assertIn('name="name"', body)
+        self.assertIn('name="code"', body)
+        self.assertIn('name="color"', body)
+        self.assertIn('name="sort_order"', body)
+
+    def test_edit_form_renders_existing(self):
+        svc = self.app.config["LR_COURSES_SERVICE"]
+        c = svc.create(name="Calc II", code="MBX101", color="#ff0000")
+        resp = self.client.get(f"/courses/{c.id}/edit")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_data(as_text=True)
+        self.assertIn("Calc II", body)
+        self.assertIn("MBX101", body)
+
+    def test_edit_unknown_returns_404(self):
+        resp = self.client.get("/courses/nope/edit")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_admin_create_redirects(self):
+        resp = self.client.post(
+            "/courses/new",
+            data={"name": "X", "code": "", "color": "#888888",
+                  "sort_order": "0"},
+            follow_redirects=False,
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("/courses/admin", resp.headers["Location"])
+
+    def test_admin_create_invalid_returns_400(self):
+        resp = self.client.post(
+            "/courses/new",
+            data={"name": "", "color": "#888888", "sort_order": "0"},
+            follow_redirects=False,
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("name is required", resp.get_data(as_text=True))
+
+    def test_admin_update_redirects(self):
+        svc = self.app.config["LR_COURSES_SERVICE"]
+        c = svc.create(name="Old")
+        resp = self.client.post(
+            f"/courses/{c.id}/edit",
+            data={"name": "New", "code": "", "color": "#abcdef",
+                  "sort_order": "1"},
+            follow_redirects=False,
+        )
+        self.assertEqual(resp.status_code, 302)
+        again = self.client.get(f"/api/v1/courses/{c.id}").get_json()
+        self.assertEqual(again["course"]["name"], "New")
+
+    def test_admin_delete_redirects(self):
+        svc = self.app.config["LR_COURSES_SERVICE"]
+        c = svc.create(name="X")
+        resp = self.client.post(
+            f"/courses/{c.id}/delete",
+            follow_redirects=False,
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(
+            self.client.get(f"/api/v1/courses/{c.id}").status_code,
+            404,
+        )
+
+
+class CoursesServiceIsRealTests(unittest.TestCase):
+    def test_courses_service_init_signature(self):
+        from services.courses import CoursesService
+        import inspect
+        sig = inspect.signature(CoursesService.__init__)
+        self.assertGreaterEqual(
+            len(sig.parameters), 2,
+            "CoursesService.__init__ should take (self, store)",
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

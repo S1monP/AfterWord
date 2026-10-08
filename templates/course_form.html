@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}
+  {% if mode == 'new' %}New course{% else %}Edit course{% endif %}
+  &middot; Lecture Recorder
+{% endblock %}
+
+{% block content %}
+<div class="lr-page">
+  <header class="lr-page__header">
+    <div>
+      <a class="lr-page__back" href="{{ url_for('ui_courses_admin') }}">
+        &larr; Courses admin
+      </a>
+    </div>
+  </header>
+
+  <h1 class="lr-page__title">
+    {% if mode == 'new' %}New course{% else %}Edit course{% endif %}
+  </h1>
+
+  {% if error %}
+    <div class="lr-card"
+         style="border-color: var(--lr-danger); margin-top: var(--lr-s-3);">
+      <div class="lr-card__body"
+           style="color: var(--lr-danger); font-size: var(--lr-fs-sm);">
+        {{ error }}
+      </div>
+    </div>
+  {% endif %}
+
+  <form method="post"
+        action="{% if mode == 'new' %}{{ url_for('create_course_action') }}{% else %}{{ url_for('update_course_action', course_id=course.id) }}{% endif %}"
+        class="lr-card lr-card--padded"
+        style="margin-top: var(--lr-s-4);">
+    <label class="lr-field">
+      <span class="lr-field__label">Name</span>
+      <input class="lr-input" type="text" name="name" required
+             maxlength="200" autocomplete="off"
+             value="{{ form_name }}">
+    </label>
+
+    <label class="lr-field">
+      <span class="lr-field__label">Code (optional)</span>
+      <input class="lr-input" type="text" name="code" maxlength="50"
+             autocomplete="off" value="{{ form_code }}">
+    </label>
+
+    <div class="lr-row" style="gap: var(--lr-s-3); flex-wrap: wrap;">
+      <label class="lr-field" style="flex: 1 1 200px;">
+        <span class="lr-field__label">Colour (hex)</span>
+        <input class="lr-input" type="color" name="color"
+               value="{{ form_color }}">
+      </label>
+      <label class="lr-field" style="flex: 1 1 200px;">
+        <span class="lr-field__label">Sort order</span>
+        <input class="lr-input" type="number" name="sort_order" min="0"
+               step="1" value="{{ form_sort_order }}">
+      </label>
+    </div>
+
+    <div class="lr-form-actions">
+      <a class="lr-btn lr-btn--ghost"
+         href="{{ url_for('ui_courses_admin') }}">Cancel</a>
+      <button class="lr-btn lr-btn--primary" type="submit">
+        {% if mode == 'new' %}Create course{% else %}Save changes{% endif %}
+      </button>
+    </div>
+  </form>
+</div>
+{% endblock %}

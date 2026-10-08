@@ -1,4 +1,4 @@
-"""Lecture Recorder Server — Phase A.
+﻿"""Lecture Recorder Server â€” Phase A.
 
 A small Flask app: receive audio chunks over HTTP, stitch them into a
 single WAV per session, and serve a minimal web UI to browse and play
@@ -31,6 +31,7 @@ import services.notes  # noqa: F401  (exposes NotesService, render_html, constan
 import services.tasks  # noqa: F401  (exposes TasksService, KINDS, ALLOWED_TRANSITIONS)
 import services.events  # noqa: F401  (exposes EventsService, compute_month_grid, suggest_match_confidence)
 import services.classification  # noqa: F401  (exposes ClassificationService, VALID_KINDS, LLM_NOT_IMPLEMENTED)
+import services.courses  # noqa: F401  (exposes CoursesService)
 import storage
 from services import processing, transcode
 
@@ -61,6 +62,9 @@ def create_app(config: Optional[config_mod.Config] = None) -> Flask:
         services.classification.ClassificationService(
             app.config["LR_STORAGE"]
         )
+    )
+    app.config["LR_COURSES_SERVICE"] = services.courses.CoursesService(
+        app.config["LR_STORAGE"]
     )
     app.secret_key = os.environ.get("LR_SECRET", "lr-dev-secret-not-for-prod")
 
@@ -128,9 +132,38 @@ def current_app_classification_service() -> (
     return current_app.config["LR_CLASSIFICATION_SERVICE"]
 
 
+def current_app_courses_service() -> services.courses.CoursesService:
+    """Pull the CoursesService off the active Flask app."""
+    return current_app.config["LR_COURSES_SERVICE"]
+
+
 # ---------------------------------------------------------------------------
 # Jinja filters
 # ---------------------------------------------------------------------------
+
+def _selected_session_context(session_id: str) -> dict[str, Any]:
+    """Build the right-pane context dict for a session id.
+
+    Used by the lectures/meetings templates to render the right
+    pane (audio + summary + transcript). Returns the empty-shape
+    dict if the session doesn't exist.
+    """
+    store = current_app_storage()
+    sess = store.get_session(session_id)
+    if sess is None:
+        return {
+            "selected_session": None,
+            "summary": None,
+            "transcript": None,
+        }
+    summary = store.get_artifact(session_id, "summary")
+    transcript = store.get_artifact(session_id, "transcript")
+    return {
+        "selected_session": sess,
+        "summary": summary,
+        "transcript": transcript,
+    }
+
 
 def _register_filters(app: Flask) -> None:
     @app.template_filter("human_size")
@@ -160,7 +193,7 @@ def _register_filters(app: Flask) -> None:
     @app.template_filter("iso_local")
     def _iso_local(iso: Optional[str]) -> str:
         if not iso:
-            return "—"
+            return "â€”"
         return iso.replace("T", " ").rstrip("Z")
 
 
@@ -215,42 +248,94 @@ def _register_routes(app: Flask) -> None:
             open_deadlines=open_deadlines,
         )
 
-    def _render_recordings(kind_filter: Optional[str] = None,
-                           page_title: str = "Recordings",
-                           sub: str = "Newest first. Click a row to open.") -> Any:
+
+    @app.get("/recordings")
+    def ui_index() -> Any:
+        """All-sessions list (legacy). Kept for backwards compatibility
+        and for users who want everything on one page."""
         all_sessions = current_app_storage().list_sessions()
-        if kind_filter is not None:
-            sessions = [s for s in all_sessions if s.kind == kind_filter]
-        else:
-            sessions = all_sessions
         return render_template(
             "index.html",
-            sessions=sessions,
-            page_title=page_title,
-            page_sub=sub,
-            kind_filter=kind_filter,
+            sessions=all_sessions,
+            page_title="Recordings",
+            page_sub="Newest first. Click a row to open.",
+            kind_filter=None,
             status_label=_STATUS_LABEL,
             duration_for=_estimate_duration_seconds,
         )
 
-    @app.get("/recordings")
-    def ui_index() -> Any:
-        return _render_recordings()
-
     @app.get("/lectures")
     def ui_lectures() -> Any:
-        return _render_recordings(
-            kind_filter="lecture",
-            page_title="Lectures",
-            sub="Recordings tagged as lectures. Use Recordings → to see all.",
+        """Two-pane layout: left sidebar lists courses (each
+        expandable to show its lectures); right pane shows the
+        selected session's audio + summary + transcript.
+        """
+        store = current_app_storage()
+        courses, _ = current_app_courses_service().list()
+        course_groups: list[dict[str, Any]] = []
+        for c in courses:
+            course_groups.append({
+                "course": c,
+                "lecture_count": store.count_sessions_by_course(c.id),
+                "lectures": store.list_sessions_by_course(
+                    c.id, status="ready", kind="lecture",
+                ),
+            })
+        uncategorised_lectures = store.list_sessions_by_course(
+            None, status="ready", kind="lecture",
+        )
+        selected_id = request.args.get("session", "").strip()
+        right_ctx = (_selected_session_context(selected_id)
+                     if selected_id else {
+                         "selected_session": None,
+                         "summary": None, "transcript": None,
+                     })
+        # Soft-nav: when the JS client requests just the right
+        # pane, render only the partial (saves bandwidth and keeps
+        # the sidebar state). Falls back to the full page otherwise.
+        if request.headers.get("X-Soft-Nav") == "1":
+            return render_template(
+                "_session_detail.html",
+                kind_label="Lecture",
+                **right_ctx,
+            )
+        return render_template(
+            "lectures.html",
+            course_groups=course_groups,
+            uncategorised_lectures=uncategorised_lectures,
+            selected_id=selected_id,
+            **right_ctx,
         )
 
     @app.get("/meetings")
     def ui_meetings() -> Any:
-        return _render_recordings(
-            kind_filter="meeting",
-            page_title="Meetings",
-            sub="Recordings tagged as meetings. Use Recordings → to see all.",
+        """Two-pane layout: left sidebar lists all meetings;
+        right pane shows the selected session's audio + summary
+        + transcript.
+        """
+        store = current_app_storage()
+        meetings = store.list_sessions_by_course(
+            None, status="ready", kind="meeting",
+        )
+        selected_id = request.args.get("session", "").strip()
+        right_ctx = (_selected_session_context(selected_id)
+                     if selected_id else {
+                         "selected_session": None,
+                         "summary": None, "transcript": None,
+                     })
+        # Soft-nav: render only the right pane when the JS client
+        # asks for it via the X-Soft-Nav header.
+        if request.headers.get("X-Soft-Nav") == "1":
+            return render_template(
+                "_session_detail.html",
+                kind_label="Meeting",
+                **right_ctx,
+            )
+        return render_template(
+            "meetings.html",
+            meetings=meetings,
+            selected_id=selected_id,
+            **right_ctx,
         )
 
     @app.get("/notes")
@@ -792,7 +877,7 @@ def _register_routes(app: Flask) -> None:
             }), 400
         confidence = payload.get("confidence")
         if confidence is None and kind is not None:
-            # Manual override — treat as full confidence.
+            # Manual override â€” treat as full confidence.
             confidence = 1.0
         try:
             sess = store.set_kind(session_id, kind, confidence=confidence)
@@ -1265,6 +1350,207 @@ def _register_routes(app: Flask) -> None:
                 "error": "invalid_payload", "detail": str(exc),
             }), 400
         return jsonify({"imported": count})
+
+    # --- API: courses (CRUD + session assignment) ---------------------
+    def _course_to_dict(c: storage.Course) -> dict[str, Any]:
+        return c.to_api_dict()
+
+    @app.get("/api/v1/courses")
+    def api_list_courses() -> Any:
+        """List courses. Query params: ``limit`` (1-500, default
+        200), ``offset`` (>=0)."""
+        try:
+            limit = int(request.args.get("limit", 200))
+            offset = int(request.args.get("offset", 0))
+        except ValueError:
+            return jsonify({"error": "invalid_limit_or_offset"}), 400
+        if limit < 1 or limit > 500:
+            return jsonify({
+                "error": "invalid_limit", "detail": "limit must be 1..500",
+            }), 400
+        if offset < 0:
+            return jsonify({
+                "error": "invalid_offset", "detail": "offset must be >= 0",
+            }), 400
+        courses, total = current_app_courses_service().list(
+            limit=limit, offset=offset,
+        )
+        return jsonify({
+            "courses": [_course_to_dict(c) for c in courses],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        })
+
+    @app.post("/api/v1/courses")
+    def api_create_course() -> Any:
+        """Create a course. Body: ``{name, code?, color?,
+        sort_order?}``."""
+        payload = request.get_json(silent=True) or {}
+        try:
+            course = current_app_courses_service().create(
+                name=payload.get("name", ""),
+                code=payload.get("code"),
+                color=payload.get("color"),
+                sort_order=payload.get("sort_order") or 0,
+            )
+        except ValueError as exc:
+            return jsonify({
+                "error": "invalid_payload", "detail": str(exc),
+            }), 400
+        return jsonify({"course": _course_to_dict(course)}), 201
+
+    @app.get("/api/v1/courses/<course_id>")
+    def api_get_course(course_id: str) -> Any:
+        course = current_app_courses_service().get(course_id)
+        if course is None:
+            return jsonify({"error": "not_found"}), 404
+        return jsonify({"course": _course_to_dict(course)})
+
+    @app.patch("/api/v1/courses/<course_id>")
+    def api_update_course(course_id: str) -> Any:
+        """Partial update. Body: any of ``{name, code, color,
+        sort_order}``. ``code`` and ``color`` accept null to clear."""
+        payload = request.get_json(silent=True) or {}
+        kwargs: dict[str, Any] = {}
+        for field in ("name", "code", "color", "sort_order"):
+            if field in payload:
+                kwargs[field] = payload[field]
+        try:
+            course = current_app_courses_service().update(
+                course_id, **kwargs,
+            )
+        except KeyError:
+            return jsonify({"error": "not_found"}), 404
+        except ValueError as exc:
+            return jsonify({
+                "error": "invalid_payload", "detail": str(exc),
+            }), 400
+        return jsonify({"course": _course_to_dict(course)})
+
+    @app.delete("/api/v1/courses/<course_id>")
+    def api_delete_course(course_id: str) -> Any:
+        deleted = current_app_courses_service().delete(course_id)
+        if not deleted:
+            return jsonify({"error": "not_found"}), 404
+        return ("", 204)
+
+    @app.post("/api/v1/sessions/<session_id>/course")
+    def api_assign_course(session_id: str) -> Any:
+        """Assign or unassign a course on a session.
+
+        Body: ``{"course_id": "<id>" | null}``.
+        """
+        store = current_app_storage()
+        if store.get_session(session_id) is None:
+            return jsonify({"error": "not_found"}), 404
+        payload = request.get_json(silent=True) or {}
+        if "course_id" not in payload:
+            return jsonify({
+                "error": "invalid_payload",
+                "detail": "field 'course_id' is required (string or null)",
+            }), 400
+        course_id = payload["course_id"]
+        try:
+            sess = store.set_session_course(session_id, course_id)
+        except ValueError as exc:
+            return jsonify({
+                "error": "invalid_payload", "detail": str(exc),
+            }), 400
+        return jsonify({"session": sess.to_api_dict()})
+
+    # --- UI: courses admin (bookmark-only) ------------------------------
+    @app.get("/courses/admin")
+    def ui_courses_admin() -> Any:
+        """Admin page for creating/editing/deleting courses. Not
+        linked from the top nav; bookmark this URL."""
+        courses, total = current_app_courses_service().list()
+        return render_template(
+            "courses_admin.html",
+            courses=courses,
+            total=total,
+        )
+
+    @app.get("/courses/new")
+    def ui_course_new() -> Any:
+        return render_template(
+            "course_form.html", mode="new", course=None,
+            form_name="", form_code="", form_color="#888888",
+            form_sort_order="0",
+        )
+
+    @app.get("/courses/<course_id>/edit")
+    def ui_course_edit(course_id: str) -> Any:
+        course = current_app_courses_service().get(course_id)
+        if course is None:
+            abort(404)
+        return render_template(
+            "course_form.html", mode="edit", course=course,
+            form_name=course.name,
+            form_code=course.code or "",
+            form_color=course.color or "#888888",
+            form_sort_order=str(course.sort_order),
+        )
+
+    @app.post("/courses/new")
+    def create_course_action() -> Any:
+        payload = {
+            "name": (request.form.get("name") or "").strip(),
+            "code": (request.form.get("code") or "").strip() or None,
+            "color": (request.form.get("color") or "").strip() or None,
+            "sort_order": request.form.get("sort_order") or 0,
+        }
+        try:
+            current_app_courses_service().create(**payload)
+        except ValueError as exc:
+            return (
+                render_template(
+                    "course_form.html",
+                    mode="new", course=None,
+                    form_name=payload["name"],
+                    form_code=payload["code"] or "",
+                    form_color=payload["color"] or "#888888",
+                    form_sort_order=str(payload["sort_order"]),
+                    error=str(exc),
+                ),
+                400,
+            )
+        return redirect(url_for("ui_courses_admin"))
+
+    @app.post("/courses/<course_id>/edit")
+    def update_course_action(course_id: str) -> Any:
+        payload = {
+            "name": (request.form.get("name") or "").strip() or None,
+            "code": (request.form.get("code") or "").strip() or None,
+            "color": (request.form.get("color") or "").strip() or None,
+            "sort_order": request.form.get("sort_order") or None,
+        }
+        try:
+            current_app_courses_service().update(course_id, **payload)
+        except KeyError:
+            abort(404)
+        except ValueError as exc:
+            course = current_app_courses_service().get(course_id)
+            return (
+                render_template(
+                    "course_form.html",
+                    mode="edit", course=course,
+                    form_name=payload.get("name") or "",
+                    form_code=payload.get("code") or "",
+                    form_color=payload.get("color") or "#888888",
+                    form_sort_order=str(payload.get("sort_order") or 0),
+                    error=str(exc),
+                ),
+                400,
+            )
+        return redirect(url_for("ui_courses_admin"))
+
+    @app.post("/courses/<course_id>/delete")
+    def delete_course_action(course_id: str) -> Any:
+        deleted = current_app_courses_service().delete(course_id)
+        if not deleted:
+            abort(404)
+        return redirect(url_for("ui_courses_admin"))
 
     # --- API: web audio upload ------------------------------------------
     @app.post("/api/v1/uploads/audio")
