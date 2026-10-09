@@ -1,4 +1,4 @@
-﻿"""Lecture Recorder Server â€” Phase A.
+"""Lecture Recorder Server â€” Phase A.
 
 A small Flask app: receive audio chunks over HTTP, stitch them into a
 single WAV per session, and serve a minimal web UI to browse and play
@@ -32,6 +32,7 @@ import services.tasks  # noqa: F401  (exposes TasksService, KINDS, ALLOWED_TRANS
 import services.events  # noqa: F401  (exposes EventsService, compute_month_grid, suggest_match_confidence)
 import services.classification  # noqa: F401  (exposes ClassificationService, VALID_KINDS, LLM_NOT_IMPLEMENTED)
 import services.courses  # noqa: F401  (exposes CoursesService)
+import services.llm  # noqa: F401  (exposes LLMProvider, default_providers)
 import storage
 from services import processing, transcode
 
@@ -65,6 +66,15 @@ def create_app(config: Optional[config_mod.Config] = None) -> Flask:
     )
     app.config["LR_COURSES_SERVICE"] = services.courses.CoursesService(
         app.config["LR_STORAGE"]
+    )
+    # Milestone 8: LLM providers. The factory reads
+    # ``LR_OPENROUTER_API_KEY`` / ``LR_MINIMAX_API_KEY`` from
+    # the process env; absent keys yield no-op providers so the
+    # server can boot and the API surface still works (it just
+    # returns ``llm_not_configured`` for any /classify call).
+    app.config["LR_LLM_PROVIDERS"] = services.llm.default_providers(
+        openrouter_key=cfg.openrouter_api_key,
+        minimax_key=cfg.minimax_api_key,
     )
     app.secret_key = os.environ.get("LR_SECRET", "lr-dev-secret-not-for-prod")
 
@@ -137,6 +147,25 @@ def current_app_courses_service() -> services.courses.CoursesService:
     return current_app.config["LR_COURSES_SERVICE"]
 
 
+def current_app_llm_providers() -> dict[str, services.llm.LLMProvider]:
+    """Return the LLM provider registry attached to the app.
+
+    Keys are ``"transcript"`` and ``"classifier"``; values are
+    provider instances (real or no-op depending on env keys).
+    """
+    return current_app.config["LR_LLM_PROVIDERS"]
+
+
+def current_app_transcript_provider() -> services.llm.LLMProvider:
+    """Pull the transcript provider (OpenRouter or no-op)."""
+    return current_app.config["LR_LLM_PROVIDERS"]["transcript"]
+
+
+def current_app_classifier_provider() -> services.llm.LLMProvider:
+    """Pull the classifier provider (MiniMax M3 or no-op)."""
+    return current_app.config["LR_LLM_PROVIDERS"]["classifier"]
+
+
 # ---------------------------------------------------------------------------
 # Jinja filters
 # ---------------------------------------------------------------------------
@@ -205,6 +234,10 @@ _STATUS_LABEL = {
     storage.STATUS_RECEIVING: "Receiving",
     storage.STATUS_STITCHING: "Stitching",
     storage.STATUS_READY: "Ready",
+    storage.STATUS_TRANSCRIBING: "Transcribing",
+    storage.STATUS_TRANSCRIBED: "Transcribed",
+    storage.STATUS_CLASSIFYING: "Classifying",
+    storage.STATUS_DONE: "Done",
     storage.STATUS_FAILED: "Failed",
 }
 
@@ -272,17 +305,22 @@ def _register_routes(app: Flask) -> None:
         """
         store = current_app_storage()
         courses, _ = current_app_courses_service().list()
+        # After the M8 post-finish pipeline, a finished session
+        # can be in status='ready' (pipeline not run / no-op) or
+        # 'done' (pipeline ran successfully). The sidebar should
+        # show both.
+        _DISPLAY_STATUSES = ("ready", "done")
         course_groups: list[dict[str, Any]] = []
         for c in courses:
             course_groups.append({
                 "course": c,
                 "lecture_count": store.count_sessions_by_course(c.id),
                 "lectures": store.list_sessions_by_course(
-                    c.id, status="ready", kind="lecture",
+                    c.id, status=_DISPLAY_STATUSES, kind="lecture",
                 ),
             })
         uncategorised_lectures = store.list_sessions_by_course(
-            None, status="ready", kind="lecture",
+            None, status=_DISPLAY_STATUSES, kind="lecture",
         )
         selected_id = request.args.get("session", "").strip()
         right_ctx = (_selected_session_context(selected_id)
@@ -314,8 +352,10 @@ def _register_routes(app: Flask) -> None:
         + transcript.
         """
         store = current_app_storage()
+        # Show ready + done sessions (M8 pipeline can land in
+        # either state).
         meetings = store.list_sessions_by_course(
-            None, status="ready", kind="meeting",
+            None, status=("ready", "done"), kind="meeting",
         )
         selected_id = request.args.get("session", "").strip()
         right_ctx = (_selected_session_context(selected_id)
@@ -824,6 +864,78 @@ def _register_routes(app: Flask) -> None:
             "session": sess.to_api_dict() if sess else None,
         })
 
+    # --- API: re-run transcription pipeline (manual retry) -------------
+    @app.post("/api/v1/sessions/<session_id>/transcribe")
+    def api_transcribe_session(session_id: str) -> Any:
+        """Re-run the post-finish pipeline for ``session_id``.
+
+        Useful when the auto-pipeline failed (network blip, no
+        API key at the time, etc.) and the user wants to retry
+        without re-uploading the audio.
+
+        Behaviour:
+
+        * The session must be in ``status='ready'``, ``'done'``,
+          ``'failed'``, ``'transcribed'`` or ``'classifying'``
+          (basically: not actively uploading or stitching).
+        * The session is moved back to ``status='ready'`` if it
+          was ``'done'`` or ``'failed'`` so the pipeline's
+          transition guard lets it run.
+        * The full pipeline (transcribe → classify) runs again
+          and overwrites any prior transcript artifact and kind.
+
+        Returns ``200`` with ``{"ok": true/false, "session": ...}``.
+        Returns ``404`` if the session is unknown.
+        """
+        store = current_app_storage()
+        sess = store.get_session(session_id)
+        if sess is None:
+            return jsonify({"error": "not_found"}), 404
+        # Allow the retry to clobber an existing transcript /
+        # kind. Move 'done' / 'failed' / 'transcribed' /
+        # 'classifying' back to 'ready' so the pipeline can run.
+        if sess.status in (
+            storage.STATUS_DONE,
+            storage.STATUS_FAILED,
+            storage.STATUS_TRANSCRIBED,
+            storage.STATUS_CLASSIFYING,
+        ):
+            try:
+                store.set_status(
+                    session_id, storage.STATUS_READY,
+                    status_detail=None,
+                )
+            except ValueError as exc:
+                return jsonify({
+                    "error": "illegal_transition",
+                    "detail": str(exc),
+                }), 409
+        # Run the pipeline synchronously. Uses the env-var-driven
+        # providers unless the test harness replaced them via
+        # ``app.config['LR_LLM_PROVIDERS']``.
+        result = processing.run_post_finish_pipeline(
+            store, session_id,
+            transcript_provider=current_app_transcript_provider(),
+            classifier=current_app_classifier_provider(),
+        )
+        sess = store.get_session(session_id)
+        # ``None`` means the session wasn't 'ready' (e.g. it's
+        # still 'receiving'). Surface that as a 409 so the UI can
+        # explain.
+        if result is None:
+            return jsonify({
+                "ok": False,
+                "reason": "not_ready",
+                "status": sess.status if sess else None,
+                "session": sess.to_api_dict() if sess else None,
+            }), 409
+        return jsonify({
+            "ok": bool(result.get("ok")),
+            "reason": result.get("reason"),
+            "detail": result.get("detail"),
+            "session": sess.to_api_dict() if sess else None,
+        })
+
     # --- API: audio serving ---------------------------------------------
     @app.get("/api/v1/sessions/<session_id>/audio")
     def api_get_audio(session_id: str) -> Any:
@@ -887,15 +999,29 @@ def _register_routes(app: Flask) -> None:
 
     @app.post("/api/v1/sessions/<session_id>/classify")
     def api_classify_session(session_id: str) -> Any:
-        """LLM classify a single session. **Currently a stub**
-        (Milestone 6): always returns ``{kind: null, confidence: null,
-        reason: "llm_not_implemented"}`` so the UI knows the AI path
-        isn't ready yet. Returns 404 if the session doesn't exist.
+        """LLM classify a single session.
+
+        Looks up the session's most recent ``transcript`` artifact
+        and asks the configured classifier (MiniMax M3 when
+        ``LR_MINIMAX_API_KEY`` is set, no-op otherwise) for a
+        kind + confidence. On success the kind is persisted on
+        the session.
+
+        Returns one of:
+
+        * ``200`` ``{"kind": "lecture", "confidence": 0.9,
+          "reason": "classified"}`` on success.
+        * ``200`` ``{"kind": null, "confidence": null,
+          "reason": "llm_not_implemented"}`` if the session has
+          no transcript yet (so the LLM can't classify) or the
+          provider is the no-op.
+        * ``404`` if the session is unknown.
         """
         if current_app_storage().get_session(session_id) is None:
             return jsonify({"error": "not_found"}), 404
         outcome = current_app_classification_service().classify_session(
             session_id,
+            classifier=current_app_classifier_provider(),
         )
         if outcome is None:
             return jsonify({
@@ -918,9 +1044,11 @@ def _register_routes(app: Flask) -> None:
         """Bulk classify a list of session ids.
 
         Body: ``{"session_ids": [...]}``. Returns
-        ``{"results": {session_id: null | {kind, confidence, reason}}}``.
-        Unknown session ids are silently omitted. **Currently a stub**:
-        every value is the ``llm_not_implemented`` placeholder.
+        ``{"results": {session_id: {kind, confidence, reason} | null}}``.
+        Unknown session ids are silently omitted. Each session
+        is classified independently using the configured LLM
+        provider; on success the kind is persisted via
+        ``set_kind``.
         """
         payload = request.get_json(silent=True) or {}
         session_ids = payload.get("session_ids")
@@ -931,13 +1059,14 @@ def _register_routes(app: Flask) -> None:
             }), 400
         svc = current_app_classification_service()
         store = current_app_storage()
+        classifier = current_app_classifier_provider()
         results: dict[str, Any] = {}
         for sid in session_ids:
             if not isinstance(sid, str) or not sid:
                 continue
             if store.get_session(sid) is None:
                 continue
-            outcome = svc.classify_session(sid)
+            outcome = svc.classify_session(sid, classifier=classifier)
             if outcome is None:
                 results[sid] = {
                     "kind": None,

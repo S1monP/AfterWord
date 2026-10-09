@@ -84,12 +84,61 @@ class ClassificationServiceTests(LRTestCase):
         with self.assertRaises(ValueError):
             self._service().override_kind("", "lecture")
 
-    def test_classify_session_returns_none_for_now(self):
-        """Stub contract: classify_session always returns None for
-        now (no transcript exists yet)."""
+    def test_classify_session_returns_none_without_transcript(self):
+        """No transcript artifact → LLM path returns None. The
+        service can't classify audio that hasn't been
+        transcribed yet."""
         sid = _make_session(self)
         self.assertIsNone(
             self._service().classify_session(sid),
+        )
+
+    def test_classify_session_returns_tuple_with_transcript(self):
+        """With a transcript present and a stub classifier, the
+        service returns ``(kind, confidence)`` for the session.
+        """
+        from services.llm import Classification, LLMProvider
+
+        class StubClassifier(LLMProvider):
+            name = "stub"
+
+            def classify(self, transcript):
+                return Classification(
+                    kind="lecture", confidence=0.77,
+                )
+
+        sid = _make_session(self)
+        self.app.config["LR_STORAGE"].add_artifact(
+            sid, "transcript", "lorem ipsum transcript",
+        )
+        out = self._service().classify_session(
+            sid, classifier=StubClassifier(),
+        )
+        self.assertEqual(out, ("lecture", 0.77))
+
+    def test_classify_session_collapses_provider_errors_to_none(self):
+        """If the LLM provider raises (network error, bad JSON,
+        …), the service swallows the exception and returns
+        ``None``. The route layer surfaces this as the
+        ``llm_not_implemented`` reason; the user is never
+        shown a raw traceback.
+        """
+        from services.llm import LLMError, LLMProvider
+
+        class FailingClassifier(LLMProvider):
+            name = "fail"
+
+            def classify(self, transcript):
+                raise LLMError("simulated upstream failure")
+
+        sid = _make_session(self)
+        self.app.config["LR_STORAGE"].add_artifact(
+            sid, "transcript", "something",
+        )
+        self.assertIsNone(
+            self._service().classify_session(
+                sid, classifier=FailingClassifier(),
+            )
         )
 
     def test_classify_session_missing_session_raises_keyerror(self):
@@ -172,6 +221,9 @@ class ClassificationApiTests(LRTestCase):
         )
 
     def test_api_classify_session_returns_stub_shape(self):
+        """With no transcript and no API key, the route returns
+        the ``llm_not_implemented`` placeholder. (Same shape as
+        the old stub; the contract is preserved.)"""
         sid = self._make()
         resp = self.client.post(f"/api/v1/sessions/{sid}/classify")
         self.assertEqual(resp.status_code, 200)
@@ -179,6 +231,46 @@ class ClassificationApiTests(LRTestCase):
         self.assertIsNone(body["kind"])
         self.assertIsNone(body["confidence"])
         self.assertEqual(body["reason"], "llm_not_implemented")
+
+    def test_api_classify_session_returns_classified_shape(self):
+        """With a transcript and a stub classifier injected into
+        the app config, the route returns the real shape:
+        ``{kind, confidence, reason: "classified"}``.
+        """
+        from services.llm import Classification, LLMProvider
+
+        class StubClassifier(LLMProvider):
+            name = "stub"
+
+            def classify(self, transcript):
+                return Classification(
+                    kind="meeting", confidence=0.65,
+                )
+
+        sid = self._make()
+        self.app.config["LR_STORAGE"].add_artifact(
+            sid, "transcript", "all-hands meeting notes",
+        )
+        # Replace the registered classifier with the stub.
+        original = self.app.config["LR_LLM_PROVIDERS"]["classifier"]
+        self.app.config["LR_LLM_PROVIDERS"]["classifier"] = (
+            StubClassifier()
+        )
+        try:
+            resp = self.client.post(
+                f"/api/v1/sessions/{sid}/classify",
+            )
+        finally:
+            self.app.config["LR_LLM_PROVIDERS"]["classifier"] = original
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertEqual(body["kind"], "meeting")
+        self.assertEqual(body["confidence"], 0.65)
+        self.assertEqual(body["reason"], "classified")
+        # The kind should also be persisted on the session row.
+        sess = self.app.config["LR_STORAGE"].get_session(sid)
+        self.assertEqual(sess.kind, "meeting")
+        self.assertEqual(sess.kind_confidence, 0.65)
 
     def test_api_classify_session_404_for_unknown(self):
         resp = self.client.post("/api/v1/sessions/nope/classify")
@@ -198,9 +290,54 @@ class ClassificationApiTests(LRTestCase):
         self.assertIn(a, body["results"])
         self.assertIn(b, body["results"])
         self.assertNotIn("nope", body["results"])
+        # No transcripts → no-op classifier returns None → reason
+        # is the placeholder.
         self.assertIsNone(body["results"][a]["kind"])
         self.assertEqual(
             body["results"][a]["reason"], "llm_not_implemented",
+        )
+
+    def test_api_bulk_classify_uses_stub_classifier(self):
+        """Inject a stub classifier + transcripts → bulk returns
+        real shapes for the sessions with transcripts."""
+        from services.llm import Classification, LLMProvider
+
+        class StubClassifier(LLMProvider):
+            name = "stub"
+
+            def classify(self, transcript):
+                return Classification(
+                    kind="lecture", confidence=0.9,
+                )
+
+        a = self._make()
+        b = self._make()
+        # Only 'a' has a transcript.
+        self.app.config["LR_STORAGE"].add_artifact(
+            a, "transcript", "lecture content",
+        )
+        original = self.app.config["LR_LLM_PROVIDERS"]["classifier"]
+        self.app.config["LR_LLM_PROVIDERS"]["classifier"] = (
+            StubClassifier()
+        )
+        try:
+            resp = self.client.post(
+                "/api/v1/classifications/bulk",
+                data=json.dumps({"session_ids": [a, b]}),
+                content_type="application/json",
+            )
+        finally:
+            self.app.config["LR_LLM_PROVIDERS"]["classifier"] = original
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        # 'a' has a transcript → classified
+        self.assertEqual(body["results"][a]["kind"], "lecture")
+        self.assertEqual(body["results"][a]["confidence"], 0.9)
+        self.assertEqual(body["results"][a]["reason"], "classified")
+        # 'b' has no transcript → placeholder
+        self.assertIsNone(body["results"][b]["kind"])
+        self.assertEqual(
+            body["results"][b]["reason"], "llm_not_implemented",
         )
 
     def test_api_bulk_classify_requires_list(self):

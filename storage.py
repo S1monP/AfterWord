@@ -33,7 +33,7 @@ import shutil
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any, Iterator, Optional, Union
 
 from config import Config
 
@@ -44,11 +44,48 @@ from config import Config
 STATUS_RECEIVING = "receiving"
 STATUS_STITCHING = "stitching"
 STATUS_READY = "ready"
+# Milestone 8: lifecycle states for the post-finish pipeline. The
+# session goes from ``ready`` to ``transcribing`` → ``transcribed`` →
+# ``classifying`` → ``done``. Any error short-circuits to ``failed``
+# with a useful ``status_detail``.
+STATUS_TRANSCRIBING = "transcribing"
+STATUS_TRANSCRIBED = "transcribed"
+STATUS_CLASSIFYING = "classifying"
+STATUS_DONE = "done"
 STATUS_FAILED = "failed"
 
 ALL_STATUSES: tuple[str, ...] = (
-    STATUS_RECEIVING, STATUS_STITCHING, STATUS_READY, STATUS_FAILED,
+    STATUS_RECEIVING, STATUS_STITCHING, STATUS_READY,
+    STATUS_TRANSCRIBING, STATUS_TRANSCRIBED, STATUS_CLASSIFYING,
+    STATUS_DONE, STATUS_FAILED,
 )
+
+# Allowed status transitions enforced by the pipeline. ``ready`` is
+# the entry point; ``done`` and ``failed`` are terminal. Any other
+# transition (e.g. ``transcribing`` → ``classifying``) is treated as
+# an internal accident and rejected with a clear ValueError.
+#
+# Keyed by current status; values are the set of legal next statuses.
+ALLOWED_STATUS_TRANSITIONS: dict[str, frozenset[str]] = {
+    STATUS_RECEIVING: frozenset({STATUS_STITCHING, STATUS_FAILED}),
+    STATUS_STITCHING: frozenset({STATUS_READY, STATUS_FAILED}),
+    STATUS_READY: frozenset({
+        STATUS_TRANSCRIBING, STATUS_FAILED,
+    }),
+    STATUS_TRANSCRIBING: frozenset({
+        STATUS_TRANSCRIBED, STATUS_FAILED, STATUS_READY,
+    }),
+    STATUS_TRANSCRIBED: frozenset({
+        STATUS_CLASSIFYING, STATUS_FAILED, STATUS_READY,
+    }),
+    STATUS_CLASSIFYING: frozenset({
+        STATUS_DONE, STATUS_FAILED, STATUS_READY,
+    }),
+    STATUS_DONE: frozenset({STATUS_READY, STATUS_FAILED}),
+    STATUS_FAILED: frozenset({
+        STATUS_RECEIVING, STATUS_READY,
+    }),
+}
 
 
 _SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_\-]{4,64}$")
@@ -404,7 +441,13 @@ class Session:
             "full_audio_size": self.full_audio_size,
             "full_audio_url": (
                 f"/api/v1/sessions/{self.id}/audio"
-                if self.status == STATUS_READY and self.full_audio_size > 0
+                if self.status in (
+                    STATUS_READY,
+                    STATUS_TRANSCRIBING,
+                    STATUS_TRANSCRIBED,
+                    STATUS_CLASSIFYING,
+                    STATUS_DONE,
+                ) and self.full_audio_size > 0
                 else None
             ),
             "kind": self.kind,
@@ -882,7 +925,26 @@ class Storage:
         if status not in ALL_STATUSES:
             raise ValueError(f"unknown status: {status}")
         now = now_iso()
+        # Transition guard: refuse illegal jumps. The post-finish
+        # pipeline (M8) drives ``ready → transcribing → transcribed →
+        # classifying → done`` and short-circuits to ``failed`` on any
+        # error. Manual re-runs can move ``done`` / ``failed`` back
+        # to ``ready``.
         with self._tx() as conn:
+            row = conn.execute(
+                "SELECT status FROM sessions WHERE id = ?",
+                (session_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(session_id)
+            current = row["status"]
+            allowed = ALLOWED_STATUS_TRANSITIONS.get(
+                current, frozenset(),
+            )
+            if status not in allowed and current != status:
+                raise ValueError(
+                    f"illegal status transition: {current} -> {status}"
+                )
             conn.execute(
                 """
                 UPDATE sessions
@@ -894,6 +956,20 @@ class Storage:
                 (status, status_detail, finished_at, now, session_id),
             )
         self._write_meta_json(session_id)
+
+    # Convenience alias for callers that prefer the shorter name.
+    # Identical to ``update_status``; included for readability in the
+    # post-finish pipeline.
+    def set_status(
+        self,
+        session_id: str,
+        status: str,
+        *,
+        status_detail: Optional[str] = None,
+    ) -> None:
+        self.update_status(
+            session_id, status, status_detail=status_detail,
+        )
 
     # --- kind classification ------------------------------------------------
 
@@ -1051,10 +1127,16 @@ class Storage:
             total = conn.execute(
                 "SELECT COUNT(*) AS c FROM courses"
             ).fetchone()["c"]
+            # Use rowid as the final tiebreaker so that courses
+            # created in the same second (and therefore with the
+            # same ``created_at``) still sort deterministically
+            # by insertion order. SQLite assigns rowids
+            # monotonically as rows are inserted, so this matches
+            # the user's expectation of "first-inserted first".
             rows = conn.execute(
                 """
                 SELECT * FROM courses
-                ORDER BY sort_order ASC, id ASC
+                ORDER BY sort_order ASC, created_at ASC, rowid ASC
                 LIMIT ? OFFSET ?
                 """,
                 (limit, offset),
@@ -1077,14 +1159,23 @@ class Storage:
 
     def list_sessions_by_course(
         self, course_id: Optional[str], *,
-        status: Optional[str] = "ready",
+        status: Union[str, list[str], None] = "ready",
         kind: Optional[str] = None,
     ) -> list[Session]:
         """List sessions under a given course (or NULL course when
         ``course_id is None``), newest first.
 
-        Filters by ``status`` (defaults to ready) and optionally by
-        ``kind``. Used by the /lectures sidebar.
+        Filters by ``status`` (defaults to "ready") and optionally by
+        ``kind``. ``status`` may be a single value, an iterable of
+        values (any of which may match), or ``None`` to skip the
+        filter. Used by the /lectures and /meetings sidebars; after
+        M8 the post-finish pipeline can leave a session in
+        ``status='done'`` (or in transient ``transcribing``/
+        ``transcribed``/``classifying`` states), so callers
+        typically pass a list of "ready" + "done".
+
+        Accepts the legacy string ``"ready"`` for backwards
+        compatibility with callers written before the M8 pipeline.
         """
         clauses: list[str] = []
         params: list[Any] = []
@@ -1094,8 +1185,14 @@ class Storage:
             clauses.append("course_id = ?")
             params.append(course_id)
         if status is not None:
-            clauses.append("status = ?")
-            params.append(status)
+            if isinstance(status, str):
+                clauses.append("status = ?")
+                params.append(status)
+            else:
+                # Iterable of statuses: use IN (...).
+                placeholders = ",".join("?" for _ in status)
+                clauses.append(f"status IN ({placeholders})")
+                params.extend(status)
         if kind is not None:
             clauses.append("kind = ?")
             params.append(kind)
@@ -1136,13 +1233,17 @@ class Storage:
         return sess
 
     def count_sessions_by_course(self, course_id: str) -> int:
-        """How many ready sessions are linked to this course. Shown
-        next to the course name in the /lectures sidebar."""
+        """How many ready + done sessions are linked to this
+        course. Shown next to the course name in the /lectures
+        sidebar. After M8, finished sessions can be in
+        ``status='done'`` (pipeline ran) as well as ``ready``
+        (pipeline was a no-op), so we count both.
+        """
         with self._tx() as conn:
             row = conn.execute(
                 "SELECT COUNT(*) AS c FROM sessions "
-                "WHERE course_id = ? AND status = ?",
-                (course_id, STATUS_READY),
+                "WHERE course_id = ? AND status IN (?, ?)",
+                (course_id, STATUS_READY, STATUS_DONE),
             ).fetchone()
         return int(row["c"])
 
@@ -1160,7 +1261,7 @@ class Storage:
             row = conn.execute(
                 "SELECT kind, content, model, created_at "
                 "FROM artifacts WHERE session_id = ? AND kind = ? "
-                "ORDER BY created_at DESC LIMIT 1",
+                "ORDER BY created_at DESC, rowid DESC LIMIT 1",
                 (session_id, kind),
             ).fetchone()
         if row is None:
@@ -1170,6 +1271,68 @@ class Storage:
             "content": row["content"],
             "model": row["model"],
             "created_at": row["created_at"],
+        }
+
+    def add_artifact(
+        self,
+        session_id: str,
+        kind: str,
+        content: str,
+        *,
+        model: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Insert a new artifact row and mirror it into the FTS table.
+
+        ``kind`` is one of the artifact kinds used by the pipeline
+        (``transcript``, ``summary``, ``extraction``, …). The row id
+        is a fresh uuid4 hex; ``created_at`` is set to now. The
+        FTS table is also written so the artifact is searchable
+        later (M10: search).
+
+        Returns the row as a dict with the same shape as
+        :meth:`get_artifact`. Raises :class:`KeyError` if the
+        session doesn't exist.
+        """
+        if not isinstance(session_id, str) or not session_id:
+            raise ValueError("session_id is required")
+        if not isinstance(kind, str) or not kind:
+            raise ValueError("kind is required")
+        if not isinstance(content, str):
+            raise ValueError("content must be a string")
+        # Validate the session exists; otherwise the FK constraint
+        # would surface a less helpful error from SQLite.
+        if self.get_session(session_id) is None:
+            raise KeyError(session_id)
+        artifact_id = uuid.uuid4().hex
+        now = now_iso()
+        with self._tx() as conn:
+            conn.execute(
+                """
+                INSERT INTO artifacts
+                    (id, session_id, kind, content, model, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (artifact_id, session_id, kind, content, model, now),
+            )
+            # Mirror into the FTS table so later search includes
+            # this artifact. ``course_id`` is left NULL — it's only
+            # useful for session-side joins; the search code can
+            # resolve it via ``session_id`` if it needs to.
+            conn.execute(
+                """
+                INSERT INTO artifacts_fts
+                    (artifact_id, session_id, course_id, kind, body)
+                VALUES (?, ?, NULL, ?, ?)
+                """,
+                (artifact_id, session_id, kind, content),
+            )
+        return {
+            "id": artifact_id,
+            "session_id": session_id,
+            "kind": kind,
+            "content": content,
+            "model": model,
+            "created_at": now,
         }
 
     # --- notes ------------------------------------------------------------

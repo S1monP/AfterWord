@@ -1,4 +1,4 @@
-﻿"""API-layer tests using Flask's test client."""
+"""API-layer tests using Flask's test client."""
 from __future__ import annotations
 
 import json
@@ -10,6 +10,11 @@ from tests.conftest import LRTestCase
 class DeviceFlowTests(LRTestCase):
 
     def test_announce_then_list_then_finish(self) -> None:
+        # The no-op providers (no API keys in the test config)
+        # return stub data so the pipeline completes successfully
+        # and the session ends at status='done'. The classifier
+        # returns Classification('other', 0.0) so the kind is
+        # 'other' (not 'lecture' as a real LLM would pick).
         # 1) announce
         r = self.client.post(
             "/api/v1/sessions",
@@ -50,12 +55,14 @@ class DeviceFlowTests(LRTestCase):
         self.assertEqual(len(listed), 1)
         self.assertEqual(listed[0]["title"], "CS101 Lecture 1")
 
-        # 4) finish
+        # 4) finish → pipeline runs end-to-end → status='done'
         r = self.client.post("/api/v1/sessions/abcdef1234567890/finish")
         self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
         body = r.get_json()
         self.assertTrue(body["ok"])
-        self.assertEqual(body["session"]["status"], "ready")
+        self.assertEqual(body["session"]["status"], "done")
+        # No-op classifier returns 'other' (low confidence).
+        self.assertEqual(body["session"]["kind"], "other")
         self.assertIsNotNone(body["session"]["full_audio_url"])
 
     def test_finish_with_missing_chunks_returns_409(self) -> None:
@@ -161,6 +168,180 @@ class DeviceFlowTests(LRTestCase):
         self.client.post("/api/v1/sessions/abcdef1234567890/finish")
 
 
+class TranscribeRouteTests(LRTestCase):
+    """Tests for POST /api/v1/sessions/<id>/transcribe.
+
+    Milestone 8 manual-retry endpoint. Re-runs the post-finish
+    pipeline on a session that's already in 'ready' (or 'done'
+    / 'failed' / 'transcribed' / 'classifying'). All tests use
+    stub providers; no real HTTP is performed.
+    """
+
+    def _stub_providers(self, transcript="t", kind="meeting", conf=0.7,
+                        fail_classify=False):
+        from services.llm import Classification, LLMProvider
+
+        class StubT(LLMProvider):
+            name = "stub-t"
+
+            def transcribe(self, audio_path):
+                return transcript
+
+            def classify(self, transcript):
+                raise RuntimeError("not used")
+
+        class StubC(LLMProvider):
+            name = "stub-c"
+
+            def classify(self, t):
+                if fail_classify:
+                    from services.llm import LLMError
+                    raise LLMError("simulated")
+                return Classification(kind=kind, confidence=conf)
+
+            def transcribe(self, audio_path):
+                raise RuntimeError("not used")
+
+        self.app.config["LR_LLM_PROVIDERS"] = {
+            "transcript": StubT(),
+            "classifier": StubC(),
+        }
+
+    def _make_ready_session(self, sid="trnsc0000001"):
+        import storage
+        store = self.app.config["LR_STORAGE"]
+        store.upsert_session(
+            sid, title="x", expected_count=1,
+            sample_rate=22050, channels=1, bits_per_sample=32,
+            started_at="2026-01-15T10:00:00Z",
+        )
+        store.full_audio_path(sid).write_bytes(
+            self.make_wav(b"\x00" * 256),
+        )
+        store.update_status(sid, storage.STATUS_STITCHING)
+        store.update_status(
+            sid, storage.STATUS_READY, finished_at=storage.now_iso(),
+        )
+        return sid
+
+    def test_transcribe_runs_pipeline_on_ready(self):
+        self._stub_providers(kind="lecture", conf=0.85)
+        sid = self._make_ready_session()
+        r = self.client.post(f"/api/v1/sessions/{sid}/transcribe")
+        self.assertEqual(r.status_code, 200)
+        body = r.get_json()
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["session"]["status"], "done")
+        self.assertEqual(body["session"]["kind"], "lecture")
+
+    def test_transcribe_404_for_unknown(self):
+        self._stub_providers()
+        r = self.client.post("/api/v1/sessions/nope/transcribe")
+        self.assertEqual(r.status_code, 404)
+
+    def test_transcribe_409_when_receiving(self):
+        """The session must be in 'ready' (or a retry-able state)
+        for the pipeline to run. If it's still 'receiving', the
+        route returns 409."""
+        self._stub_providers()
+        import storage
+        store = self.app.config["LR_STORAGE"]
+        store.upsert_session(
+            "trnsc0000002", title="x", expected_count=1,
+            sample_rate=22050, channels=1, bits_per_sample=32,
+            started_at="2026-01-15T10:00:00Z",
+        )
+        r = self.client.post("/api/v1/sessions/trnsc0000002/transcribe")
+        self.assertEqual(r.status_code, 409)
+        body = r.get_json()
+        self.assertFalse(body["ok"])
+        self.assertEqual(body["reason"], "not_ready")
+
+    def test_transcribe_retries_from_failed(self):
+        """A session that previously failed can be re-run by
+        POSTing /transcribe."""
+        import storage
+        from services.llm import Classification, LLMError, LLMProvider
+
+        class Bad(LLMProvider):
+            name = "bad"
+
+            def transcribe(self, audio_path):
+                return "x"
+
+            def classify(self, transcript):
+                raise LLMError("first run fails")
+
+        self.app.config["LR_LLM_PROVIDERS"] = {
+            "transcript": Bad(), "classifier": Bad(),
+        }
+        sid = self._make_ready_session("trnsc0000003")
+        r1 = self.client.post(f"/api/v1/sessions/{sid}/transcribe")
+        self.assertEqual(r1.status_code, 200)
+        self.assertFalse(r1.get_json()["ok"])
+        self.assertEqual(
+            self.app.config["LR_STORAGE"].get_session(sid).status,
+            storage.STATUS_FAILED,
+        )
+        # Swap in working providers and retry.
+        class Good(LLMProvider):
+            name = "good"
+
+            def transcribe(self, audio_path):
+                return "fixed"
+
+            def classify(self, transcript):
+                return Classification(
+                    kind="other", confidence=0.5,
+                )
+
+        self.app.config["LR_LLM_PROVIDERS"] = {
+            "transcript": Good(), "classifier": Good(),
+        }
+        r2 = self.client.post(f"/api/v1/sessions/{sid}/transcribe")
+        self.assertEqual(r2.status_code, 200)
+        body = r2.get_json()
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["session"]["status"], "done")
+        self.assertEqual(body["session"]["kind"], "other")
+
+    def test_transcribe_classifier_failure_returns_200_with_ok_false(self):
+        """When the LLM call fails, the route returns 200 with
+        ``ok: false`` and a useful ``reason``/``detail``. The
+        status code is 200 (not 5xx) so the UI can display the
+        reason without special-case handling."""
+        from services.llm import LLMError, LLMProvider
+
+        class T(LLMProvider):
+            name = "t"
+
+            def transcribe(self, audio_path):
+                return "transcript"
+
+            def classify(self, transcript):
+                raise RuntimeError("not used")
+
+        class C(LLMProvider):
+            name = "c"
+
+            def classify(self, transcript):
+                raise LLMError("upstream 503")
+
+            def transcribe(self, audio_path):
+                raise RuntimeError("not used")
+
+        self.app.config["LR_LLM_PROVIDERS"] = {
+            "transcript": T(), "classifier": C(),
+        }
+        sid = self._make_ready_session("trnsc0000004")
+        r = self.client.post(f"/api/v1/sessions/{sid}/transcribe")
+        self.assertEqual(r.status_code, 200)
+        body = r.get_json()
+        self.assertFalse(body["ok"])
+        self.assertEqual(body["reason"], "classify_failed")
+        self.assertIn("upstream 503", body["detail"])
+
+
 class WebUITests(LRTestCase):
 
     def test_index_empty(self) -> None:
@@ -174,7 +355,10 @@ class WebUITests(LRTestCase):
         self.assertEqual(r.status_code, 200)
         body = r.get_data()
         self.assertIn(b"Test", body)
-        self.assertIn(b"Ready", body)
+        # After M8, the no-op pipeline completes successfully and
+        # the session ends at status='done' (rendered as "Done"
+        # in the page). Real LLM keys would also land on 'done'.
+        self.assertIn(b"Done", body)
 
     def test_dashboard_renders(self) -> None:
         """The home page (/) is the bento dashboard."""

@@ -329,3 +329,155 @@ class NonMinimalWavTests(LRTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# Milestone 8: new statuses, transition guard, add_artifact helper
+# ---------------------------------------------------------------------------
+
+
+class M8StatusConstantsTests(unittest.TestCase):
+    """The new status enum values and ALL_STATUSES tuple are
+    part of the schema contract; they need to be discoverable
+    by other modules (notably :mod:`services.processing`)."""
+
+    def test_new_status_values_exist(self):
+        self.assertEqual(storage.STATUS_TRANSCRIBING, "transcribing")
+        self.assertEqual(storage.STATUS_TRANSCRIBED, "transcribed")
+        self.assertEqual(storage.STATUS_CLASSIFYING, "classifying")
+        self.assertEqual(storage.STATUS_DONE, "done")
+
+    def test_all_statuses_includes_new_values(self):
+        for s in (
+            storage.STATUS_TRANSCRIBING,
+            storage.STATUS_TRANSCRIBED,
+            storage.STATUS_CLASSIFYING,
+            storage.STATUS_DONE,
+            storage.STATUS_FAILED,
+            storage.STATUS_READY,
+        ):
+            self.assertIn(s, storage.ALL_STATUSES)
+
+    def test_allowed_transitions_table_is_populated(self):
+        for s in storage.ALL_STATUSES:
+            self.assertIn(s, storage.ALLOWED_STATUS_TRANSITIONS)
+            self.assertIsInstance(
+                storage.ALLOWED_STATUS_TRANSITIONS[s], frozenset,
+            )
+
+
+class M8TransitionGuardTests(LRTestCase):
+    """update_status now refuses illegal jumps."""
+
+    def _make(self):
+        import uuid
+        sid = uuid.uuid4().hex
+        store = self.app.config["LR_STORAGE"]
+        store.upsert_session(
+            sid, title="x", expected_count=1,
+            sample_rate=22050, channels=1, bits_per_sample=32,
+            started_at="2026-01-15T10:00:00Z",
+        )
+        return sid, store
+
+    def test_legal_transition_works(self):
+        sid, store = self._make()
+        store.update_status(sid, storage.STATUS_STITCHING)
+        self.assertEqual(
+            store.get_session(sid).status, storage.STATUS_STITCHING,
+        )
+
+    def test_illegal_transition_raises(self):
+        sid, store = self._make()
+        with self.assertRaises(ValueError):
+            store.update_status(sid, storage.STATUS_DONE)
+        self.assertEqual(
+            store.get_session(sid).status, storage.STATUS_RECEIVING,
+        )
+
+    def test_legal_pipeline_progression(self):
+        """The full pipeline: receiving -> stitching -> ready ->
+        transcribing -> transcribed -> classifying -> done."""
+        sid, store = self._make()
+        store.update_status(sid, storage.STATUS_STITCHING)
+        store.update_status(
+            sid, storage.STATUS_READY, finished_at=storage.now_iso(),
+        )
+        store.update_status(sid, storage.STATUS_TRANSCRIBING)
+        store.update_status(sid, storage.STATUS_TRANSCRIBED)
+        store.update_status(sid, storage.STATUS_CLASSIFYING)
+        store.update_status(sid, storage.STATUS_DONE)
+        self.assertEqual(
+            store.get_session(sid).status, storage.STATUS_DONE,
+        )
+
+    def test_set_status_is_alias(self):
+        sid, store = self._make()
+        store.set_status(sid, storage.STATUS_STITCHING)
+        self.assertEqual(
+            store.get_session(sid).status, storage.STATUS_STITCHING,
+        )
+
+
+class M8AddArtifactTests(LRTestCase):
+    """Storage.add_artifact inserts into both artifacts and
+    artifacts_fts and returns the row."""
+
+    def _make(self):
+        import uuid
+        sid = uuid.uuid4().hex
+        store = self.app.config["LR_STORAGE"]
+        store.upsert_session(
+            sid, title="x", expected_count=1,
+            sample_rate=22050, channels=1, bits_per_sample=32,
+            started_at="2026-01-15T10:00:00Z",
+        )
+        return sid, store
+
+    def test_add_artifact_persists_row(self):
+        sid, store = self._make()
+        row = store.add_artifact(
+            sid, "transcript", "hello world",
+            model="openai/whisper-large-v3",
+        )
+        self.assertEqual(row["kind"], "transcript")
+        self.assertEqual(row["content"], "hello world")
+        self.assertEqual(row["model"], "openai/whisper-large-v3")
+        self.assertEqual(len(row["id"]), 32)
+        fetched = store.get_artifact(sid, "transcript")
+        self.assertIsNotNone(fetched)
+        self.assertEqual(fetched["content"], "hello world")
+
+    def test_add_artifact_indexes_in_fts(self):
+        sid, store = self._make()
+        store.add_artifact(sid, "transcript", "needle in a haystack")
+        with store._tx() as conn:
+            row = conn.execute(
+                "SELECT body FROM artifacts_fts WHERE body MATCH ?",
+                ("needle",),
+            ).fetchone()
+        self.assertIsNotNone(row)
+        self.assertIn("needle", row["body"])
+
+    def test_add_artifact_missing_session_raises_keyerror(self):
+        store = self.app.config["LR_STORAGE"]
+        with self.assertRaises(KeyError):
+            store.add_artifact("no-such-id", "transcript", "x")
+
+    def test_add_artifact_validates_inputs(self):
+        sid, store = self._make()
+        with self.assertRaises(ValueError):
+            store.add_artifact("", "transcript", "x")
+        with self.assertRaises(ValueError):
+            store.add_artifact(sid, "", "x")
+        with self.assertRaises(ValueError):
+            store.add_artifact(sid, "transcript", None)  # type: ignore[arg-type]
+
+    def test_add_artifact_multiple_per_session(self):
+        """Two transcripts for the same session → get_artifact
+        returns the most recent one."""
+        sid, store = self._make()
+        store.add_artifact(sid, "transcript", "first")
+        store.add_artifact(sid, "transcript", "second")
+        fetched = store.get_artifact(sid, "transcript")
+        self.assertEqual(fetched["content"], "second")

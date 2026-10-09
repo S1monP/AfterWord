@@ -83,16 +83,24 @@ class ClassificationService:
     # -- LLM classify (stub) ---------------------------------------------
 
     def classify_session(
-        self, session_id: str,
+        self, session_id: str, *, classifier=None,
     ) -> Optional[tuple[str, float]]:
         """Run the LLM classifier on a session's transcript.
 
-        **Currently a stub** (Milestone 6): always returns ``None``
-        regardless of the session's state. The contract is stable
-        so callers can rely on the return-type signature; when the
-        LLM pipeline is wired up in Milestone 8, this will either
-        return ``(kind, confidence)`` (success) or ``None``
-        (transcript missing, classification failed, etc.).
+        Looks up the most recent ``transcript`` artifact for the
+        session and asks the LLM to pick one of the four
+        :data:`VALID_KINDS`. The classifier is injectable for
+        tests; when omitted, the env-var-driven provider factory
+        is used (real ``MiniMaxProvider`` when an API key is set,
+        no-op otherwise).
+
+        Returns ``(kind, confidence)`` on success, or ``None`` if
+        the session has no transcript yet, the classifier raised,
+        or the LLM returned an unrecognised response.
+
+        The caller (the API route) is responsible for persisting
+        the returned kind via :meth:`Storage.set_kind`; this
+        method does NOT mutate the session.
 
         Raises :class:`KeyError` if the session doesn't exist;
         :class:`ValueError` for an empty session_id.
@@ -101,8 +109,29 @@ class ClassificationService:
             raise ValueError("session_id is required")
         if self._store.get_session(session_id) is None:
             raise KeyError(session_id)
-        # No transcript exists yet (M8); the LLM path returns None.
-        return None
+        # No transcript yet → the LLM can't classify. Return None
+        # so the route surfaces a friendly "transcribe first"
+        # message instead of a stack trace.
+        transcript_artifact = self._store.get_artifact(
+            session_id, "transcript",
+        )
+        if not transcript_artifact or not transcript_artifact.get("content"):
+            return None
+        transcript = transcript_artifact["content"]
+        # Resolve the classifier. Tests pass a fake; production
+        # uses the env-var-driven factory. Import lazily to avoid
+        # a circular import with ``services.llm``.
+        if classifier is None:
+            from services.llm import default_providers
+            classifier = default_providers().get("classifier")
+        try:
+            result = classifier.classify(transcript)
+        except Exception:
+            # Defensive: any provider failure (LLMError, network
+            # error, etc.) collapses to "no result" so the route
+            # can surface a clean error to the user.
+            return None
+        return (result.kind, result.confidence)
 
     def bulk_classify(
         self, session_ids: list[str],
