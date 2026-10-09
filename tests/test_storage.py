@@ -358,6 +358,18 @@ class M8StatusConstantsTests(unittest.TestCase):
         ):
             self.assertIn(s, storage.ALL_STATUSES)
 
+
+    def test_m9_status_values_exist(self):
+        # M9 adds two more pipeline states between
+        # ``classifying`` and ``done``.
+        self.assertEqual(storage.STATUS_SUMMARISING, "summarising")
+        self.assertEqual(storage.STATUS_EXTRACTING, "extracting")
+        for s in (
+            storage.STATUS_SUMMARISING,
+            storage.STATUS_EXTRACTING,
+        ):
+            self.assertIn(s, storage.ALL_STATUSES)
+
     def test_allowed_transitions_table_is_populated(self):
         for s in storage.ALL_STATUSES:
             self.assertIn(s, storage.ALLOWED_STATUS_TRANSITIONS)
@@ -396,8 +408,9 @@ class M8TransitionGuardTests(LRTestCase):
         )
 
     def test_legal_pipeline_progression(self):
-        """The full pipeline: receiving -> stitching -> ready ->
-        transcribing -> transcribed -> classifying -> done."""
+        """The full M8+M9 pipeline: receiving -> stitching -> ready
+        -> transcribing -> transcribed -> classifying
+        -> summarising -> extracting -> done."""
         sid, store = self._make()
         store.update_status(sid, storage.STATUS_STITCHING)
         store.update_status(
@@ -406,6 +419,8 @@ class M8TransitionGuardTests(LRTestCase):
         store.update_status(sid, storage.STATUS_TRANSCRIBING)
         store.update_status(sid, storage.STATUS_TRANSCRIBED)
         store.update_status(sid, storage.STATUS_CLASSIFYING)
+        store.update_status(sid, storage.STATUS_SUMMARISING)
+        store.update_status(sid, storage.STATUS_EXTRACTING)
         store.update_status(sid, storage.STATUS_DONE)
         self.assertEqual(
             store.get_session(sid).status, storage.STATUS_DONE,

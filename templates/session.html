@@ -39,7 +39,7 @@
     </dl>
   </section>
 
-  {% if session.status in ('ready', 'done', 'transcribing', 'transcribed', 'classifying') and session.full_audio_size > 0 %}
+  {% if session.status in ('ready', 'done', 'transcribing', 'transcribed', 'classifying', 'summarising', 'extracting') and session.full_audio_size > 0 %}
     <section class="lr-card" style="margin-top: var(--lr-gap-card);">
       <h2>Playback</h2>
       <div class="lr-player" style="margin-top: var(--lr-s-3);">

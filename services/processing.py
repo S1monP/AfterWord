@@ -1,17 +1,22 @@
-"""Post-finish pipeline orchestrator (Milestone 8).
+"""Post-finish pipeline orchestrator (Milestones 8 + 9).
 
 The ``/finish`` endpoint stitches the session's audio and leaves it in
 ``status='ready'``. Right after that, the server kicks off the
-post-finish pipeline, which runs the four LLM steps in order:
+post-finish pipeline, which runs the LLM steps in order:
 
   1. ``OpenRouterProvider.transcribe(full.wav)``  → transcript text
   2. Persist the transcript as an ``artifacts`` row (kind='transcript')
   3. ``MiniMaxProvider.classify(transcript)``     → (kind, confidence)
   4. ``Storage.set_kind(...)``                    → session.kind
+  5. ``MiniMaxProvider.summarize(transcript)``    → Summary
+  6. Persist the summary as an ``artifacts`` row (kind='summary')
+  7. ``MiniMaxProvider.extract(transcript, kind)`` → list of items
+  8. Persist the extraction as an ``artifacts`` row (kind='extraction')
 
 Each step updates ``sessions.status`` so the UI can show progress:
 
-    ready → transcribing → transcribed → classifying → done
+    ready → transcribing → transcribed → classifying
+          → summarising → extracting → done
 
 Any exception short-circuits the pipeline to ``status='failed'`` with
 a useful ``status_detail`` so the user can see what went wrong and
@@ -26,14 +31,17 @@ The providers are injectable for tests; see
 """
 from __future__ import annotations
 
+import json
 import traceback
 from typing import Optional
 
 from storage import (
     STATUS_CLASSIFYING,
     STATUS_DONE,
+    STATUS_EXTRACTING,
     STATUS_FAILED,
     STATUS_READY,
+    STATUS_SUMMARISING,
     STATUS_TRANSCRIBED,
     STATUS_TRANSCRIBING,
     Storage,
@@ -47,6 +55,8 @@ from services.llm import LLMError, LLMProvider
 # without re-running anything.
 REASON_TRANSCRIBE_FAILED = "transcribe_failed"
 REASON_CLASSIFY_FAILED = "classify_failed"
+REASON_SUMMARISE_FAILED = "summarise_failed"
+REASON_EXTRACT_FAILED = "extract_failed"
 REASON_NO_AUDIO = "no_audio"
 REASON_NO_TRANSCRIPT = "no_transcript"
 REASON_NOT_READY = "not_ready"
@@ -116,20 +126,30 @@ def run_post_finish_pipeline(
     *,
     transcript_provider: Optional[LLMProvider] = None,
     classifier: Optional[LLMProvider] = None,
+    llm_provider: Optional[LLMProvider] = None,
 ) -> Optional[dict]:
     """Run the post-stitch pipeline for ``session_id``.
 
-    The ``transcript_provider`` and ``classifier`` parameters are
-    injectable for tests. When both are ``None`` the pipeline uses
-    :func:`services.llm.default_providers` to resolve them from
-    env vars — real providers when keys are set, no-op otherwise.
+    The ``transcript_provider``, ``classifier`` and ``llm_provider``
+    parameters are injectable for tests. When they're ``None`` the
+    pipeline uses :func:`services.llm.default_providers` to resolve
+    them from env vars — real providers when keys are set, no-op
+    otherwise.
+
+    The ``llm_provider`` is the MiniMax (or no-op) provider used for
+    summarisation and extraction. It defaults to the same
+    ``classifier`` provider, since both call the same model. Tests
+    that want to exercise just the classification or just the
+    summary path can pass a different one for each.
 
     The pipeline walks these states:
 
       1. ``transcribing``  → call transcript_provider.transcribe(wav)
       2. ``transcribed``   → store the transcript artifact
       3. ``classifying``   → call classifier.classify(transcript)
-      4. ``done``          → store the kind on the session
+      4. ``summarising``   → call llm_provider.summarize(transcript)
+      5. ``extracting``    → call llm_provider.extract(transcript, kind)
+      6. ``done``          → all artifacts persisted
 
     Any exception is caught and the session is moved to
     ``status='failed'`` with a ``status_detail`` explaining the step.
@@ -155,13 +175,21 @@ def run_post_finish_pipeline(
 
     # 2. Resolve providers. Tests pass fakes; production uses the
     # env-var-driven factory.
-    if transcript_provider is None or classifier is None:
+    if (
+        transcript_provider is None
+        or classifier is None
+        or llm_provider is None
+    ):
         from services.llm import default_providers
         providers = default_providers()
         if transcript_provider is None:
             transcript_provider = providers.get("transcript")
         if classifier is None:
             classifier = providers.get("classifier")
+        if llm_provider is None:
+            # Default to the same provider as the classifier:
+            # both hit MiniMax M3 chat completions.
+            llm_provider = classifier
 
     full_path = ctx["full_path"]
 
@@ -228,13 +256,13 @@ def run_post_finish_pipeline(
             f"classify: {exc!r}",
         )
 
-    # 6. Persist the kind and finish.
+    # 6. Persist the kind on the session. Status stays in
+    # ``classifying`` for now; the next step moves to ``summarising``.
     try:
         kind, confidence = result.kind, result.confidence
         storage.set_kind(
             session_id, kind, confidence=confidence,
         )
-        _set_status(storage, session_id, STATUS_DONE)
     except _PipelineError as exc:
         return _mark_failed(
             storage, session_id, "bad_transition", str(exc),
@@ -244,11 +272,94 @@ def run_post_finish_pipeline(
             storage, session_id, REASON_CLASSIFY_FAILED,
             f"persist kind: {exc!r}",
         )
+
+    # 7. Summarise. A no-op summariser (no API key configured)
+    # returns an empty Summary, so this step always succeeds in
+    # the no-key case.
+    try:
+        _set_status(storage, session_id, STATUS_SUMMARISING)
+    except _PipelineError as exc:
+        return _mark_failed(
+            storage, session_id, "bad_transition", str(exc),
+        )
+    try:
+        summary = llm_provider.summarize(transcript)
+        # Serialise the Summary as JSON so the storage layer
+        # doesn't need to know the dataclass shape. ``text`` is
+        # the display string; ``key_points`` is a list.
+        summary_payload = json.dumps({
+            "text": summary.text,
+            "key_points": list(summary.key_points),
+        })
+    except LLMError as exc:
+        return _mark_failed(
+            storage, session_id, REASON_SUMMARISE_FAILED,
+            f"summarise: {exc}",
+        )
+    except Exception as exc:  # pragma: no cover
+        return _mark_failed(
+            storage, session_id, REASON_SUMMARISE_FAILED,
+            f"summarise: {exc!r}",
+        )
+    try:
+        storage.add_artifact(
+            session_id, "summary", summary_payload,
+            model=getattr(llm_provider, "name", None),
+        )
+    except _PipelineError as exc:
+        return _mark_failed(
+            storage, session_id, "bad_transition", str(exc),
+        )
+    except Exception as exc:  # pragma: no cover
+        return _mark_failed(
+            storage, session_id, REASON_SUMMARISE_FAILED,
+            f"persist summary: {exc!r}",
+        )
+
+    # 8. Extract. Same pattern: LLM error → mark failed;
+    # otherwise persist as an ``extraction`` artifact.
+    try:
+        _set_status(storage, session_id, STATUS_EXTRACTING)
+    except _PipelineError as exc:
+        return _mark_failed(
+            storage, session_id, "bad_transition", str(exc),
+        )
+    try:
+        items = llm_provider.extract(transcript, kind)
+    except LLMError as exc:
+        return _mark_failed(
+            storage, session_id, REASON_EXTRACT_FAILED,
+            f"extract: {exc}",
+        )
+    except Exception as exc:  # pragma: no cover
+        return _mark_failed(
+            storage, session_id, REASON_EXTRACT_FAILED,
+            f"extract: {exc!r}",
+        )
+    try:
+        storage.add_artifact(
+            session_id, "extraction",
+            json.dumps({"items": list(items)}),
+            model=getattr(llm_provider, "name", None),
+        )
+        _set_status(storage, session_id, STATUS_DONE)
+    except _PipelineError as exc:
+        return _mark_failed(
+            storage, session_id, "bad_transition", str(exc),
+        )
+    except Exception as exc:  # pragma: no cover
+        return _mark_failed(
+            storage, session_id, REASON_EXTRACT_FAILED,
+            f"persist extraction: {exc!r}",
+        )
+
     return {
         "ok": True,
         "kind": kind,
         "confidence": confidence,
         "transcript_chars": len(transcript),
+        "summary_chars": len(summary.text),
+        "extracted_items": len(items),
     }
 
 

@@ -310,6 +310,137 @@ class MiniMaxProviderTests(unittest.TestCase):
         with self.assertRaises(LLMConfigError):
             p.transcribe("/tmp/x.wav")
 
+    def test_summarize_returns_summary(self):
+        body = json.dumps({
+            "choices": [{
+                "message": {
+                    "content": json.dumps({
+                        "text": "A meeting about the new design.",
+                        "key_points": ["Point 1", "Point 2"],
+                    }),
+                },
+            }],
+        }).encode("utf-8")
+        p = MiniMaxProvider("k", http_transport=_fake(200, body))
+        out = p.summarize("a long transcript")
+        self.assertEqual(out.text, "A meeting about the new design.")
+        self.assertEqual(out.key_points, ["Point 1", "Point 2"])
+
+    def test_summarize_handles_fenced_json(self):
+        body = json.dumps({
+            "choices": [{
+                "message": {
+                    "content": "```json\n{\"text\": \"hi\", \"key_points\": []}\n```",
+                },
+            }],
+        }).encode("utf-8")
+        p = MiniMaxProvider("k", http_transport=_fake(200, body))
+        out = p.summarize("x")
+        self.assertEqual(out.text, "hi")
+        self.assertEqual(out.key_points, [])
+
+    def test_summarize_raises_on_http_error(self):
+        p = MiniMaxProvider("k", http_transport=_fake(503, b"down"))
+        with self.assertRaises(LLMHTTPError):
+            p.summarize("x")
+
+    def test_summarize_raises_on_malformed_response(self):
+        body = json.dumps({
+            "choices": [{"message": {"content": "no json here"}}],
+        }).encode("utf-8")
+        p = MiniMaxProvider("k", http_transport=_fake(200, body))
+        with self.assertRaises(LLMError):
+            p.summarize("x")
+
+    def test_summarize_rejects_non_dict_text(self):
+        body = json.dumps({
+            "choices": [{
+                "message": {
+                    "content": json.dumps({"text": 42, "key_points": []}),
+                },
+            }],
+        }).encode("utf-8")
+        p = MiniMaxProvider("k", http_transport=_fake(200, body))
+        with self.assertRaises(LLMError):
+            p.summarize("x")
+
+    def test_extract_returns_items(self):
+        body = json.dumps({
+            "choices": [{
+                "message": {
+                    "content": json.dumps({
+                        "items": [
+                            {"type": "deadline", "text": "Ship by Friday"},
+                            {"type": "topic", "text": "Auth flow"},
+                        ],
+                    }),
+                },
+            }],
+        }).encode("utf-8")
+        p = MiniMaxProvider("k", http_transport=_fake(200, body))
+        out = p.extract("transcript text", kind="meeting")
+        self.assertEqual(len(out), 2)
+        self.assertEqual(out[0]["type"], "deadline")
+        self.assertEqual(out[1]["type"], "topic")
+        self.assertEqual(out[0]["text"], "Ship by Friday")
+
+    def test_extract_handles_fenced_json(self):
+        body = json.dumps({
+            "choices": [{
+                "message": {
+                    "content": "```json\n{\"items\": [{\"type\": \"x\", \"text\": \"y\"}]}\n```",
+                },
+            }],
+        }).encode("utf-8")
+        p = MiniMaxProvider("k", http_transport=_fake(200, body))
+        out = p.extract("x", kind="lecture")
+        self.assertEqual(out, [{"type": "x", "text": "y"}])
+
+    def test_extract_rejects_unknown_kind(self):
+        p = MiniMaxProvider("k", http_transport=_fake(200, b"{}"))
+        with self.assertRaises(LLMError):
+            p.extract("x", kind="alien")
+
+    def test_extract_raises_on_item_missing_keys(self):
+        body = json.dumps({
+            "choices": [{
+                "message": {
+                    "content": json.dumps({
+                        "items": [{"type": "x"}],  # no 'text'
+                    }),
+                },
+            }],
+        }).encode("utf-8")
+        p = MiniMaxProvider("k", http_transport=_fake(200, body))
+        with self.assertRaises(LLMError):
+            p.extract("x", kind="lecture")
+
+    def test_extract_raises_on_http_error(self):
+        p = MiniMaxProvider("k", http_transport=_fake(500, b"boom"))
+        with self.assertRaises(LLMHTTPError):
+            p.extract("x", kind="lecture")
+
+    def test_extract_returns_empty_list_when_items_empty(self):
+        body = json.dumps({
+            "choices": [{
+                "message": {
+                    "content": json.dumps({"items": []}),
+                },
+            }],
+        }).encode("utf-8")
+        p = MiniMaxProvider("k", http_transport=_fake(200, body))
+        self.assertEqual(p.extract("x", kind="meeting"), [])
+
+    def test_summarize_rejects_non_string_transcript(self):
+        p = MiniMaxProvider("k", http_transport=_fake(200, b"x"))
+        with self.assertRaises(LLMError):
+            p.summarize(None)  # type: ignore[arg-type]
+
+    def test_extract_rejects_non_string_kind(self):
+        p = MiniMaxProvider("k", http_transport=_fake(200, b"x"))
+        with self.assertRaises(LLMError):
+            p.extract("x", kind=None)  # type: ignore[arg-type]
+
 
 # --- Response parser (unit) -------------------------------------------------
 

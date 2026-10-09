@@ -237,6 +237,8 @@ _STATUS_LABEL = {
     storage.STATUS_TRANSCRIBING: "Transcribing",
     storage.STATUS_TRANSCRIBED: "Transcribed",
     storage.STATUS_CLASSIFYING: "Classifying",
+    storage.STATUS_SUMMARISING: "Summarising",
+    storage.STATUS_EXTRACTING: "Extracting",
     storage.STATUS_DONE: "Done",
     storage.STATUS_FAILED: "Failed",
 }
@@ -917,6 +919,7 @@ def _register_routes(app: Flask) -> None:
             store, session_id,
             transcript_provider=current_app_transcript_provider(),
             classifier=current_app_classifier_provider(),
+            llm_provider=current_app_classifier_provider(),
         )
         sess = store.get_session(session_id)
         # ``None`` means the session wasn't 'ready' (e.g. it's

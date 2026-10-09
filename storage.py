@@ -51,12 +51,18 @@ STATUS_READY = "ready"
 STATUS_TRANSCRIBING = "transcribing"
 STATUS_TRANSCRIBED = "transcribed"
 STATUS_CLASSIFYING = "classifying"
+# Milestone 9: after classification the pipeline produces a
+# summary and extracts structured items (deadlines, key points,
+# topics). The session is fully LLM-processed at ``done``.
+STATUS_SUMMARISING = "summarising"
+STATUS_EXTRACTING = "extracting"
 STATUS_DONE = "done"
 STATUS_FAILED = "failed"
 
 ALL_STATUSES: tuple[str, ...] = (
     STATUS_RECEIVING, STATUS_STITCHING, STATUS_READY,
     STATUS_TRANSCRIBING, STATUS_TRANSCRIBED, STATUS_CLASSIFYING,
+    STATUS_SUMMARISING, STATUS_EXTRACTING,
     STATUS_DONE, STATUS_FAILED,
 )
 
@@ -79,6 +85,12 @@ ALLOWED_STATUS_TRANSITIONS: dict[str, frozenset[str]] = {
         STATUS_CLASSIFYING, STATUS_FAILED, STATUS_READY,
     }),
     STATUS_CLASSIFYING: frozenset({
+        STATUS_SUMMARISING, STATUS_FAILED, STATUS_READY,
+    }),
+    STATUS_SUMMARISING: frozenset({
+        STATUS_EXTRACTING, STATUS_FAILED, STATUS_READY,
+    }),
+    STATUS_EXTRACTING: frozenset({
         STATUS_DONE, STATUS_FAILED, STATUS_READY,
     }),
     STATUS_DONE: frozenset({STATUS_READY, STATUS_FAILED}),
@@ -446,6 +458,8 @@ class Session:
                     STATUS_TRANSCRIBING,
                     STATUS_TRANSCRIBED,
                     STATUS_CLASSIFYING,
+                    STATUS_SUMMARISING,
+                    STATUS_EXTRACTING,
                     STATUS_DONE,
                 ) and self.full_audio_size > 0
                 else None

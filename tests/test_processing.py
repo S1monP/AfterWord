@@ -13,13 +13,14 @@ Tests use stub providers (no real HTTP) to verify each branch:
 """
 from __future__ import annotations
 
+import json
 import unittest
 import uuid
 from pathlib import Path
 
 import storage
 from services.llm import (
-    Classification, LLMError, LLMProvider,
+    Classification, LLMError, LLMProvider, Summary,
 )
 from services import processing
 from tests.conftest import LRTestCase
@@ -43,7 +44,12 @@ class _StubTranscript(LLMProvider):
 
 
 class _StubClassifier(LLMProvider):
-    """Returns a fixed (kind, confidence) tuple."""
+    """Stub that implements classify, summarise and extract.
+
+    M9: the pipeline uses the same provider for all three LLM
+    steps, so the stub has to implement them all to keep the
+    M8 happy-path tests green.
+    """
 
     name = "stub-classifier"
 
@@ -58,6 +64,15 @@ class _StubClassifier(LLMProvider):
         if self._fail:
             raise LLMError("simulated classifier failure")
         return Classification(kind=self._kind, confidence=self._confidence)
+
+    def summarize(self, transcript):
+        # M9: return an empty Summary so the pipeline can run
+        # through summarising/extracting to ``done``.
+        return Summary(text="", key_points=[])
+
+    def extract(self, transcript, kind):
+        # M9: no structured items by default.
+        return []
 
     def transcribe(self, audio_path):
         raise RuntimeError("not used in this stub")
@@ -346,6 +361,169 @@ class PipelineReasonConstantsTests(unittest.TestCase):
         self.assertIsInstance(processing.REASON_CLASSIFY_FAILED, str)
         self.assertIsInstance(processing.REASON_NOT_READY, str)
         self.assertIsInstance(processing.REASON_NO_AUDIO, str)
+        self.assertIsInstance(processing.REASON_SUMMARISE_FAILED, str)
+        self.assertIsInstance(processing.REASON_EXTRACT_FAILED, str)
+
+
+class PipelineSummariseExtractTests(LRTestCase):
+    """M9: the pipeline now produces a summary and an extraction
+    artifact after classification. These tests verify both the
+    happy path and the failure paths.
+    """
+
+    def test_pipeline_persists_summary_and_extraction(self):
+        from services.llm import Classification, LLMProvider, Summary
+
+        class StubT(LLMProvider):
+            name = "stub-t"
+
+            def transcribe(self, audio_path):
+                return "the transcript text"
+
+            def classify(self, transcript):
+                raise RuntimeError("not used")
+
+            def summarize(self, transcript):
+                raise RuntimeError("not used")
+
+            def extract(self, transcript, kind):
+                raise RuntimeError("not used")
+
+        class StubLLM(LLMProvider):
+            name = "stub-llm"
+
+            def classify(self, transcript):
+                return Classification(kind="lecture", confidence=0.8)
+
+            def summarize(self, transcript):
+                return Summary(
+                    text="A lecture on testing.",
+                    key_points=["tests are good", "coverage matters"],
+                )
+
+            def extract(self, transcript, kind):
+                return [
+                    {"type": "topic", "text": "Test coverage"},
+                    {"type": "key_term", "text": "Unit test"},
+                ]
+
+            def transcribe(self, audio_path):
+                raise RuntimeError("not used here")
+
+        sid = _make_ready_session(self)
+        result = processing.run_post_finish_pipeline(
+            self.app.config["LR_STORAGE"], sid,
+            transcript_provider=StubT(),
+            classifier=StubLLM(),
+            llm_provider=StubLLM(),
+        )
+        self.assertTrue(result["ok"])
+        # Summary artifact exists and round-trips as JSON.
+        summary = self.app.config["LR_STORAGE"].get_artifact(
+            sid, "summary",
+        )
+        self.assertIsNotNone(summary)
+        parsed = json.loads(summary["content"])
+        self.assertEqual(parsed["text"], "A lecture on testing.")
+        self.assertEqual(len(parsed["key_points"]), 2)
+        # Extraction artifact exists and has the items.
+        extraction = self.app.config["LR_STORAGE"].get_artifact(
+            sid, "extraction",
+        )
+        self.assertIsNotNone(extraction)
+        items = json.loads(extraction["content"])["items"]
+        self.assertEqual(len(items), 2)
+        self.assertEqual(items[0]["type"], "topic")
+        # Session is fully done.
+        sess = self.app.config["LR_STORAGE"].get_session(sid)
+        self.assertEqual(sess.status, storage.STATUS_DONE)
+        self.assertEqual(result["summary_chars"],
+                         len("A lecture on testing."))
+        self.assertEqual(result["extracted_items"], 2)
+
+    def test_summarise_failure_marks_failed(self):
+        from services.llm import (
+            Classification, LLMError, LLMProvider,
+        )
+
+        class T(LLMProvider):
+            name = "t"
+
+            def transcribe(self, audio_path):
+                return "x"
+
+            def classify(self, transcript):
+                return Classification(kind="lecture", confidence=0.8)
+
+            def summarize(self, transcript):
+                raise LLMError("upstream timed out")
+
+            def extract(self, transcript, kind):
+                return []
+
+        sid = _make_ready_session(self)
+        result = processing.run_post_finish_pipeline(
+            self.app.config["LR_STORAGE"], sid,
+            transcript_provider=T(),
+            classifier=T(),
+            llm_provider=T(),
+        )
+        self.assertFalse(result["ok"])
+        self.assertEqual(
+            result["reason"], processing.REASON_SUMMARISE_FAILED,
+        )
+        sess = self.app.config["LR_STORAGE"].get_session(sid)
+        self.assertEqual(sess.status, storage.STATUS_FAILED)
+        self.assertIn("upstream timed out", sess.status_detail)
+        # No summary artifact was persisted.
+        self.assertIsNone(
+            self.app.config["LR_STORAGE"].get_artifact(sid, "summary"),
+        )
+
+    def test_extract_failure_keeps_summary_artifact(self):
+        from services.llm import (
+            Classification, LLMError, LLMProvider, Summary,
+        )
+
+        class T(LLMProvider):
+            name = "t"
+
+            def transcribe(self, audio_path):
+                return "x"
+
+            def classify(self, transcript):
+                return Classification(kind="meeting", confidence=0.7)
+
+            def summarize(self, transcript):
+                return Summary(text="meeting summary", key_points=[])
+
+            def extract(self, transcript, kind):
+                raise LLMError("extraction broke")
+
+        sid = _make_ready_session(self)
+        result = processing.run_post_finish_pipeline(
+            self.app.config["LR_STORAGE"], sid,
+            transcript_provider=T(),
+            classifier=T(),
+            llm_provider=T(),
+        )
+        self.assertFalse(result["ok"])
+        self.assertEqual(
+            result["reason"], processing.REASON_EXTRACT_FAILED,
+        )
+        sess = self.app.config["LR_STORAGE"].get_session(sid)
+        self.assertEqual(sess.status, storage.STATUS_FAILED)
+        # The summary was persisted before the extract step failed.
+        summary = self.app.config["LR_STORAGE"].get_artifact(
+            sid, "summary",
+        )
+        self.assertIsNotNone(summary)
+        # No extraction artifact.
+        self.assertIsNone(
+            self.app.config["LR_STORAGE"].get_artifact(
+                sid, "extraction",
+            ),
+        )
 
 
 if __name__ == "__main__":

@@ -178,10 +178,19 @@ class _NoOpProvider(LLMProvider):
         return Classification(kind="other", confidence=0.0)
 
     def summarize(self, transcript: str) -> Summary:
-        raise LLMConfigError("no LLM provider configured")
+        # Empty Summary so the pipeline persists an empty
+        # summary artifact; the UI's "no summary yet" placeholder
+        # shows. Matches the no-op semantic: no LLM = no work.
+        return Summary(
+            text="[no summary - no LLM provider configured]",
+            key_points=[],
+        )
 
     def extract(self, transcript: str, kind: str) -> list[dict]:
-        raise LLMConfigError("no LLM provider configured")
+        # Empty list so the pipeline persists an empty
+        # extraction artifact. The UI can render "no
+        # structured items" without special-casing.
+        return []
 
 
 # --- OpenRouter (Whisper) ---------------------------------------------------
@@ -194,7 +203,7 @@ class _NoOpProvider(LLMProvider):
 OPENROUTER_TRANSCRIPTIONS_URL = (
     "https://openrouter.ai/api/v1/audio/transcriptions"
 )
-OPENROUTER_WHISPER_MODEL = "openai/whisper-large-v3"
+OPENROUTER_WHISPER_MODEL = "microsoft/mai-transcribe-2"
 
 #: Valid recording kinds the classifier can return.
 #: Mirrors ``storage.RECORDING_KINDS`` and
@@ -332,8 +341,8 @@ class OpenRouterProvider(LLMProvider):
 # that constrains the response to a JSON object with ``kind`` and
 # ``confidence`` fields, then parse the assistant message.
 
-MINIMAX_CHAT_URL = "https://api.minimax.chat/v1/chat/completions"
-MINIMAX_MODEL = "MiniMax-M3"
+MINIMAX_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
+MINIMAX_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
 
 # System prompt: keeps the model on task. We give the model the
 # four valid kinds and ask for a JSON object back. The confidence
@@ -350,6 +359,238 @@ _CLASSIFY_SYSTEM_PROMPT = (
     '"confidence" is your own 0..1 estimate; use 0.0 when you are '
     "guessing and 1.0 when you are certain."
 )
+
+
+
+
+
+# --- Map-reduce for long transcripts (M9.1) -----------------------------
+#
+# The system prompts above (summarise/extract) assume the entire
+# transcript fits in one prompt. For long recordings (a 30+ minute
+# lecture transcript is often 30-60k characters) that means the
+# model only sees the first slice and ignores the rest.
+#
+# The fix is map-reduce: split the transcript into overlapping chunks,
+# run the per-chunk LLM call on each, then either dedupe (extraction)
+# or synthesise (summarise) the partials into a final result.
+#
+# All of this lives in helpers below; the public ``summarize()`` and
+# ``extract()`` methods stay simple wrappers.
+
+# Approximate per-chunk budget. The system prompt + response
+# together cost ~1-2k tokens, so leave headroom in a 32k-token
+# model window. 12_000 chars ~ 3k tokens is comfortable.
+_CHUNK_SIZE = 12_000
+# Overlap between consecutive chunks. Lets the model see context
+# that straddles a boundary. ~1k chars is enough for ~2 sentences
+# of overlap.
+_CHUNK_OVERLAP = 1_000
+
+
+def _chunk_text(
+    text: str, *, chunk_size: int = _CHUNK_SIZE,
+    overlap: int = _CHUNK_OVERLAP,
+) -> list[str]:
+    """Split ``text`` into overlapping chunks of ``chunk_size`` chars.
+
+    Returns at least one chunk, even if ``text`` is empty (the
+    chunk is then ``""``). Each chunk (except the first) starts
+    ``overlap`` characters before where the previous one ended,
+    so context that straddles a boundary is still visible to the
+    model.
+
+    Edge cases:
+    - empty / whitespace-only text -> [""]
+    - text shorter than ``chunk_size`` -> [text]
+    - text exactly ``chunk_size`` -> [text]
+    - text longer than ``chunk_size`` -> N overlapping chunks
+    """
+    if not text:
+        return [""]
+    if len(text) <= chunk_size:
+        return [text]
+    if overlap >= chunk_size:
+        raise ValueError(
+            f"chunk overlap ({overlap}) must be smaller than "
+            f"chunk_size ({chunk_size})"
+        )
+    chunks: list[str] = []
+    start = 0
+    stride = chunk_size - overlap
+    while start < len(text):
+        end = min(start + chunk_size, len(text))
+        chunks.append(text[start:end])
+        if end == len(text):
+            break
+        start += stride
+    return chunks
+
+
+# Per-section system prompt for the map step. Tells the model it is
+# looking at a fragment, so it focuses on what's actually present
+# rather than guessing about the whole.
+_SUMMARISE_SECTION_PROMPT = (
+    "You summarise a single section of a longer audio transcript. "
+    "Reply with ONLY a JSON object (no prose, no markdown fences) with "
+    "exactly two keys: 'text' and 'key_points'.\n\n"
+    "- 'text' is 1-3 sentences summarising THIS SECTION ONLY. Do not "
+    "speculate about content outside the section.\n"
+    "- 'key_points' is a list of 0-5 short bullet points (each under 20 "
+    "words) covering the most important takeaways FROM THIS SECTION.\n\n"
+    "If the section is empty, repetitive, or contains no useful content, "
+    "return {\"text\": \"\", \"key_points\": []}."
+)
+
+
+# Synthesis prompt: takes the partial summaries and produces a single
+# coherent summary + deduplicated key points.
+_SYNTHESISE_SUMMARIES_PROMPT = (
+    "You are given a list of partial summaries, each describing one "
+    "section of a longer audio recording (in order). Your job is to "
+    "synthesise them into ONE coherent final summary.\n\n"
+    "Reply with ONLY a JSON object (no prose, no markdown fences) with "
+    "exactly two keys: 'text' and 'key_points'.\n\n"
+    "- 'text' is a 2-4 sentence summary of the WHOLE recording, written "
+    "in the third person, present tense. Weave the section summaries "
+    "together naturally; don't reference the sections.\n"
+    "- 'key_points' is a deduplicated list of 3-7 short bullet points "
+    "(each under 20 words) covering the most important takeaways from "
+    "the entire recording. Drop near-duplicates; keep distinct points.\n\n"
+    "If the partials are empty, return "
+    "{\"text\": \"no content\", \"key_points\": []}."
+)
+
+
+# Per-section system prompt for extraction. Same shape as the
+# single-shot one but explicit that the model is looking at a
+# fragment.
+_EXTRACT_SECTION_PROMPT = (
+    "You extract structured items from a single section of a longer "
+    "transcript. Reply with ONLY a JSON object (no prose, no markdown "
+    "fences) with one key: 'items'.\n\n"
+    "'items' is a list of objects. Each object has at minimum two keys: "
+    "'type' (short snake_case identifier like 'deadline', 'action_item', "
+    "'topic', 'key_term', 'study_question', or 'fact') and 'text' "
+    "(the item's content, plain English).\n\n"
+    "Type guidance by recording kind:\n"
+    "- 'meeting': focus on 'action_item' and 'deadline'.\n"
+    "- 'lecture': focus on 'topic', 'key_term', 'study_question', 'fact'.\n"
+    "- 'voice_memo': focus on 'fact' and 'topic'.\n"
+    "- 'other': include a mix of 'topic' and 'fact'.\n\n"
+    "Aim for 3-10 items. Only include items that are clearly supported "
+    "by THIS SECTION; do not invent. If the section has no relevant "
+    "items, return {\"items\": []}."
+)
+
+
+def _summarise_one_chunk(
+    provider: "MiniMaxProvider",
+    chunk: str,
+    *,
+    section_index: int,
+    total_sections: int,
+) -> Summary:
+    """Run the per-chunk summarise LLM call. Returns an empty
+    :class:`Summary` on a parse error so the map step degrades
+    gracefully (the synthesis step will just have one fewer input).
+    """
+    user_prompt = (
+        f"This is section {section_index + 1} of {total_sections} of "
+        f"a longer transcript. Summarise it:\n\n{chunk}"
+    )
+    try:
+        message = provider._chat(
+            _SUMMARISE_SECTION_PROMPT, user_prompt,
+            max_chars=_CHUNK_SIZE,
+        )
+        return _parse_summarise_response(message.encode("utf-8"))
+    except LLMError:
+        return Summary(text="", key_points=[])
+
+
+def _synthesise_summaries(
+    provider: "MiniMaxProvider",
+    partials: list[Summary],
+) -> Summary:
+    """Run the synthesis LLM call that takes the partial
+    summaries and produces the final, coherent summary.
+    """
+    if not partials:
+        return Summary(text="", key_points=[])
+    formatted = "\n\n".join(
+        f"[Section {i + 1}] {p.text}\n  Key points: "
+        + (", ".join(p.key_points) if p.key_points else "(none)")
+        for i, p in enumerate(partials)
+    )
+    user_prompt = (
+        f"Below are partial summaries of {len(partials)} sections of "
+        f"a longer recording. Synthesise them into one final summary:\n\n"
+        f"{formatted}"
+    )
+    message = provider._chat(
+        _SYNTHESISE_SUMMARIES_PROMPT, user_prompt,
+        max_chars=_CHUNK_SIZE,
+    )
+    return _parse_summarise_response(message.encode("utf-8"))
+
+
+def _extract_one_chunk(
+    provider: "MiniMaxProvider",
+    chunk: str,
+    *,
+    kind: str,
+    section_index: int,
+    total_sections: int,
+) -> list[dict]:
+    """Run the per-chunk extract LLM call. Returns an empty list
+    on a parse error so the dedupe step is robust to a single
+    chunk failing.
+    """
+    user_prompt = (
+        f"Recording kind: {kind}\n\n"
+        f"This is section {section_index + 1} of {total_sections} of a "
+        f"longer transcript. Extract structured items from this section:\n\n"
+        f"{chunk}"
+    )
+    try:
+        message = provider._chat(
+            _EXTRACT_SECTION_PROMPT, user_prompt,
+            max_chars=_CHUNK_SIZE,
+        )
+        return _parse_extract_response(message.encode("utf-8"))
+    except LLMError:
+        return []
+
+
+def _normalise_item_text(text: str) -> str:
+    """Lowercase, strip whitespace, collapse runs of whitespace.
+    Used to fingerprint items for dedup so the same item mentioned
+    in two chunks with slightly different surface forms still
+    matches.
+    """
+    return " ".join(text.lower().split())
+
+
+def _dedupe_items(items: list[dict]) -> list[dict]:
+    """Drop near-duplicate items across chunks.
+
+    Two items are considered duplicates when they share the same
+    ``type`` and a normalised ``text`` fingerprint. The first
+    occurrence (which usually has the most context) is kept.
+    """
+    seen: set[tuple[str, str]] = set()
+    out: list[dict] = []
+    for item in items:
+        item_type = str(item.get("type", ""))
+        text = str(item.get("text", ""))
+        fingerprint = (item_type, _normalise_item_text(text))
+        if fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        out.append(item)
+    return out
+
 
 
 def _parse_classify_response(raw: bytes) -> Classification:
@@ -404,6 +645,150 @@ def _parse_classify_response(raw: bytes) -> Classification:
     return Classification(kind=kind, confidence=confidence_f)
 
 
+# --- Summarisation (M9) --------------------------------------------------
+#
+# The summariser produces a 2-3 sentence overview plus a list of
+# key points. We keep the response shape small enough to fit
+# comfortably in the 12k-char prompt window the model is given.
+
+_SUMMARISE_SYSTEM_PROMPT = (
+    "You are a personal-note summariser. Given an audio transcript, "
+    "produce a JSON object with exactly two keys: 'text' and 'key_points'.\n\n"
+    "- 'text' is a 2-3 sentence summary of the recording. "
+    "Write in the third person, present tense, like notes you'd read back "
+    "next month to remember what was discussed.\n"
+    "- 'key_points' is a list of 3-7 short bullet points (each under 20 words) "
+    "covering the most important takeaways.\n\n"
+    "Reply with ONLY the JSON object, no prose, no markdown fences."
+)
+
+
+def _parse_summarise_response(raw: bytes) -> Summary:
+    """Parse the raw model output into a :class:`Summary`.
+
+    Same code-fence / JSON-extraction tolerance as
+    :func:`_parse_classify_response`.
+    """
+    text = raw.decode("utf-8", errors="replace").strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        raise LLMError(
+            f"summary response has no JSON object: {text[:200]!r}"
+        )
+    candidate = text[start:end + 1]
+    try:
+        obj = json.loads(candidate)
+    except ValueError as exc:
+        raise LLMError(
+            f"summary response is not valid JSON: {candidate[:200]!r}"
+        ) from exc
+    if not isinstance(obj, dict):
+        raise LLMError(
+            f"summary response is not a JSON object: {candidate[:200]!r}"
+        )
+    text_summary = obj.get("text", "")
+    if not isinstance(text_summary, str):
+        raise LLMError(
+            f"summary 'text' is not a string: {text_summary!r}"
+        )
+    raw_points = obj.get("key_points", [])
+    if not isinstance(raw_points, list):
+        raise LLMError(
+            f"summary 'key_points' is not a list: {raw_points!r}"
+        )
+    key_points = [str(p) for p in raw_points]
+    return Summary(text=text_summary.strip(), key_points=key_points)
+
+
+# --- Extraction (M9) -----------------------------------------------------
+#
+# The extractor pulls structured items out of a transcript. The
+# ``kind`` argument (lecture, voice_memo, meeting, other) tells the
+# model what kind of artefacts to look for — a meeting transcript
+# gets action items, a lecture gets key terms + study questions, etc.
+# The result is a list of plain dicts; the caller is responsible for
+# validating the shape (e.g. ``add_artifact(kind='extraction', content=...)``
+# doesn't care about the structure).
+
+_EXTRACT_SYSTEM_PROMPT = (
+    "You extract structured items from transcripts. Reply with ONLY a JSON "
+    "object (no prose, no markdown fences) with one key: 'items'.\n\n"
+    "'items' is a list of objects. Each object has at minimum two keys: "
+    "'type' (short snake_case identifier like 'deadline', 'action_item', "
+    "'topic', 'key_term', 'study_question', or 'fact') and 'text' "
+    "(the item's content, plain English).\n\n"
+    "Type guidance by recording kind:\n"
+    "- 'meeting': focus on 'action_item' and 'deadline'.\n"
+    "- 'lecture': focus on 'topic', 'key_term', 'study_question', 'fact'.\n"
+    "- 'voice_memo': focus on 'fact' and 'topic'.\n"
+    "- 'other': include a mix of 'topic' and 'fact'.\n\n"
+    "Aim for 3-10 items. Only include items that are clearly supported by "
+    "the transcript; do not invent."
+)
+
+
+def _parse_extract_response(raw: bytes) -> list[dict]:
+    """Parse the model output into a list of structured items.
+
+    Defensive against code fences, prose around JSON, and
+    heterogeneous shapes. We coerce the ``text`` field to a string
+    but otherwise pass dicts through unchanged so the caller can
+    decide what to do with the structure.
+    """
+    text = raw.decode("utf-8", errors="replace").strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        raise LLMError(
+            f"extraction response has no JSON object: {text[:200]!r}"
+        )
+    candidate = text[start:end + 1]
+    try:
+        obj = json.loads(candidate)
+    except ValueError as exc:
+        raise LLMError(
+            f"extraction response is not valid JSON: {candidate[:200]!r}"
+        ) from exc
+    if not isinstance(obj, dict):
+        raise LLMError(
+            f"extraction response is not a JSON object: {candidate[:200]!r}"
+        )
+    raw_items = obj.get("items", [])
+    if not isinstance(raw_items, list):
+        raise LLMError(
+            f"extraction 'items' is not a list: {raw_items!r}"
+        )
+    out: list[dict] = []
+    for i, item in enumerate(raw_items):
+        if not isinstance(item, dict):
+            raise LLMError(
+                f"extraction item {i} is not a dict: {item!r}"
+            )
+        if "type" not in item or "text" not in item:
+            raise LLMError(
+                f"extraction item {i} missing 'type' or 'text': {item!r}"
+            )
+        # Coerce text to a string; keep other keys verbatim so callers
+        # can extend the schema (e.g. add a 'due' field for deadlines).
+        normalised = dict(item)
+        normalised["text"] = str(item["text"])
+        out.append(normalised)
+    return out
+
+
 class MiniMaxProvider(LLMProvider):
     """Real classification via the MiniMax M3 chat completions API.
 
@@ -434,52 +819,15 @@ class MiniMaxProvider(LLMProvider):
     def classify(self, transcript: str) -> Classification:
         if not isinstance(transcript, str):
             raise LLMError("transcript must be a string")
-        # Truncate very long transcripts to keep the prompt small.
-        # 12_000 chars is roughly 3k tokens — well within MiniMax M3's
-        # window. The summary pipeline (M9) will operate on the full
-        # text; for classification, the topic is usually established
-        # in the first few minutes.
-        truncated = transcript[:12_000]
-        payload = {
-            "model": self._model,
-            "messages": [
-                {"role": "system", "content": _CLASSIFY_SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": (
-                        f"Classify this transcript:\n\n{truncated}"
-                    ),
-                },
-            ],
-            "temperature": 0.0,
-        }
-        body = json.dumps(payload).encode("utf-8")
-        headers = {
-            "Authorization": f"Bearer {self._api_key}",
-            "Content-Type": "application/json",
-        }
-        status, raw = self._http(
-            self._chat_url, data=body, headers=headers, timeout=60.0,
+        # 12_000 chars ≈ 3k tokens — leaves room for the prompt +
+        # response in MiniMax M3's window. For classification, the
+        # topic is usually established in the first few minutes so
+        # this rarely hurts accuracy.
+        message = self._chat(
+            _CLASSIFY_SYSTEM_PROMPT,
+            f"Classify this transcript:\n\n{transcript}",
+            max_chars=12_000,
         )
-        if status < 200 or status >= 300:
-            raise LLMHTTPError(
-                status, raw,
-                f"MiniMax classify failed: HTTP {status}: "
-                f"{raw[:200]!r}",
-            )
-        try:
-            payload_resp = json.loads(raw.decode("utf-8"))
-        except (ValueError, UnicodeDecodeError) as exc:
-            raise LLMError(
-                f"MiniMax returned non-JSON body: {raw[:200]!r}"
-            ) from exc
-        try:
-            message = payload_resp["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError) as exc:
-            raise LLMError(
-                f"MiniMax response missing choices[0].message.content: "
-                f"{raw[:200]!r}"
-            ) from exc
         if not isinstance(message, str):
             raise LLMError(
                 f"MiniMax response message is not a string: {message!r}"
@@ -493,11 +841,138 @@ class MiniMaxProvider(LLMProvider):
             "transcription"
         )
 
+    def _chat(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        timeout: float = 60.0,
+        max_chars: int = 16_000,
+    ) -> str:
+        """Shared HTTP plumbing for summarisation / extraction /
+        classification.
+
+        POSTs a chat-completions request with the given system
+        prompt + user content (truncated to ``max_chars``), returns
+        the assistant message text. Raises :class:`LLMError` /
+        :class:`LLMHTTPError` on failure.
+        """
+        payload = {
+            "model": self._model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt[:max_chars]},
+            ],
+            "temperature": 0.0,
+        }
+        body = json.dumps(payload).encode("utf-8")
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+        }
+        status, raw = self._http(
+            self._chat_url, data=body, headers=headers, timeout=timeout,
+        )
+        if status < 200 or status >= 300:
+            raise LLMHTTPError(
+                status, raw,
+                f"MiniMax chat call failed: HTTP {status}: "
+                f"{raw[:200]!r}",
+            )
+        try:
+            payload_resp = json.loads(raw.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise LLMError(
+                f"MiniMax returned non-JSON body: {raw[:200]!r}"
+            ) from exc
+        try:
+            return payload_resp["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise LLMError(
+                f"MiniMax response missing choices[0].message.content: "
+                f"{raw[:200]!r}"
+            ) from exc
+
     def summarize(self, transcript: str) -> Summary:
-        raise LLMConfigError("summarisation lands in M9")
+        """Produce a 2-3 sentence summary plus key points.
+
+        For short transcripts (one chunk or less) this is a single
+        LLM call. For long transcripts the work is split into a
+        map step (one call per chunk) followed by a reduce step
+        (one synthesis call that combines the partials). See
+        :func:`_chunk_text` and :func:`_synthesise_summaries`.
+        """
+        if not isinstance(transcript, str):
+            raise LLMError("transcript must be a string")
+        chunks = _chunk_text(transcript)
+        if len(chunks) == 1:
+            # Short path: one call, same shape as before.
+            message = self._chat(
+                _SUMMARISE_SYSTEM_PROMPT,
+                f"Summarise this transcript:\n\n{transcript}",
+                max_chars=_CHUNK_SIZE,
+            )
+            if not isinstance(message, str):
+                raise LLMError(
+                    f"MiniMax response message is not a string: {message!r}"
+                )
+            return _parse_summarise_response(message.encode("utf-8"))
+        # Long path: map-reduce.
+        partials = [
+            _summarise_one_chunk(
+                self, chunk, section_index=i, total_sections=len(chunks),
+            )
+            for i, chunk in enumerate(chunks)
+        ]
+        return _synthesise_summaries(self, partials)
 
     def extract(self, transcript: str, kind: str) -> list[dict]:
-        raise LLMConfigError("extraction lands in M9")
+        """Pull structured items out of a transcript.
+
+        For short transcripts this is a single LLM call. For long
+        transcripts the work is split per-chunk and the partial
+        item lists are de-duplicated (a ``deadline`` mentioned in
+        chunks 1 and 3 should appear once in the final result).
+        ``kind`` is one of ``lecture``/``voice_memo``/``meeting``/
+        ``other``; it tunes the prompt so the model knows what
+        kind of items to look for (action items vs. study
+        questions, etc.).
+        """
+        if not isinstance(transcript, str):
+            raise LLMError("transcript must be a string")
+        if not isinstance(kind, str):
+            raise LLMError("kind must be a string")
+        if kind not in VALID_KINDS:
+            raise LLMError(
+                f"extract: kind must be one of {sorted(VALID_KINDS)}, "
+                f"got {kind!r}"
+            )
+        chunks = _chunk_text(transcript)
+        if len(chunks) == 1:
+            # Short path: one call, same shape as before.
+            message = self._chat(
+                _EXTRACT_SYSTEM_PROMPT,
+                (
+                    f"Recording kind: {kind}\n\n"
+                    f"Transcript:\n\n{transcript}"
+                ),
+                max_chars=_CHUNK_SIZE,
+            )
+            if not isinstance(message, str):
+                raise LLMError(
+                    f"MiniMax response message is not a string: {message!r}"
+                )
+            return _parse_extract_response(message.encode("utf-8"))
+        # Long path: per-chunk extraction, then dedupe.
+        all_items: list[dict] = []
+        for i, chunk in enumerate(chunks):
+            all_items.extend(
+                _extract_one_chunk(
+                    self, chunk, kind=kind,
+                    section_index=i, total_sections=len(chunks),
+                )
+            )
+        return _dedupe_items(all_items)
 
 
 # --- Factory ----------------------------------------------------------------

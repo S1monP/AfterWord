@@ -199,6 +199,16 @@ class TranscribeRouteTests(LRTestCase):
                     raise LLMError("simulated")
                 return Classification(kind=kind, confidence=conf)
 
+            def summarize(self, transcript):
+                # M9: stub returns an empty Summary so the pipeline
+                # can complete without an LLM.
+                from services.llm import Summary
+                return Summary(text="", key_points=[])
+
+            def extract(self, transcript, kind):
+                # M9: stub returns an empty list.
+                return []
+
             def transcribe(self, audio_path):
                 raise RuntimeError("not used")
 
@@ -272,6 +282,15 @@ class TranscribeRouteTests(LRTestCase):
             def classify(self, transcript):
                 raise LLMError("first run fails")
 
+            def summarize(self, transcript):
+                # M9: even on the "first run" failure path, the
+                # pipeline calls summarise after classify. Have
+                # it raise so the failure propagates.
+                raise LLMError("first run fails")
+
+            def extract(self, transcript, kind):
+                raise LLMError("first run fails")
+
         self.app.config["LR_LLM_PROVIDERS"] = {
             "transcript": Bad(), "classifier": Bad(),
         }
@@ -294,6 +313,15 @@ class TranscribeRouteTests(LRTestCase):
                 return Classification(
                     kind="other", confidence=0.5,
                 )
+
+            def summarize(self, transcript):
+                # M9: empty Summary so the pipeline reaches done.
+                from services.llm import Summary
+                return Summary(text="", key_points=[])
+
+            def extract(self, transcript, kind):
+                # M9: no items.
+                return []
 
         self.app.config["LR_LLM_PROVIDERS"] = {
             "transcript": Good(), "classifier": Good(),
