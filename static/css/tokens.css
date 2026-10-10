@@ -35,6 +35,12 @@
   --lr-danger:        #e88282;
   --lr-info:          #82b8e8;
 
+  /* Surfaces: aliases over the background scale. Defined once here
+     so hover/active tints adapt to both themes automatically. */
+  --lr-surface:       var(--lr-bg-card);
+  --lr-surface-2:     var(--lr-bg-card-hi);
+  --lr-surface-hover: color-mix(in srgb, var(--lr-text) 6%, transparent);
+
   /* ---- Type ---- */
   --lr-font-display:  "Manrope", -apple-system, BlinkMacSystemFont,
                        "Segoe UI", Roboto, sans-serif;

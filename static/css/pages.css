@@ -53,6 +53,45 @@
 .lr-dashboard .lr-card__header {
   margin-bottom: var(--lr-s-3);
 }
+/* Fixed bento: card contents are capped and clip cleanly — an inner
+   scrollbar never appears ("View all (N)" footers lead to the pages). */
+.lr-dashboard .lr-card__body {
+  overflow-y: hidden;
+}
+
+/* Compact single-line rows for the fixed bento cards. Titles truncate
+   with an ellipsis so nothing can wrap and overflow its box. */
+.lr-dash-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.lr-dash-list li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--lr-s-2);
+  min-width: 0;
+}
+.lr-dash-list a {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--lr-text);
+  text-decoration: none;
+  font-size: var(--lr-fs-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lr-dash-list a:hover { color: var(--lr-accent); }
+.lr-dash-list__meta {
+  flex-shrink: 0;
+  color: var(--lr-text-faint);
+  font-size: var(--lr-fs-xs);
+  white-space: nowrap;
+}
 
 /* ---- Session detail: definition list ---- */
 
@@ -150,9 +189,33 @@
 .lr-todo:last-child { border-bottom: 0; }
 .lr-todo:hover { background: var(--lr-surface-hover, transparent); }
 .lr-todo__check {
-  width: 16px; height: 16px; cursor: pointer;
-  accent-color: var(--lr-accent);
+  /* Round, theme-native checkbox: subtle circle that fills with a
+     lavender dot when checked (radial-gradient so it works without
+     pseudo-elements in every browser). */
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px; height: 16px; margin: 0;
+  flex-shrink: 0;
+  border: 1.5px solid var(--lr-border-hi);
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  transition: border-color var(--lr-t-fast), box-shadow var(--lr-t-fast);
 }
+.lr-todo__check:hover { border-color: var(--lr-accent); }
+.lr-todo__check:focus-visible {
+  outline: none;
+  box-shadow: var(--lr-shadow-glow);
+}
+.lr-todo__check:checked {
+  border-color: var(--lr-accent);
+  background-image: radial-gradient(
+    circle,
+    var(--lr-accent) 0 3.5px,
+    transparent 4px
+  );
+}
+.lr-todo__check:disabled { opacity: 0.45; cursor: default; }
 .lr-todo__title {
   font-size: var(--lr-fs-md);
   color: var(--lr-text);
@@ -189,7 +252,7 @@
   font-size: 18px; line-height: 1;
   color: var(--lr-text-faint);
   cursor: pointer; padding: 4px 8px;
-  border-radius: var(--lr-radius-sm);
+  border-radius: var(--lr-r-sm);
 }
 .lr-todo__del:hover { color: var(--lr-danger); background: var(--lr-surface-hover, transparent); }
 .lr-todo__del:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -220,3 +283,216 @@
   color: var(--lr-danger);
 }
 .lr-todo.is-overdue { background: rgba(232, 130, 130, 0.04); }
+
+/* ---------------------------------------------------------------------------
+   Two-pane layouts (lectures / meetings / notes)
+   Shared page-scoped styles, previously duplicated in lectures.html.
+--------------------------------------------------------------------------- */
+.lr-twopane {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: var(--lr-gap-card, var(--lr-s-5));
+  align-items: start;
+}
+.lr-twopane__sidebar {
+  /* Same card treatment as .lr-card (dashboard/todos cards):
+     plush padding, rounded corners, card surface. */
+  background: var(--lr-bg-card);
+  border: 1px solid var(--lr-border);
+  border-radius: var(--lr-r-lg);
+  padding: var(--lr-pad-card);
+}
+.lr-twopane__sidebar h2 {
+  /* Same type treatment as .lr-card__title. */
+  font-family: var(--lr-font-display);
+  font-size: var(--lr-fs-lg);
+  font-weight: var(--lr-fw-semibold);
+  color: var(--lr-text);
+  letter-spacing: -0.005em;
+  margin: 0 0 var(--lr-s-4);
+}
+.lr-course {
+  border-radius: var(--lr-r-sm);
+  margin-bottom: var(--lr-s-2);
+}
+.lr-course__head {
+  display: flex;
+  align-items: center;
+  gap: var(--lr-s-2);
+  padding: var(--lr-s-2) var(--lr-s-3);
+  cursor: pointer;
+  user-select: none;
+  border-radius: var(--lr-r-sm);
+}
+.lr-course__head:hover { background: var(--lr-surface-hover); }
+.lr-course__swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid var(--lr-border-hi);
+  flex-shrink: 0;
+}
+.lr-course__name { flex: 1; font-weight: 600; }
+.lr-course__count {
+  font-size: var(--lr-fs-xs);
+  color: var(--lr-text-faint);
+  font-family: var(--lr-font-mono);
+}
+.lr-course__chevron {
+  transition: transform 150ms ease;
+  color: var(--lr-text-faint);
+}
+.lr-course.is-open .lr-course__chevron { transform: rotate(90deg); }
+.lr-course__lectures {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 200ms ease;
+}
+.lr-course.is-open .lr-course__lectures {
+  max-height: 800px;
+}
+.lr-course__lecture {
+  display: block;
+  padding: var(--lr-s-2) var(--lr-s-3);
+  border-radius: var(--lr-r-sm);
+  color: var(--lr-text);
+  text-decoration: none;
+  font-size: var(--lr-fs-sm);
+}
+.lr-course__lecture:hover { background: var(--lr-surface-hover); }
+.lr-course__lecture.is-active {
+  background: color-mix(in srgb, var(--lr-accent) 16%, var(--lr-surface));
+  color: var(--lr-accent);
+  font-weight: 600;
+}
+.lr-course__empty {
+  padding: var(--lr-s-2) var(--lr-s-3);
+  color: var(--lr-text-faint);
+  font-size: var(--lr-fs-xs);
+  font-style: italic;
+}
+.lr-twopane__main {
+  min-height: 400px;
+}
+.lr-detail {
+  background: var(--lr-surface);
+  border: 1px solid var(--lr-border);
+  border-radius: var(--lr-r-md);
+  padding: var(--lr-s-4);
+}
+.lr-detail__header { margin-bottom: var(--lr-s-3); }
+.lr-detail__title {
+  font-size: var(--lr-fs-xl);
+  margin: 0 0 var(--lr-s-2);
+}
+.lr-detail__meta {
+  color: var(--lr-text-faint);
+  font-size: var(--lr-fs-xs);
+}
+.lr-detail__player { margin-bottom: var(--lr-s-4); }
+.lr-detail__summary,
+.lr-detail__transcript {
+  margin-bottom: var(--lr-s-4);
+}
+.lr-detail__summary h3,
+.lr-detail__transcript h3 {
+  font-size: var(--lr-fs-md);
+  margin: 0 0 var(--lr-s-2);
+}
+.lr-detail__placeholder {
+  color: var(--lr-text-faint);
+  font-style: italic;
+  padding: var(--lr-s-3);
+  background: var(--lr-surface-2, var(--lr-surface));
+  border-radius: var(--lr-r-sm);
+  font-size: var(--lr-fs-sm);
+}
+.lr-detail__transcript summary {
+  cursor: pointer;
+  color: var(--lr-accent);
+  font-weight: 600;
+  padding: var(--lr-s-2) 0;
+}
+.lr-detail__model {
+  margin-top: var(--lr-s-2);
+  font-size: var(--lr-fs-xs);
+  color: var(--lr-text-faint);
+}
+@media (max-width: 900px) {
+  .lr-twopane { grid-template-columns: 1fr; }
+}
+
+/* ---------------------------------------------------------------------------
+   Embedded note editor (notes page right pane)
+   Themed to match the rest of the UI: dark surface, light text, mono
+   markdown source. No live preview — just the source, comfortably
+   sized for long-form writing.
+--------------------------------------------------------------------------- */
+.lr-note-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lr-s-3);
+}
+.lr-note-editor__title {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: var(--lr-fs-xl);
+  font-weight: 600;
+  background: var(--lr-surface);
+  color: var(--lr-text);
+  border: 1px solid var(--lr-border);
+  border-radius: var(--lr-r-md);
+  padding: var(--lr-s-3) var(--lr-s-4);
+}
+.lr-note-editor__title:focus {
+  outline: none;
+  border-color: var(--lr-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--lr-accent) 25%, transparent);
+}
+.lr-note-editor__body {
+  flex: 1;
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 60vh;
+  background: var(--lr-surface);
+  color: var(--lr-text);
+  border: 1px solid var(--lr-border);
+  border-radius: var(--lr-r-md);
+  font-family: var(--lr-font-mono);
+  font-size: 14px;
+  line-height: 1.6;
+  padding: var(--lr-s-4);
+}
+.lr-note-editor__body:focus {
+  outline: none;
+  border-color: var(--lr-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--lr-accent) 25%, transparent);
+}
+.lr-note-editor__actions {
+  display: flex;
+  gap: var(--lr-s-2);
+  align-items: center;
+}
+.lr-note-editor__saved {
+  color: var(--lr-accent);
+  font-size: var(--lr-fs-sm);
+}
+.lr-note-editor__error {
+  color: var(--lr-danger);
+  font-size: var(--lr-fs-sm);
+}
+.lr-note-editor.is-dirty .lr-note-editor__save {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--lr-warning) 45%, transparent);
+}
+
+/* Flat sidebar list (meetings / notes) — same link styles as the
+   lectures course lists, minus the grouping. */
+.lr-flat-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}

@@ -1,4 +1,4 @@
-"""Tests for the Notes service and API. Covers service-level validation/rendering/CRUD, API-level HTTP surface, and frontend HTML rendering. All tests use the temp-dir storage helper from conftest.LRTestCase."""
+﻿"""Tests for the Notes service and API. Covers service-level validation/rendering/CRUD, API-level HTTP surface, and frontend HTML rendering. All tests use the temp-dir storage helper from conftest.LRTestCase."""
 from __future__ import annotations
 
 import json
@@ -366,33 +366,46 @@ class NotesWebUITests(LRTestCase):
         self.assertIn("Cars", body)
         self.assertNotIn("Apples", body)
 
-    def test_notes_new_renders_form(self):
-        resp = self.client.get("/notes/new")
+    def test_notes_new_renders_editor(self):
+        resp = self.client.get("/notes/new", follow_redirects=True)
         self.assertEqual(resp.status_code, 200)
         body = resp.get_data(as_text=True)
-        self.assertIn("title", body.lower())
-        self.assertIn("body", body.lower())
-
-    def test_note_detail_renders(self):
+        # The embedded editor renders in create mode.
+        self.assertIn("lr-note-editor", body)
+        self.assertIn("lr-note-title", body)
+        self.assertIn("lr-note-body", body)
+    def test_note_detail_renders_editor_prefilled(self):
         create = self._create(title="Hello", body_md="**world**").get_json()
         note_id = create["note"]["id"]
-        resp = self.client.get(f"/notes/{note_id}")
+        # The legacy deep-link redirects to the notes page with the
+        # editor prefilled.
+        resp = self.client.get(f"/notes/{note_id}", follow_redirects=True)
         self.assertEqual(resp.status_code, 200)
         body = resp.get_data(as_text=True)
         self.assertIn("Hello", body)
-        self.assertIn("<strong>world</strong>", body)
-
+        self.assertIn("**world**", body)
     def test_note_detail_404(self):
         self.assertEqual(self.client.get("/notes/zzz").status_code, 404)
 
-    def test_note_edit_renders(self):
+    def test_note_edit_renders_editor_prefilled(self):
         create = self._create(title="Hello", body_md="**world**").get_json()
         note_id = create["note"]["id"]
-        resp = self.client.get(f"/notes/{note_id}/edit")
+        resp = self.client.get(
+            f"/notes/{note_id}/edit", follow_redirects=True,
+        )
         self.assertEqual(resp.status_code, 200)
         body = resp.get_data(as_text=True)
         self.assertIn("**world**", body)
 
+    def test_notes_page_renders_selected_note_editor(self):
+        create = self._create(title="Hello", body_md="body text").get_json()
+        note_id = create["note"]["id"]
+        resp = self.client.get(f"/notes?note_id={note_id}")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_data(as_text=True)
+        self.assertIn("lr-note-editor", body)
+        self.assertIn("Hello", body)
+        self.assertIn("body text", body)
     def test_note_edit_404(self):
         self.assertEqual(self.client.get("/notes/zzz/edit").status_code, 404)
 

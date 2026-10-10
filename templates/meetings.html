@@ -15,51 +15,25 @@
   </header>
 
   <div class="lr-twopane">
-    <aside class="lr-twopane__sidebar"
-           style="background: var(--lr-surface);
-                  border: 1px solid var(--lr-border);
-                  border-radius: var(--lr-radius-md);
-                  padding: var(--lr-s-3);">
-      <h2 style="font-size: var(--lr-fs-md); margin: 0 0 var(--lr-s-3);">
-        Meetings
-      </h2>
+    <aside class="lr-twopane__sidebar">
+      <h2>Meetings</h2>
       {% if meetings %}
-        <ul style="list-style: none; padding: 0; margin: 0;">
+        <ul class="lr-flat-list">
           {% for m in meetings %}
             <li>
-              <a class="lr-course__lecture"
-                 style="display: block; padding: var(--lr-s-2) var(--lr-s-3);
-                        border-radius: var(--lr-radius-sm);
-                        color: var(--lr-text);
-                        text-decoration: none;
-                        font-size: var(--lr-fs-sm);"
+              <a class="lr-course__lecture {% if m.id == selected_id %}is-active{% endif %}"
                  href="{{ url_for('ui_meetings') }}?session={{ m.id }}"
                  data-session-link="{{ m.id }}"
-                 data-kind="meeting"
-                 {% if m.id == selected_id %}
-                   class="lr-course__lecture is-active"
-                   style="display: block; padding: var(--lr-s-2) var(--lr-s-3);
-                          border-radius: var(--lr-radius-sm);
-                          background: color-mix(in srgb, var(--lr-warning) 18%, var(--lr-surface));
-                          color: var(--lr-warning);
-                          font-weight: 600;
-                          text-decoration: none;
-                          font-size: var(--lr-fs-sm);"
-                 {% endif %}>
-                {{ m.title or '(untitled)' }}
-              </a>
+                 data-kind="meeting">{{ m.title or '(untitled)' }}</a>
             </li>
           {% endfor %}
         </ul>
       {% else %}
-        <p style="color: var(--lr-text-faint); font-size: var(--lr-fs-sm); margin: 0;">
-          No meetings yet.
-        </p>
+        <p class="lr-course__empty">No meetings yet.</p>
       {% endif %}
     </aside>
 
-    <section class="lr-twopane__main" id="lr-twopane-main"
-             style="min-height: 400px;">
+    <section class="lr-twopane__main" id="lr-twopane-main">
       {% include "_session_detail.html" %}
     </section>
   </div>

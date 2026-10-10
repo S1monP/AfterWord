@@ -8,13 +8,6 @@
 
 {% block content %}
 <div class="lr-page lr-page--with-gap lr-page--full">
-  <header class="lr-page__header">
-    <div>
-      <h1 class="lr-page__title">Home</h1>
-      <div class="lr-page__sub">Your recordings, tasks, and deadlines at a glance.</div>
-    </div>
-  </header>
-
   <div class="lr-dashboard">
     {# --- Left column: Calendar (full height) --- #}
     <section class="lr-card lr-dashboard__calendar" aria-label="Calendar">
@@ -25,17 +18,45 @@
       <div class="lr-card__body">
         <div class="lr-cal-section">
           <div class="lr-cal-section__label">Today</div>
-          <div class="lr-empty-card">
-            <div class="lr-empty-card__title">Nothing scheduled</div>
-            <p>Events land here as you add them.</p>
-          </div>
+          {% if events_today %}
+            <ul class="lr-dash-list">
+              {% for e in events_today %}
+                <li>
+                  <a href="{{ url_for('ui_calendar') }}">{{ e.title }}</a>
+                  <span class="lr-dash-list__meta lr-mono">{{ e.starts_at[11:16] }}</span>
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <div class="lr-empty-card">
+              <div class="lr-empty-card__title">Nothing scheduled</div>
+              <p>Events land here as you add them.</p>
+            </div>
+          {% endif %}
         </div>
         <div class="lr-cal-section">
           <div class="lr-cal-section__label">This week</div>
-          <div class="lr-empty-card">
-            <div class="lr-empty-card__title">No events</div>
-            <p>Deadlines show up here as the due date approaches.</p>
-          </div>
+          {% if events_week or week_deadlines %}
+            <ul class="lr-dash-list">
+              {% for e in events_week %}
+                <li>
+                  <a href="{{ url_for('ui_calendar') }}">{{ e.title }}</a>
+                  <span class="lr-dash-list__meta lr-mono">{{ e.starts_at[:10] }}</span>
+                </li>
+              {% endfor %}
+              {% for d in week_deadlines %}
+                <li>
+                  <a href="{{ url_for('ui_todos') }}">{{ d.title }}</a>
+                  <span class="lr-dash-list__meta lr-mono">{{ d.due_at[:10] }}</span>
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <div class="lr-empty-card">
+              <div class="lr-empty-card__title">No events</div>
+              <p>Deadlines show up here as the due date approaches.</p>
+            </div>
+          {% endif %}
         </div>
       </div>
     </section>
@@ -78,16 +99,27 @@
         <section class="lr-card" aria-label="Lectures">
           <header class="lr-card__header">
             <h2 class="lr-card__title">Lectures</h2>
-            <a class="lr-card__action" href="{{ url_for('ui_lectures') }}">+ New</a>
+            <a class="lr-card__action" href="{{ url_for('ui_lectures') }}">Open &rarr;</a>
           </header>
           <div class="lr-card__body">
-            <div class="lr-empty-card">
-              <div class="lr-empty-card__title">No lectures yet</div>
-              <p>Recordings tagged as <code>lecture</code> show up here.</p>
-            </div>
+            {% if recent_lectures %}
+              <ul class="lr-dash-list">
+                {% for s in recent_lectures %}
+                  <li>
+                    <a href="{{ url_for('ui_lectures', session=s.id) }}">{{ s.title or '(untitled)' }}</a>
+                    <span class="lr-dash-list__meta lr-mono">{{ s.started_at[:10] }}</span>
+                  </li>
+                {% endfor %}
+              </ul>
+            {% else %}
+              <div class="lr-empty-card">
+                <div class="lr-empty-card__title">No lectures yet</div>
+                <p>Recordings tagged as <code>lecture</code> show up here.</p>
+              </div>
+            {% endif %}
           </div>
           <div class="lr-card__footer">
-            <a class="lr-card__action" href="{{ url_for('ui_lectures') }}">View all &rarr;</a>
+            <a class="lr-card__action" href="{{ url_for('ui_lectures') }}">View all{% if lecture_total %} ({{ lecture_total }}){% endif %} &rarr;</a>
           </div>
         </section>
 
@@ -95,16 +127,27 @@
         <section class="lr-card" aria-label="Meetings">
           <header class="lr-card__header">
             <h2 class="lr-card__title">Meetings</h2>
-            <a class="lr-card__action" href="{{ url_for('ui_meetings') }}">+ New</a>
+            <a class="lr-card__action" href="{{ url_for('ui_meetings') }}">Open &rarr;</a>
           </header>
           <div class="lr-card__body">
-            <div class="lr-empty-card">
-              <div class="lr-empty-card__title">No meetings recorded</div>
-              <p>Voice memos show up here. Tag them after recording.</p>
-            </div>
+            {% if recent_meetings %}
+              <ul class="lr-dash-list">
+                {% for s in recent_meetings %}
+                  <li>
+                    <a href="{{ url_for('ui_meetings', session=s.id) }}">{{ s.title or '(untitled)' }}</a>
+                    <span class="lr-dash-list__meta lr-mono">{{ s.started_at[:10] }}</span>
+                  </li>
+                {% endfor %}
+              </ul>
+            {% else %}
+              <div class="lr-empty-card">
+                <div class="lr-empty-card__title">No meetings recorded</div>
+                <p>Voice memos show up here. Tag them after recording.</p>
+              </div>
+            {% endif %}
           </div>
           <div class="lr-card__footer">
-            <a class="lr-card__action" href="{{ url_for('ui_meetings') }}">View all &rarr;</a>
+            <a class="lr-card__action" href="{{ url_for('ui_meetings') }}">View all{% if meeting_total %} ({{ meeting_total }}){% endif %} &rarr;</a>
           </div>
         </section>
       </div>
@@ -115,7 +158,7 @@
       <section class="lr-card" aria-label="Deadlines">
         <header class="lr-card__header">
           <h2 class="lr-card__title">Deadlines</h2>
-          <a class="lr-card__action" href="{{ url_for('ui_deadlines') }}">Open &rarr;</a>
+          <a class="lr-card__action" href="{{ url_for('ui_todos') }}">Open &rarr;</a>
         </header>
         <div class="lr-card__body">
           {% if open_deadlines %}
@@ -133,10 +176,13 @@
           {% else %}
             <div class="lr-empty-card">
               <div class="lr-empty-card__title">Nothing due</div>
-              <p>Add a deadline on the <a href="{{ url_for('ui_deadlines') }}">Deadlines page</a>.</p>
-              <p style="margin-top: var(--lr-s-3);"><a class="lr-btn" href="{{ url_for('ui_deadlines') }}">+ New deadline</a></p>
+              <p>Add a deadline on the <a href="{{ url_for('ui_todos') }}">Todos page</a>.</p>
+              <p style="margin-top: var(--lr-s-3);"><a class="lr-btn" href="{{ url_for('ui_todos') }}">+ New deadline</a></p>
             </div>
           {% endif %}
+        </div>
+        <div class="lr-card__footer">
+          <a class="lr-card__action" href="{{ url_for('ui_todos') }}">View all{% if deadline_open_total %} ({{ deadline_open_total }}){% endif %} &rarr;</a>
         </div>
       </section>
 
@@ -169,7 +215,7 @@
           {% endif %}
         </div>
         <div class="lr-card__footer">
-          <a class="lr-card__action" href="{{ url_for('ui_todos') }}">View all &rarr;</a>
+          <a class="lr-card__action" href="{{ url_for('ui_todos') }}">View all{% if open_task_count %} ({{ open_task_count }}){% endif %} &rarr;</a>
         </div>
       </section>
     </div>

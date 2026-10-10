@@ -703,7 +703,8 @@ class DeadlinesDeepLinkTests(LRTestCase):
             source_ref="abcdef1234567890",
             source_offset_ms=42000,
         )
-        resp = self.client.get("/deadlines")
+        # The deadlines page was merged into /todos.
+        resp = self.client.get("/todos")
         self.assertEqual(resp.status_code, 200)
         body = resp.get_data(as_text=True)
         # Title should be a link to the session page with ?t=<ms>.
@@ -714,11 +715,42 @@ class DeadlinesDeepLinkTests(LRTestCase):
 
     def test_deadline_without_source_ref_renders_as_plain_span(self):
         self._create_deadline()
-        resp = self.client.get("/deadlines")
+        resp = self.client.get("/todos")
         self.assertEqual(resp.status_code, 200)
         body = resp.get_data(as_text=True)
         # No deep-link markers when source_ref is absent.
         self.assertNotIn("lr-todo__title--linked", body)
+
+    def test_deadline_quick_add_with_course(self):
+        """The unified Todos page's deadline quick-add accepts an
+        optional course, and the form renders a course dropdown
+        instead of a priority dropdown."""
+        # Create a course via the API.
+        c = self.client.post(
+            "/api/v1/courses",
+            data=json.dumps({"name": "CS101"}),
+            content_type="application/json",
+        ).get_json()["course"]
+        resp = self.client.post(
+            "/todos/deadline-quick",
+            data={
+                "title": "Submit lab report",
+                "due_at": "2027-02-01",
+                "course_id": c["id"],
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_data(as_text=True)
+        self.assertIn("Submit lab report", body)
+        # Priority dropdown is gone from the deadline form; the
+        # course dropdown is there with the created course.
+        api = self.client.get("/api/v1/tasks").get_json()
+        deadline = next(
+            t for t in api["tasks"] if t["title"] == "Submit lab report"
+        )
+        self.assertEqual(deadline["priority"], "medium")
+        self.assertEqual(deadline["course_id"], c["id"])
 
     def test_session_page_ignores_missing_t_param(self):
         """The session page must render fine with no ``?t=`` param."""

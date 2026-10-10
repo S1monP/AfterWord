@@ -350,14 +350,71 @@ def _register_routes(app: Flask) -> None:
     # --- Web UI ----------------------------------------------------------
     @app.get("/")
     def ui_dashboard() -> Any:
-        """The home page: a 3-col bento with calendar, search,
-        deadlines+Tasks (right), and notes/lectures/meetings (centre)."""
+        """The home page: a fixed-height bento grid. Every card's
+        content is capped and rendered single-line so it always fits
+        its box ("View all (N)" links lead to the full pages):
+
+        * Calendar: today's and this week's events + deadlines.
+        * Lectures / Meetings: the 5 most recent recordings.
+        * Deadlines / Tasks: the 5 most recent open items.
+        """
+        import datetime as _dt
+        now = storage.now_iso()
+        now_dt = _dt.datetime.strptime(now, "%Y-%m-%dT%H:%M:%SZ")
+        day_start = _dt.datetime(
+            now_dt.year, now_dt.month, now_dt.day,
+            tzinfo=_dt.timezone.utc,
+        )
+
+        def _iso(dt: _dt.datetime) -> str:
+            return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        events_service = current_app_events_service()
+        events_today, _ = events_service.list(
+            starts_after=_iso(day_start),
+            starts_before=_iso(day_start + _dt.timedelta(days=1)),
+            limit=4,
+        )
+        events_week, _ = events_service.list(
+            starts_after=_iso(day_start + _dt.timedelta(days=1)),
+            starts_before=_iso(day_start + _dt.timedelta(days=7)),
+            limit=4,
+        )
+        # Open deadlines due within the week, soonest first.
+        week_deadlines = sorted(
+            (
+                d for d in current_app_tasks_service().list(
+                    kind="deadline", status="open", limit=50,
+                )[0]
+                if d.due_at
+                and d.due_at <= _iso(day_start + _dt.timedelta(days=7))
+            ),
+            key=lambda d: d.due_at,
+        )[:4]
+
+        # Recent recordings per kind (list_sessions is newest first).
+        sessions = current_app_storage().list_sessions()
+        recent_lectures = [
+            s for s in sessions
+            if s.kind == "lecture" and s.status in ("ready", "done")
+        ]
+        lecture_total = len(recent_lectures)
+        recent_lectures = recent_lectures[:5]
+        recent_meetings = [
+            s for s in sessions
+            if s.kind == "meeting" and s.status in ("ready", "done")
+        ]
+        meeting_total = len(recent_meetings)
+        recent_meetings = recent_meetings[:5]
+
         recent_notes, _ = current_app_notes_service().list(limit=5, offset=0)
         open_tasks, open_task_total = current_app_tasks_service().list(
             kind="task", status="open", limit=5, offset=0,
         )
-        open_deadlines, _ = current_app_tasks_service().list(
-            kind="deadline", status="open", limit=5, offset=0,
+        open_deadlines, deadline_open_total = (
+            current_app_tasks_service().list(
+                kind="deadline", status="open", limit=5, offset=0,
+            )
         )
         return render_template(
             "dashboard.html",
@@ -365,6 +422,14 @@ def _register_routes(app: Flask) -> None:
             open_tasks=open_tasks,
             open_task_count=open_task_total,
             open_deadlines=open_deadlines,
+            deadline_open_total=deadline_open_total,
+            events_today=events_today,
+            events_week=events_week,
+            week_deadlines=week_deadlines,
+            recent_lectures=recent_lectures,
+            lecture_total=lecture_total,
+            recent_meetings=recent_meetings,
+            meeting_total=meeting_total,
         )
 
 
@@ -466,99 +531,65 @@ def _register_routes(app: Flask) -> None:
 
     @app.get("/notes")
     def ui_notes() -> Any:
-        """List view: title, updated time, snippet. Search is via
-        a query string param ``q`` so it's bookmarkable."""
+        """Two-pane notes page: sidebar list on the left, embedded
+        editor on the right.
+
+        Modes (via query params):
+
+        * ``?note_id=<id>`` — editor prefilled with that note.
+        * ``?new=1``        — blank editor for a new note.
+        * neither           — empty right pane ("Pick a note").
+
+        ``q`` filters the sidebar list (bookmarkable).
+        """
         q = request.args.get("q", "").strip()
         notes, total = current_app_notes_service().list(
             limit=50, offset=0, search=q or None,
         )
+        mode = "empty"
+        note = None
+        if request.args.get("new"):
+            mode = "new"
+        else:
+            note_id = request.args.get("note_id", "").strip()
+            if note_id:
+                note = current_app_notes_service().get(note_id)
+                if note is None:
+                    abort(404)
+                mode = "edit"
         return render_template(
             "notes.html",
             notes=notes,
             total=total,
             q=q,
+            mode=mode,
+            note=note,
         )
 
     @app.get("/notes/new")
     def ui_notes_new() -> Any:
-        """Empty form for creating a note. The form posts to the API."""
-        return render_template("note.html", mode="new", note=None)
+        """Legacy URL: the editor now lives on the notes page."""
+        return redirect(url_for("ui_notes", new=1))
 
     @app.get("/notes/<note_id>")
     def ui_note_detail(note_id: str) -> Any:
-        note = current_app_notes_service().get(note_id)
-        if note is None:
+        """Legacy deep-link: lands on the embedded editor."""
+        if current_app_notes_service().get(note_id) is None:
             abort(404)
-        return render_template(
-            "note.html", mode="read", note=note,
-        )
+        return redirect(url_for("ui_notes", note_id=note_id))
 
     @app.get("/notes/<note_id>/edit")
     def ui_note_edit(note_id: str) -> Any:
-        note = current_app_notes_service().get(note_id)
-        if note is None:
+        """Legacy URL: the editor now lives on the notes page."""
+        if current_app_notes_service().get(note_id) is None:
             abort(404)
-        return render_template(
-            "note.html", mode="edit", note=note,
-        )
-
-    @app.post("/notes/new")
-    def create_note_action() -> Any:
-        """Form action: create a note from the editor and redirect
-        to its detail page. JSON API at /api/v1/notes is the canonical
-        path; this is a thin HTML shortcut for the no-JS path."""
-        title = (request.form.get("title") or "").strip()
-        body_md = request.form.get("body_md") or ""
-        try:
-            note = current_app_notes_service().create(
-                title=title, body_md=body_md,
-            )
-        except ValueError as exc:
-            return (
-                render_template(
-                    "note.html", mode="new", note=None,
-                    error=str(exc), form_title=title, form_body=body_md,
-                ),
-                400,
-            )
-        return redirect(url_for("ui_note_detail", note_id=note.id))
-
-    @app.post("/notes/<note_id>")
-    def update_note_action(note_id: str) -> Any:
-        """Form action: update a note from the editor."""
-        title = request.form.get("title")
-        body_md = request.form.get("body_md")
-        kwargs: dict[str, Any] = {}
-        if title is not None:
-            kwargs["title"] = title
-        if body_md is not None:
-            kwargs["body_md"] = body_md
-        try:
-            current_app_notes_service().update(note_id, **kwargs)
-        except KeyError:
-            abort(404)
-        except ValueError as exc:
-            existing = current_app_notes_service().get(note_id)
-            return (
-                render_template(
-                    "note.html", mode="edit", note=existing,
-                    error=str(exc),
-                ),
-                400,
-            )
-        return redirect(url_for("ui_note_detail", note_id=note_id))
-
-    @app.post("/notes/<note_id>/delete")
-    def delete_note_action(note_id: str) -> Any:
-        deleted = current_app_notes_service().delete(note_id)
-        if not deleted:
-            abort(404)
-        return redirect(url_for("ui_notes"))
+        return redirect(url_for("ui_notes", note_id=note_id))
 
     @app.get("/todos")
     def ui_todos() -> Any:
-        """The Tasks page: list view of ``kind='task'`` rows +
-        quick-add form."""
+        """The unified Tasks + Deadlines page: personal tasks on the
+        left (``?status=`` filter), course deadlines on the right
+        (``?deadline_status=`` filter), each with a quick-add form."""
         status_filter = request.args.get("status")
         if status_filter not in (None, "", "open", "done", "cancelled"):
             status_filter = None
@@ -566,12 +597,27 @@ def _register_routes(app: Flask) -> None:
             kind="task", status=status_filter or None, limit=100,
         )
         open_count = sum(1 for t in tasks if t.status == "open")
+        deadline_status = request.args.get("deadline_status")
+        if deadline_status not in (None, "", "open", "done", "cancelled"):
+            deadline_status = None
+        deadlines, deadline_total = current_app_tasks_service().list(
+            kind="deadline", status=deadline_status or None, limit=100,
+        )
+        deadline_open_count = sum(
+            1 for d in deadlines if d.status == "open"
+        )
+        courses, _ = current_app_courses_service().list()
         return render_template(
             "todos.html",
             tasks=tasks,
             total=total,
             open_count=open_count,
             status_filter=status_filter or "",
+            deadlines=deadlines,
+            deadline_total=deadline_total,
+            deadline_open_count=deadline_open_count,
+            deadline_status=deadline_status or "",
+            courses=courses,
         )
 
     @app.post("/todos/quick")
@@ -596,53 +642,31 @@ def _register_routes(app: Flask) -> None:
             return redirect(url_for("ui_todos"))
         return redirect(url_for("ui_todos"))
 
-    @app.get("/deadlines")
-    def ui_deadlines() -> Any:
-        """The Deadlines page: list view of ``kind='deadline'`` rows
-        + quick-add form. Deadlines MUST have a date; the form
-        enforces that with HTML5 ``required`` and the service enforces
-        it server-side."""
-        status_filter = request.args.get("status")
-        if status_filter not in (None, "", "open", "done", "cancelled"):
-            status_filter = None
-        deadlines, total = current_app_tasks_service().list(
-            kind="deadline", status=status_filter or None, limit=100,
-        )
-        open_count = sum(1 for t in deadlines if t.status == "open")
-        return render_template(
-            "deadlines.html",
-            deadlines=deadlines,
-            total=total,
-            open_count=open_count,
-            status_filter=status_filter or "",
-        )
+    @app.post("/todos/deadline-quick")
+    def ui_todos_deadline_quick() -> Any:
+        """Quick-add a deadline from the unified Todos page.
 
-    @app.post("/deadlines/quick")
-    def ui_deadlines_quick() -> Any:
-        """Quick-add a deadline. ``due_at`` is required.
-
-        Optional: ``description``, ``course_id``, ``source_ref``,
-        ``source_offset_ms`` (the last one is hidden in the simple
-        form; LLM-extracted deadlines populate it automatically).
+        ``due_at`` is required (HTML5 ``required`` in the form, and
+        enforced server-side). ``course_id`` is optional — deadlines
+        may be associated with a course. Priority stays at its
+        'medium' default (no priority control in this form).
         """
         title = (request.form.get("title") or "").strip()
         if not title:
-            return redirect(url_for("ui_deadlines"))
-        priority = (request.form.get("priority") or "medium").strip()
+            return redirect(url_for("ui_todos"))
         due_at_raw = (request.form.get("due_at") or "").strip()
-        description = (request.form.get("description") or "").strip()
         course_id = (request.form.get("course_id") or "").strip()
+        description = (request.form.get("description") or "").strip()
         try:
             current_app_tasks_service().create(
                 title=title, kind="deadline",
-                priority=priority,
                 due_at=due_at_raw or None,
                 description=description or None,
                 course_id=course_id or None,
             )
         except ValueError:
-            return redirect(url_for("ui_deadlines"))
-        return redirect(url_for("ui_deadlines"))
+            return redirect(url_for("ui_todos"))
+        return redirect(url_for("ui_todos"))
 
     @app.get("/calendar")
     def ui_calendar() -> Any:

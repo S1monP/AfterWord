@@ -12,48 +12,88 @@
         {% if q %}Searching for &ldquo;<span class="lr-mono">{{ q }}</span>&rdquo;.{% endif %}
       </div>
     </div>
-    <a class="lr-btn lr-btn--primary" href="{{ url_for('ui_notes_new') }}">+ New note</a>
   </header>
 
-  <form class="lr-search" method="get" action="{{ url_for('ui_notes') }}" role="search">
-    <input class="lr-input" type="search" name="q" value="{{ q or '' }}"
-           placeholder="Search title or body&hellip;" aria-label="Search notes">
-    <button class="lr-btn" type="submit">Search</button>
-    {% if q %}<a class="lr-btn lr-btn--ghost" href="{{ url_for('ui_notes') }}">Clear</a>{% endif %}
-  </form>
-
-  {% if notes %}
-    <div class="lr-card lr-card--padded">
-      <ul class="lr-list">
-        {% for n in notes %}
-          <li class="lr-list__row">
-            <a class="lr-list__title" href="{{ url_for('ui_note_detail', note_id=n.id) }}">{{ n.title }}</a>
-            <span class="lr-list__meta lr-mono" title="{{ n.updated_at }}">{{ n.updated_at }}</span>
-          </li>
-        {% endfor %}
-      </ul>
-    </div>
-    <div class="lr-page__sub">
-      {{ total }} note{{ '' if total == 1 else 's' }}{% if q %} match{{ '' if total == 1 else 'es' }}{% endif %}.
-    </div>
-  {% else %}
-    <div class="lr-card">
-      <div class="lr-empty-card">
-        <div class="lr-empty-card__title">
-          {% if q %}No notes match &ldquo;{{ q }}&rdquo;{% else %}No notes yet{% endif %}
-        </div>
-        <p>
-          {% if q %}
-            Try a different search term, or <a href="{{ url_for('ui_notes') }}">clear the search</a>.
-          {% else %}
-            Capture ideas here, or have them extracted from your recordings.
-          {% endif %}
-        </p>
-        {% if not q %}
-          <a class="lr-btn lr-btn--primary" href="{{ url_for('ui_notes_new') }}">+ New note</a>
-        {% endif %}
+  <div class="lr-twopane">
+    <aside class="lr-twopane__sidebar">
+      <div style="margin-bottom: var(--lr-s-3);">
+        <a class="lr-btn lr-btn--primary"
+           style="display: block; text-align: center;"
+           href="{{ url_for('ui_notes', new=1) }}">+ Add note</a>
       </div>
-    </div>
-  {% endif %}
+
+      <form class="lr-search" method="get" action="{{ url_for('ui_notes') }}" role="search"
+            style="margin-bottom: var(--lr-s-3);">
+        <input class="lr-input" type="search" name="q" value="{{ q or '' }}"
+               placeholder="Search notes&hellip;" aria-label="Search notes">
+        <button class="lr-btn" type="submit">Search</button>
+      </form>
+      {% if q %}
+        <div style="margin: calc(-1 * var(--lr-s-2)) 0 var(--lr-s-3);">
+          <a class="lr-course__empty" href="{{ url_for('ui_notes') }}">Clear search</a>
+        </div>
+      {% endif %}
+
+      <h2>All notes</h2>
+      {% if notes %}
+        <ul class="lr-flat-list">
+          {% for n in notes %}
+            <li>
+              <a class="lr-course__lecture {% if note and n.id == note.id %}is-active{% endif %}"
+                 href="{{ url_for('ui_notes', note_id=n.id) }}"
+                 data-note-link="{{ n.id }}">{{ n.title }}</a>
+            </li>
+          {% endfor %}
+        </ul>
+        <div class="lr-course__empty">
+          {{ total }} note{{ '' if total == 1 else 's' }}{% if q %} match{{ '' if total == 1 else 'es' }}{% endif %}.
+        </div>
+      {% else %}
+        <p class="lr-course__empty">
+          {% if q %}No notes match &ldquo;{{ q }}&rdquo;.{% else %}No notes yet.{% endif %}
+        </p>
+      {% endif %}
+    </aside>
+
+    <section class="lr-twopane__main">
+      {% if mode == 'new' or note %}
+        <div class="lr-note-editor" id="lr-note-editor"
+             data-note-id="{{ note.id if note else '' }}"
+             data-initial-title="{{ note.title if note else '' }}"
+             data-initial-body="{{ note.body_md if note else '' }}">
+          <input class="lr-note-editor__title" id="lr-note-title"
+                 placeholder="Note title" maxlength="200" autocomplete="off"
+                 value="{{ note.title if note else '' }}">
+          <textarea class="lr-note-editor__body" id="lr-note-body"
+                    placeholder="# Start typing&hellip;">{{ note.body_md if note else '' }}</textarea>
+          <div class="lr-note-editor__actions">
+            <button class="lr-btn lr-btn--primary lr-note-editor__save"
+                    id="lr-note-save" type="button" disabled>Save</button>
+            {% if note %}
+              <button class="lr-btn lr-btn--danger" id="lr-note-delete"
+                      type="button">Delete</button>
+            {% endif %}
+            <span class="lr-note-editor__saved" id="lr-note-saved"
+                  hidden>Saved &check;</span>
+            <span class="lr-note-editor__error" id="lr-note-error" hidden></span>
+          </div>
+        </div>
+      {% else %}
+        <div class="lr-empty-card">
+          <div class="lr-empty-card__title">Pick a note</div>
+          <p>
+            Pick a note from the list on the left to open it in the
+            editor, or add a new one.
+          </p>
+          <p style="margin-top: var(--lr-s-3);">
+            <a class="lr-btn lr-btn--primary" href="{{ url_for('ui_notes', new=1) }}">+ Add note</a>
+          </p>
+        </div>
+      {% endif %}
+    </section>
+  </div>
 </div>
+
+<script src="{{ url_for('static', filename='js/notes.js') }}"
+        defer></script>
 {% endblock %}

@@ -461,6 +461,48 @@ class WebUITests(LRTestCase):
         # And the full modifier so it fills the viewport edge-to-edge.
         self.assertIn(b"lr-page--full", body)
 
+    def test_dashboard_shows_real_data(self):
+        """With a lecture, a meeting, and an event in the DB, the
+        dashboard cards show them instead of the empty states."""
+        import datetime as _dt
+        import storage as storage_mod
+        store = self.app.config["LR_STORAGE"]
+        for sid, kind, title in (
+            ("lect00000001", "lecture", "Linear Algebra"),
+            ("meet00000001", "meeting", "Weekly sync"),
+        ):
+            store.upsert_session(
+                sid, title=title, expected_count=1,
+                sample_rate=22050, channels=1, bits_per_sample=32,
+                started_at="2026-10-01T10:00:00Z",
+            )
+            store.update_status(sid, storage_mod.STATUS_STITCHING)
+            store.update_status(
+                sid, storage_mod.STATUS_READY,
+                finished_at=storage_mod.now_iso(),
+            )
+            store.set_kind(sid, kind, confidence=1.0)
+        # An event starting tomorrow lands in the "This week" list.
+        tomorrow = (
+            _dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(days=1)
+        )
+        event_starts = tomorrow.strftime("%Y-%m-%dT") + "10:00:00Z"
+        self.app.config["LR_EVENTS_SERVICE"].create(
+            title="Project demo", kind="other", starts_at=event_starts,
+        )
+        r = self.client.get("/")
+        self.assertEqual(r.status_code, 200)
+        body = r.get_data()
+        self.assertIn(b"Linear Algebra", body)
+        self.assertIn(b"Weekly sync", body)
+        self.assertIn(b"Project demo", body)
+        # The empty-state strings are gone for the cards that now
+        # have data. ("Nothing scheduled" legitimately remains: the
+        # event is tomorrow, so Today is still empty.)
+        self.assertNotIn(b"No lectures yet", body)
+        self.assertNotIn(b"No meetings recorded", body)
+        self.assertNotIn(b"No events", body)
+
     def test_dashboard_gap_token_defined(self) -> None:
         """The dashboard's top-gap token is defined in tokens.css and
         used by the layout. Static check so the visual stays consistent
