@@ -47,6 +47,7 @@ from storage import (
     Storage,
 )
 
+from services.events import EventsService
 from services.llm import LLMError, LLMProvider
 
 
@@ -193,6 +194,13 @@ def run_post_finish_pipeline(
 
     full_path = ctx["full_path"]
 
+    # 0. Calendar time-match (no AI). Correlate the recording's
+    # start with calendar events; on a match the kind, course, and
+    # title come from the event, and the AI classifier is skipped
+    # later. Only applies when the session has no kind yet, so
+    # manual overrides are never clobbered.
+    _time_match_session(storage, session_id)
+
     # 3. Transcribe.
     try:
         _set_status(storage, session_id, STATUS_TRANSCRIBING)
@@ -234,44 +242,60 @@ def run_post_finish_pipeline(
             f"persist transcript: {exc!r}",
         )
 
-    # 5. Classify. A no-op classifier (no API key configured) is
-    # allowed to fail without taking the session to 'failed' — we
-    # just stop at 'transcribed' and let the user re-run later.
-    try:
-        _set_status(storage, session_id, STATUS_CLASSIFYING)
-    except _PipelineError as exc:
-        return _mark_failed(
-            storage, session_id, "bad_transition", str(exc),
-        )
-    try:
-        result = classifier.classify(transcript)
-    except LLMError as exc:
-        return _mark_failed(
-            storage, session_id, REASON_CLASSIFY_FAILED,
-            f"classify: {exc}",
-        )
-    except Exception as exc:  # pragma: no cover
-        return _mark_failed(
-            storage, session_id, REASON_CLASSIFY_FAILED,
-            f"classify: {exc!r}",
-        )
+    # 5. Classify — unless the kind is already known. The calendar
+    # time-match (step 0) sets kind/course/title from the matched
+    # event without any AI, and a previous run may have classified
+    # already. In both cases the classifier is skipped and we go
+    # straight from ``transcribed`` to ``summarising`` (the
+    # transition table allows that jump).
+    kind: Optional[str] = None
+    confidence: Optional[float] = None
+    sess_now = storage.get_session(session_id)
+    kind_already_set = (
+        sess_now is not None and sess_now.kind is not None
+    )
+    if not kind_already_set:
+        # A no-op classifier (no API key configured) is allowed to
+        # fail without taking the session to 'failed' — we just
+        # stop at 'transcribed' and let the user re-run later.
+        try:
+            _set_status(storage, session_id, STATUS_CLASSIFYING)
+        except _PipelineError as exc:
+            return _mark_failed(
+                storage, session_id, "bad_transition", str(exc),
+            )
+        try:
+            result = classifier.classify(transcript)
+        except LLMError as exc:
+            return _mark_failed(
+                storage, session_id, REASON_CLASSIFY_FAILED,
+                f"classify: {exc}",
+            )
+        except Exception as exc:  # pragma: no cover
+            return _mark_failed(
+                storage, session_id, REASON_CLASSIFY_FAILED,
+                f"classify: {exc!r}",
+            )
 
-    # 6. Persist the kind on the session. Status stays in
-    # ``classifying`` for now; the next step moves to ``summarising``.
-    try:
-        kind, confidence = result.kind, result.confidence
-        storage.set_kind(
-            session_id, kind, confidence=confidence,
-        )
-    except _PipelineError as exc:
-        return _mark_failed(
-            storage, session_id, "bad_transition", str(exc),
-        )
-    except Exception as exc:  # pragma: no cover
-        return _mark_failed(
-            storage, session_id, REASON_CLASSIFY_FAILED,
-            f"persist kind: {exc!r}",
-        )
+        # 6. Persist the kind on the session. Status stays in
+        # ``classifying`` for now; the next step moves to
+        # ``summarising``.
+        try:
+            kind, confidence = result.kind, result.confidence
+            storage.set_kind(
+                session_id, kind, confidence=confidence,
+            )
+        except _PipelineError as exc:
+            return _mark_failed(
+                storage, session_id, "bad_transition", str(exc),
+            )
+        except Exception as exc:  # pragma: no cover
+            return _mark_failed(
+                storage, session_id, REASON_CLASSIFY_FAILED,
+                f"persist kind: {exc!r}",
+            )
+    else:
+        kind, confidence = sess_now.kind, sess_now.kind_confidence
 
     # 7. Summarise. A no-op summariser (no API key configured)
     # returns an empty Summary, so this step always succeeds in
@@ -361,6 +385,84 @@ def run_post_finish_pipeline(
         "summary_chars": len(summary.text),
         "extracted_items": len(items),
     }
+
+
+def _time_match_session(storage: Storage, session_id: str) -> bool:
+    """Calendar time-match (pipeline step 0): correlate the
+    recording's start with a calendar event — no AI involved.
+
+    On a match, the session's kind, course, and title come from the
+    event, and the event is marked as the session's match (so the
+    calendar shows the pairing). Returns ``True`` when a match was
+    applied.
+
+    Only sessions without a kind are matched, so manual overrides
+    and previous runs are never clobbered. Any failure is
+    swallowed: the time-match is an enhancement, and the AI
+    classifier remains the fallback.
+    """
+    try:
+        sess = storage.get_session(session_id)
+        if sess is None or sess.kind is not None:
+            return False
+        events = EventsService(storage)
+        event = events.suggest_match(session_id)
+        if event is None:
+            return False
+        if event.kind in storage.RECORDING_KINDS:
+            storage.set_kind(session_id, event.kind, confidence=1.0)
+        if event.course_id:
+            try:
+                storage.set_session_course(session_id, event.course_id)
+            except (KeyError, ValueError):
+                pass  # course vanished; leave the session unassigned
+        try:
+            storage.set_session_title(
+                session_id, _event_title_for_session(event, storage, sess),
+            )
+        except (KeyError, ValueError):
+            pass
+        events.match_session(event.id, session_id, 1.0)
+        return True
+    except Exception:  # pragma: no cover  (defensive)
+        traceback.print_exc()
+        return False
+
+
+def _event_title_for_session(
+    event, storage: Storage, session,
+) -> str:
+    """Human name for a time-matched recording.
+
+    Lectures are named after their course ("CS101 · 15 Oct 2026"),
+    other events after the event itself ("Weekly sync · 15 Oct
+    2026"). If the exact title already exists on another session,
+    the recording start time disambiguates ("… · 14:05").
+    """
+    try:
+        date_part = _fmt_event_date(event.starts_at)
+    except (ValueError, AttributeError):
+        date_part = ""
+    if event.kind == "lecture" and event.course_id:
+        course = storage.get_course(event.course_id)
+        base = course.name if course else event.title
+    else:
+        base = event.title
+    title = f"{base} · {date_part}" if date_part else base
+    taken = any(
+        s.id != session.id and s.title == title
+        for s in storage.list_sessions()
+    )
+    if taken and session.started_at:
+        title = f"{title} · {session.started_at[11:16]}"
+    return title
+
+
+def _fmt_event_date(iso_ts: str) -> str:
+    """Format an ISO-8601 timestamp as a human date ("15 Oct 2026")."""
+    import datetime as _dt
+    dt = _dt.datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))
+    return dt.strftime("%d %b %Y")
 
 
 def _mark_failed(

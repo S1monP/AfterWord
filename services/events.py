@@ -38,6 +38,11 @@ MAX_DESCRIPTION_LEN = 2000
 MAX_LOCATION_LEN = 200
 MAX_SOURCE_REF_LEN = 256
 
+# Safety cap for weekly-recurring event series: creating more than a
+# year of weekly occurrences in one go is almost certainly a typo
+# (e.g. "repeat until 2101-01-01").
+MAX_REPEAT_OCCURRENCES = 52
+
 KINDS: frozenset[str] = frozenset({"lecture", "meeting", "other"})
 SOURCES: frozenset[str] = frozenset({"manual", "ical_import"})
 
@@ -96,6 +101,32 @@ def _parse_iso(ts: str) -> _dt.datetime:
     )
 
 
+def _fmt_iso(dt: _dt.datetime) -> str:
+    """Format an aware datetime as the storage-normalised ISO string."""
+    return dt.astimezone(_dt.timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+
+
+def _validate_repeat_until(value: object) -> Optional[str]:
+    """Validate the optional weekly-recurrence end date (inclusive).
+
+    Accepts ``YYYY-MM-DD``; returns a normalised ISO date string or
+    ``None`` when no recurrence was requested.
+    """
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str):
+        raise ValueError("repeat_until must be a date string")
+    try:
+        d = _dt.date.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(
+            "repeat_until must be an ISO date (YYYY-MM-DD)"
+        ) from exc
+    return d.isoformat()
+
+
 # --- Validators -------------------------------------------------------------
 
 def _validate_title(title: object) -> str:
@@ -149,6 +180,19 @@ def _validate_source_ref(source_ref: object) -> Optional[str]:
     return _validate_optional_text(
         source_ref, field="source_ref", max_len=MAX_SOURCE_REF_LEN,
     )
+
+
+def _validate_course_id(course_id: object, store: Storage) -> Optional[str]:
+    """Validate an event's optional course association: ``None`` or
+    an existing course id. Used by the calendar time-matcher, which
+    assigns the matched event's course to the recording."""
+    if course_id is None or course_id == "":
+        return None
+    if not isinstance(course_id, str):
+        raise ValueError("course_id must be a string or null")
+    if store.get_course(course_id) is None:
+        raise ValueError(f"course {course_id!r} does not exist")
+    return course_id
 
 
 def _validate_starts_at(value: object) -> str:
@@ -311,6 +355,7 @@ class EventsService:
         location: Optional[str] = None,
         source: str = "manual",
         source_ref: Optional[str] = None,
+        course_id: Optional[str] = None,
     ) -> Event:
         title = _validate_title(title)
         kind = _validate_kind(kind)
@@ -324,6 +369,7 @@ class EventsService:
             location, field="location", max_len=MAX_LOCATION_LEN,
         )
         source_ref = _validate_source_ref(source_ref)
+        course_id = _validate_course_id(course_id, self._store)
         event_id = uuid.uuid4().hex
         return self._store.create_event(
             event_id,
@@ -335,6 +381,7 @@ class EventsService:
             location=location,
             source=source,
             source_ref=source_ref,
+            course_id=course_id,
         )
 
     def update(self, event_id: str, **fields: Any) -> Event:
@@ -373,11 +420,93 @@ class EventsService:
             cleaned["source_ref"] = _validate_source_ref(
                 fields["source_ref"]
             )
+        if "course_id" in fields:
+            cleaned["course_id"] = _validate_course_id(
+                fields["course_id"], self._store,
+            )
         if not cleaned:
             existing = self._store.get_event(event_id)
             assert existing is not None
             return existing
         return self._store.update_event(event_id, **cleaned)
+
+    def create_recurring(
+        self,
+        *,
+        title: str,
+        kind: str,
+        starts_at: str,
+        ends_at: Optional[str] = None,
+        description: Optional[str] = None,
+        location: Optional[str] = None,
+        source: str = "manual",
+        source_ref: Optional[str] = None,
+        course_id: Optional[str] = None,
+        repeat_until: Optional[str] = None,
+    ) -> tuple[Event, int]:
+        """Create a weekly-recurring event series.
+
+        The event repeats on the weekday of ``starts_at``, from the
+        start date through ``repeat_until`` (inclusive, ``YYYY-MM-DD``).
+        Every occurrence is an independent, fully materialised event
+        row — so the calendar, the dashboard, and the pipeline's
+        calendar time-matcher all treat it like any other event. The
+        time-of-day and duration (``ends_at``) are preserved per
+        occurrence; title/kind/course/description/location are shared.
+
+        Returns ``(first_event, created_count)``.
+
+        Raises ``ValueError`` when ``repeat_until`` is before the
+        start date or the series would exceed
+        :data:`MAX_REPEAT_OCCURRENCES`.
+        """
+        until_norm = _validate_repeat_until(repeat_until)
+        starts_norm = _validate_starts_at(starts_at)
+        ends_norm = (
+            _validate_ends_at(ends_at, starts_at=starts_norm)
+            if ends_at
+            else None
+        )
+        course_id = _validate_course_id(course_id, self._store)
+        starts_dt = _parse_iso(starts_norm)
+        if until_norm is None:
+            weeks = 1
+        else:
+            until_date = _dt.date.fromisoformat(until_norm)
+            if until_date < starts_dt.date():
+                raise ValueError(
+                    "repeat_until must be on or after the event's "
+                    "start date"
+                )
+            weeks = (until_date - starts_dt.date()).days // 7 + 1
+            if weeks > MAX_REPEAT_OCCURRENCES:
+                raise ValueError(
+                    f"a weekly series until {until_norm} would create "
+                    f"{weeks} events; the maximum is "
+                    f"{MAX_REPEAT_OCCURRENCES}"
+                )
+        ends_dt = _parse_iso(ends_norm) if ends_norm else None
+        first: Optional[Event] = None
+        for k in range(weeks):
+            ev = self.create(
+                title=title,
+                kind=kind,
+                starts_at=_fmt_iso(starts_dt + _dt.timedelta(days=7 * k)),
+                ends_at=(
+                    _fmt_iso(ends_dt + _dt.timedelta(days=7 * k))
+                    if ends_dt
+                    else None
+                ),
+                description=description,
+                location=location,
+                source=source,
+                source_ref=source_ref,
+                course_id=course_id,
+            )
+            if first is None:
+                first = ev
+        assert first is not None
+        return first, weeks
 
     def delete(self, event_id: str) -> bool:
         if not isinstance(event_id, str) or not event_id:

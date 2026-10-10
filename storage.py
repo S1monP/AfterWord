@@ -82,7 +82,7 @@ ALLOWED_STATUS_TRANSITIONS: dict[str, frozenset[str]] = {
         STATUS_TRANSCRIBED, STATUS_FAILED, STATUS_READY,
     }),
     STATUS_TRANSCRIBED: frozenset({
-        STATUS_CLASSIFYING, STATUS_FAILED, STATUS_READY,
+        STATUS_CLASSIFYING, STATUS_SUMMARISING, STATUS_FAILED, STATUS_READY,
     }),
     STATUS_CLASSIFYING: frozenset({
         STATUS_SUMMARISING, STATUS_FAILED, STATUS_READY,
@@ -101,6 +101,7 @@ ALLOWED_STATUS_TRANSITIONS: dict[str, frozenset[str]] = {
 
 
 _SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_\-]{4,64}$")
+_CONTROL_CHARS_TITLE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _CHUNK_INDEX_MIN = 1
 WAV_HEADER_SIZE = 44
 
@@ -273,6 +274,7 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
         location            TEXT,
         source              TEXT NOT NULL DEFAULT 'manual',
         source_ref          TEXT,
+        course_id           TEXT REFERENCES courses(id) ON DELETE SET NULL,
         matched_session_id  TEXT REFERENCES sessions(id) ON DELETE SET NULL,
         match_confidence    REAL,
         created_at          TEXT NOT NULL,
@@ -292,6 +294,9 @@ SCHEMA_ALTERS: tuple[str, ...] = (
     "ALTER TABLE sessions ADD COLUMN kind TEXT",
     "ALTER TABLE sessions ADD COLUMN kind_confidence REAL",
     "ALTER TABLE sessions ADD COLUMN kind_set_at TEXT",
+    # events: course association (calendar time-matching assigns the
+    # matched event's course to the recording automatically).
+    "ALTER TABLE events ADD COLUMN course_id TEXT REFERENCES courses(id)",
     # tasks: the merged todos + deadlines table; nothing to alter
     # because it was created at table-creation time. Future columns
     # go here.
@@ -569,6 +574,7 @@ class Event:
     location: Optional[str]
     source: str                        # 'manual' | 'ical_import'
     source_ref: Optional[str]
+    course_id: Optional[str]
     matched_session_id: Optional[str]
     match_confidence: Optional[float]
     created_at: str
@@ -585,6 +591,7 @@ class Event:
             "location": self.location,
             "source": self.source,
             "source_ref": self.source_ref,
+            "course_id": self.course_id,
             "matched_session_id": self.matched_session_id,
             "match_confidence": self.match_confidence,
             "created_at": self.created_at,
@@ -1242,6 +1249,39 @@ class Storage:
                 "WHERE id = ?",
                 (course_id, now, session_id),
             )
+        sess = self.get_session(session_id)
+        assert sess is not None
+        return sess
+
+    def set_session_title(self, session_id: str, title: str) -> Session:
+        """Rename a session. Used by the calendar time-matcher to give
+        matched recordings a human name (and available for future
+        manual renames).
+
+        Raises ``KeyError`` if the session doesn't exist;
+        ``ValueError`` for empty/oversized titles or control
+        characters.
+        """
+        sess = self.get_session(session_id)
+        if sess is None:
+            raise KeyError(session_id)
+        if not isinstance(title, str):
+            raise ValueError("title must be a string")
+        title = title.strip()
+        if not title:
+            raise ValueError("title must not be empty")
+        if len(title) > 200:
+            raise ValueError("title must be at most 200 chars")
+        if _CONTROL_CHARS_TITLE.search(title):
+            raise ValueError("title contains control characters")
+        now = now_iso()
+        with self._tx() as conn:
+            conn.execute(
+                "UPDATE sessions SET title = ?, updated_at = ? "
+                "WHERE id = ?",
+                (title, now, session_id),
+            )
+        self._write_meta_json(session_id)
         sess = self.get_session(session_id)
         assert sess is not None
         return sess
@@ -1971,6 +2011,7 @@ class Storage:
         location: Optional[str] = None,
         source: str = "manual",
         source_ref: Optional[str] = None,
+        course_id: Optional[str] = None,
         matched_session_id: Optional[str] = None,
         match_confidence: Optional[float] = None,
     ) -> Event:
@@ -1982,13 +2023,14 @@ class Storage:
                 """
                 INSERT INTO events
                     (id, title, description, kind, starts_at, ends_at,
-                     location, source, source_ref, matched_session_id,
-                     match_confidence, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     location, source, source_ref, course_id,
+                     matched_session_id, match_confidence,
+                     created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (event_id, title, description, kind, starts_at, ends_at,
-                 location, source, source_ref, matched_session_id,
-                 match_confidence, now, now),
+                 location, source, source_ref, course_id,
+                 matched_session_id, match_confidence, now, now),
             )
         return self.get_event(event_id)  # type: ignore[return-value]
 
@@ -2013,6 +2055,7 @@ class Storage:
         location: Any = _UNSET,
         source: Optional[str] = None,
         source_ref: Any = _UNSET,
+        course_id: Any = _UNSET,
         matched_session_id: Any = _UNSET,
         match_confidence: Any = _UNSET,
     ) -> Event:
@@ -2039,6 +2082,8 @@ class Storage:
             sets.append("source = ?"); params.append(source)
         if source_ref is not _UNSET:
             sets.append("source_ref = ?"); params.append(source_ref)
+        if course_id is not _UNSET:
+            sets.append("course_id = ?"); params.append(course_id)
         if matched_session_id is not _UNSET:
             sets.append("matched_session_id = ?")
             params.append(matched_session_id)
@@ -2144,6 +2189,9 @@ class Storage:
             location=row["location"],
             source=row["source"],
             source_ref=row["source_ref"] if "source_ref" in keys else None,
+            course_id=(
+                row["course_id"] if "course_id" in keys else None
+            ),
             matched_session_id=(
                 row["matched_session_id"]
                 if "matched_session_id" in keys else None

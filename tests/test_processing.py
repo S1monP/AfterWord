@@ -526,5 +526,123 @@ class PipelineSummariseExtractTests(LRTestCase):
         )
 
 
+class CalendarTimeMatchTests(LRTestCase):
+    """Pipeline step 0: calendar time-match sets kind/course/title
+    from the matched event without any AI; the AI classifier is only
+    the fallback when nothing matches. Manual kinds are preserved."""
+
+    def _seed(self, *, event_title, event_kind, starts_at,
+              ends_at=None, course=None):
+        sid = _make_ready_session(self)  # started 2026-01-15T10:00:00Z
+        store = self.app.config["LR_STORAGE"]
+        course_id = None
+        if course:
+            course_id = store.create_course(
+                uuid.uuid4().hex, name=course,
+            ).id
+        ev = self.app.config["LR_EVENTS_SERVICE"].create(
+            title=event_title,
+            kind=event_kind,
+            starts_at=starts_at,
+            ends_at=ends_at,
+            course_id=course_id,
+        )
+        return sid, ev, course_id
+
+    def _run(self, sid, classifier=None):
+        classifier = classifier or _StubClassifier("meeting", 0.7)
+        transcript = _StubTranscript("the quick brown fox")
+        result = processing.run_post_finish_pipeline(
+            self.app.config["LR_STORAGE"], sid,
+            transcript_provider=transcript,
+            classifier=classifier,
+        )
+        return result, classifier
+
+    def test_time_match_sets_kind_course_title_no_ai(self):
+        sid, ev, course_id = self._seed(
+            event_title="Lecture 5", event_kind="lecture",
+            starts_at="2026-01-15T10:05:00Z",
+            ends_at="2026-01-15T11:00:00Z",
+            course="CS101",
+        )
+        result, classifier = self._run(sid)
+        self.assertTrue(result["ok"])
+        store = self.app.config["LR_STORAGE"]
+        sess = store.get_session(sid)
+        self.assertEqual(sess.kind, "lecture")
+        self.assertEqual(sess.kind_confidence, 1.0)
+        self.assertEqual(sess.course_id, course_id)
+        # Course name + human date, per the naming convention.
+        self.assertEqual(sess.title, "CS101 · 15 Jan 2026")
+        # The AI classifier was never called.
+        self.assertEqual(classifier.calls, [])
+        # The calendar shows the pairing.
+        matched = self.app.config["LR_EVENTS_SERVICE"].get(
+            ev.id,
+        ).matched_session_id
+        self.assertEqual(matched, sid)
+
+    def test_time_match_without_course_uses_event_name(self):
+        sid, ev, _ = self._seed(
+            event_title="Lecture 5", event_kind="lecture",
+            starts_at="2026-01-15T10:05:00Z",
+            ends_at="2026-01-15T11:00:00Z",
+        )
+        result, classifier = self._run(sid)
+        self.assertTrue(result["ok"])
+        sess = self.app.config["LR_STORAGE"].get_session(sid)
+        self.assertIsNone(sess.course_id)
+        self.assertEqual(sess.title, "Lecture 5 · 15 Jan 2026")
+        self.assertEqual(classifier.calls, [])
+
+    def test_time_match_meeting_uses_event_name(self):
+        sid, ev, _ = self._seed(
+            event_title="Weekly sync", event_kind="meeting",
+            starts_at="2026-01-15T10:00:00Z",
+            ends_at="2026-01-15T11:00:00Z",
+            course="CS101",
+        )
+        result, classifier = self._run(sid)
+        self.assertTrue(result["ok"])
+        sess = self.app.config["LR_STORAGE"].get_session(sid)
+        self.assertEqual(sess.kind, "meeting")
+        # Meetings are named after the event, not the course.
+        self.assertEqual(sess.title, "Weekly sync · 15 Jan 2026")
+        self.assertEqual(classifier.calls, [])
+
+    def test_no_match_uses_ai_fallback(self):
+        # An event far away in time does not match.
+        self._seed(
+            event_title="Lecture 5", event_kind="lecture",
+            starts_at="2027-06-01T10:00:00Z",
+            ends_at="2027-06-01T11:00:00Z",
+            course="CS101",
+        )
+        sid = _make_ready_session(self)
+        result, classifier = self._run(sid)
+        self.assertTrue(result["ok"])
+        self.assertEqual(len(classifier.calls), 1)
+        sess = self.app.config["LR_STORAGE"].get_session(sid)
+        self.assertEqual(sess.kind, "meeting")  # from the AI stub
+        self.assertEqual(sess.kind_confidence, 0.7)
+
+    def test_manual_kind_is_preserved(self):
+        sid = _make_ready_session(self)
+        store = self.app.config["LR_STORAGE"]
+        store.set_kind(sid, "voice_memo", confidence=1.0)
+        self._seed(
+            event_title="Lecture 5", event_kind="lecture",
+            starts_at="2026-01-15T10:05:00Z",
+            ends_at="2026-01-15T11:00:00Z",
+            course="CS101",
+        )
+        result, classifier = self._run(sid)
+        self.assertTrue(result["ok"])
+        sess = store.get_session(sid)
+        self.assertEqual(sess.kind, "voice_memo")
+        self.assertEqual(classifier.calls, [])
+
+
 if __name__ == "__main__":
     unittest.main()

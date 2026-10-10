@@ -9,6 +9,7 @@ All tests use the temp-dir storage helper from conftest.LRTestCase.
 """
 from __future__ import annotations
 
+import json
 import unittest
 
 from tests.conftest import LRTestCase
@@ -476,12 +477,82 @@ class MonthGridTests(unittest.TestCase):
         self.assertEqual(cell["overflow"], 2)
 
 
+class RecurringEventTests(LRTestCase):
+    """Weekly recurrence: ticking the box materialises one event per
+    occurrence, so the calendar, the dashboard, and the pipeline
+    time-matcher treat them like any other event."""
+
+    def _create(self, payload):
+        return self.client.post(
+            "/api/v1/events",
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+    def test_recurring_makes_weekly_occurrences(self):
+        resp = self._create({
+            "title": "Linear Algebra", "kind": "lecture",
+            "starts_at": "2026-09-01T10:00:00Z",
+            "ends_at": "2026-09-01T11:00:00Z",
+            "repeat_until": "2026-09-15",
+        })
+        self.assertEqual(resp.status_code, 201)
+        body = resp.get_json()
+        self.assertEqual(body["created_count"], 3)
+        first_id = body["event"]["id"]
+        events, total = self.app.config["LR_EVENTS_SERVICE"].list(
+            limit=500,
+        )
+        self.assertEqual(total, 3)
+        self.assertEqual(
+            [e.starts_at for e in events],
+            [
+                "2026-09-01T10:00:00Z",
+                "2026-09-08T10:00:00Z",
+                "2026-09-15T10:00:00Z",
+            ],
+        )
+        for e in events:
+            self.assertEqual(e.title, "Linear Algebra")
+            self.assertEqual(e.ends_at, e.starts_at.replace("10", "11"))
+        self.assertEqual(events[0].id, first_id)
+
+    def test_no_repeat_creates_single_event(self):
+        resp = self._create({
+            "title": "One-off", "kind": "meeting",
+            "starts_at": "2026-09-02T10:00:00Z",
+        })
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.get_json()["created_count"], 1)
+        _, total = self.app.config["LR_EVENTS_SERVICE"].list(limit=500)
+        self.assertEqual(total, 1)
+
+    def test_repeat_until_before_start_rejected(self):
+        resp = self._create({
+            "title": "Backwards", "kind": "lecture",
+            "starts_at": "2026-09-01T10:00:00Z",
+            "repeat_until": "2026-08-25",
+        })
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("start date", resp.get_json()["detail"])
+
+    def test_repeat_cap_enforced(self):
+        # A year of weekly events = 53 occurrences > the 52 cap.
+        resp = self._create({
+            "title": "Forever", "kind": "lecture",
+            "starts_at": "2026-09-01T10:00:00Z",
+            "repeat_until": "2027-09-01",
+        })
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("maximum", resp.get_json()["detail"])
+
+
 def _make_event(starts_at: str, eid: str):
     """Build a minimal Event for tests."""
     return Event(
         id=eid, title=eid, description=None, kind="lecture",
         starts_at=starts_at, ends_at=None, location=None,
-        source="manual", source_ref=None,
+        source="manual", source_ref=None, course_id=None,
         matched_session_id=None, match_confidence=None,
         created_at="2026-01-01T00:00:00Z",
         updated_at="2026-01-01T00:00:00Z",

@@ -59,6 +59,16 @@
         </select>
       </label>
       <label class="lr-field" style="flex: 1 1 200px;">
+        <span class="lr-field__label">Course (optional)</span>
+        <select class="lr-input" name="course_id">
+          {% set ec = (event.course_id if event else '') %}
+          <option value="">No course</option>
+          {% for c in courses %}
+            <option value="{{ c.id }}" {% if ec == c.id %}selected{% endif %}>{{ c.name }}{% if c.code %} ({{ c.code }}){% endif %}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="lr-field" style="flex: 1 1 200px;">
         <span class="lr-field__label">Location (optional)</span>
         <input class="lr-input" type="text" name="location" maxlength="200"
                autocomplete="off"
@@ -78,6 +88,24 @@
                value="{{ ends_at_default }}">
       </label>
     </div>
+
+    <div class="lr-row" style="gap: var(--lr-s-3); flex-wrap: wrap; align-items: flex-end;">
+      <label class="lr-field" style="flex: 0 1 auto; display: flex; align-items: center; gap: var(--lr-s-2); padding-bottom: var(--lr-s-2);">
+        <input type="checkbox" id="lr-repeat-toggle"
+               style="width: 16px; height: 16px; accent-color: var(--lr-accent);">
+        <span class="lr-field__label" style="margin: 0;">Repeats weekly</span>
+      </label>
+      <label class="lr-field" style="flex: 1 1 200px;" id="lr-repeat-until-wrap" hidden>
+        <span class="lr-field__label">Repeat until</span>
+        <input class="lr-input" type="date" name="repeat_until"
+               id="lr-repeat-until">
+      </label>
+    </div>
+    <p class="lr-page__sub" id="lr-repeat-hint" hidden
+       style="margin-top: calc(-1 * var(--lr-s-2));">
+      One event per week on this weekday until that date. Occurrences
+      are independent — edit or delete any of them separately.
+    </p>
 
     <label class="lr-field">
       <span class="lr-field__label">Description (optional)</span>
@@ -102,4 +130,26 @@
     </div>
   </form>
 </div>
+
+<script>
+  // Toggle the "Repeat until" date on the weekly-recurrence tick box.
+  // Only relevant in create mode; hidden entirely when editing.
+  {% if mode == 'new' %}
+  (function () {
+    var toggle = document.getElementById("lr-repeat-toggle");
+    var wrap = document.getElementById("lr-repeat-until-wrap");
+    var until = document.getElementById("lr-repeat-until");
+    var hint = document.getElementById("lr-repeat-hint");
+    if (!toggle || !wrap || !until || !hint) return;
+    function refresh() {
+      wrap.hidden = !toggle.checked;
+      hint.hidden = !toggle.checked;
+      until.required = toggle.checked;
+      if (!toggle.checked) until.value = "";
+    }
+    toggle.addEventListener("change", refresh);
+    refresh();
+  })();
+  {% endif %}
+</script>
 {% endblock %}

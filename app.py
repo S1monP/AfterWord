@@ -748,6 +748,7 @@ def _register_routes(app: Flask) -> None:
             mode="new", event=None,
             starts_at_default=starts_at_default,
             ends_at_default="",
+            courses=current_app_courses_service().list()[0],
         )
 
     @app.get("/events/<event_id>/edit")
@@ -766,6 +767,7 @@ def _register_routes(app: Flask) -> None:
             mode="edit", event=ev,
             starts_at_default=_strip(ev.starts_at),
             ends_at_default=_strip(ev.ends_at),
+            courses=current_app_courses_service().list()[0],
         )
 
     @app.post("/events/new")
@@ -782,9 +784,20 @@ def _register_routes(app: Flask) -> None:
             "location": (
                 request.form.get("location") or ""
             ).strip() or None,
+            "course_id": (
+                request.form.get("course_id") or ""
+            ).strip() or None,
         }
+        repeat_until = (
+            request.form.get("repeat_until") or ""
+        ).strip() or None
         try:
-            current_app_events_service().create(**payload)
+            if repeat_until:
+                current_app_events_service().create_recurring(
+                    **payload, repeat_until=repeat_until,
+                )
+            else:
+                current_app_events_service().create(**payload)
         except ValueError as exc:
             return (
                 render_template(
@@ -793,6 +806,7 @@ def _register_routes(app: Flask) -> None:
                     starts_at_default=payload["starts_at"],
                     ends_at_default=payload.get("ends_at") or "",
                     error=str(exc),
+                    courses=current_app_courses_service().list()[0],
                 ),
                 400,
             )
@@ -811,6 +825,9 @@ def _register_routes(app: Flask) -> None:
             "location": (
                 request.form.get("location") or ""
             ).strip() or None,
+            "course_id": (
+                request.form.get("course_id") or ""
+            ).strip() or None,
         }
         try:
             current_app_events_service().update(event_id, **payload)
@@ -825,6 +842,7 @@ def _register_routes(app: Flask) -> None:
                     starts_at_default=payload.get("starts_at") or "",
                     ends_at_default=payload.get("ends_at") or "",
                     error=str(exc),
+                    courses=current_app_courses_service().list()[0],
                 ),
                 400,
             )
@@ -1537,22 +1555,41 @@ def _register_routes(app: Flask) -> None:
         """Create an event. Body: ``{title, kind, starts_at, ends_at?,
         description?, location?, source?, source_ref?}``."""
         payload = request.get_json(silent=True) or {}
+        repeat_until = (payload.get("repeat_until") or "").strip() or None
         try:
-            ev = current_app_events_service().create(
-                title=payload.get("title", ""),
-                kind=payload.get("kind", ""),
-                starts_at=payload.get("starts_at", ""),
-                ends_at=payload.get("ends_at"),
-                description=payload.get("description"),
-                location=payload.get("location"),
-                source=payload.get("source") or "manual",
-                source_ref=payload.get("source_ref"),
-            )
+            if repeat_until:
+                ev, count = current_app_events_service().create_recurring(
+                    title=payload.get("title", ""),
+                    kind=payload.get("kind", ""),
+                    starts_at=payload.get("starts_at", ""),
+                    ends_at=payload.get("ends_at"),
+                    description=payload.get("description"),
+                    location=payload.get("location"),
+                    source=payload.get("source") or "manual",
+                    source_ref=payload.get("source_ref"),
+                    course_id=payload.get("course_id"),
+                    repeat_until=repeat_until,
+                )
+            else:
+                ev = current_app_events_service().create(
+                    title=payload.get("title", ""),
+                    kind=payload.get("kind", ""),
+                    starts_at=payload.get("starts_at", ""),
+                    ends_at=payload.get("ends_at"),
+                    description=payload.get("description"),
+                    location=payload.get("location"),
+                    source=payload.get("source") or "manual",
+                    source_ref=payload.get("source_ref"),
+                    course_id=payload.get("course_id"),
+                )
+                count = 1
         except ValueError as exc:
             return jsonify({
                 "error": "invalid_payload", "detail": str(exc),
             }), 400
-        return jsonify({"event": _event_to_dict(ev)}), 201
+        return jsonify({
+            "event": _event_to_dict(ev), "created_count": count,
+        }), 201
 
     @app.get("/api/v1/events/<event_id>")
     def api_get_event(event_id: str) -> Any:
@@ -1571,7 +1608,7 @@ def _register_routes(app: Flask) -> None:
         kwargs: dict[str, Any] = {}
         for field in ("title", "kind", "starts_at", "ends_at",
                       "description", "location", "source",
-                      "source_ref"):
+                      "source_ref", "course_id"):
             if field in payload:
                 kwargs[field] = payload[field]
         try:
