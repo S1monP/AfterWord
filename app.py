@@ -12,9 +12,11 @@ Configuration is via env vars (see :mod:`config`).
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
+import threading
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -67,14 +69,35 @@ def create_app(config: Optional[config_mod.Config] = None) -> Flask:
     app.config["LR_COURSES_SERVICE"] = services.courses.CoursesService(
         app.config["LR_STORAGE"]
     )
-    # Milestone 8: LLM providers. The factory reads
-    # ``LR_OPENROUTER_API_KEY`` / ``LR_MINIMAX_API_KEY`` from
-    # the process env; absent keys yield no-op providers so the
-    # server can boot and the API surface still works (it just
-    # returns ``llm_not_configured`` for any /classify call).
+    # LLM providers. The factory reads ``LR_TRANSCRIPTION_API_KEY``
+    # / ``LR_TEXT_API_KEY`` from the process env (a `.env` file in
+    # the Server directory is loaded by ``config.load()``; the
+    # legacy ``LR_OPENROUTER_API_KEY`` / ``LR_MINIMAX_API_KEY``
+    # names are accepted as fallbacks). Absent keys yield no-op
+    # providers so the server can boot and the API surface still
+    # works (it just returns no-op stub data).
     app.config["LR_LLM_PROVIDERS"] = services.llm.default_providers(
-        openrouter_key=cfg.openrouter_api_key,
-        minimax_key=cfg.minimax_api_key,
+        transcription_key=cfg.transcription_api_key,
+        text_key=cfg.text_api_key,
+    )
+    # Boot diagnostic: say loudly whether the API keys from .env /
+    # env vars were actually picked up, so "the AI didn't work" is
+    # diagnosable from the console alone. Prints provider names
+    # only — never key material.
+    _t = app.config["LR_LLM_PROVIDERS"]["transcript"]
+    _x = app.config["LR_LLM_PROVIDERS"]["text"]
+    print(
+        f"[LR ] LLM providers: transcript={_t.name}"
+        + (
+            "  <- no LR_TRANSCRIPTION_API_KEY set!"
+            if _t.name == "noop" else ""
+        )
+        + f", text={_x.name}"
+        + (
+            "  <- no LR_TEXT_API_KEY set!"
+            if _x.name == "noop" else ""
+        ),
+        flush=True,
     )
     app.secret_key = os.environ.get("LR_SECRET", "lr-dev-secret-not-for-prod")
 
@@ -150,25 +173,84 @@ def current_app_courses_service() -> services.courses.CoursesService:
 def current_app_llm_providers() -> dict[str, services.llm.LLMProvider]:
     """Return the LLM provider registry attached to the app.
 
-    Keys are ``"transcript"`` and ``"classifier"``; values are
-    provider instances (real or no-op depending on env keys).
+    Keys are ``"transcript"`` and ``"text"``; values are provider
+    instances (real or no-op depending on env keys).
     """
     return current_app.config["LR_LLM_PROVIDERS"]
 
 
 def current_app_transcript_provider() -> services.llm.LLMProvider:
-    """Pull the transcript provider (OpenRouter or no-op)."""
+    """Pull the transcription provider (OpenRouter or no-op)."""
     return current_app.config["LR_LLM_PROVIDERS"]["transcript"]
 
 
-def current_app_classifier_provider() -> services.llm.LLMProvider:
-    """Pull the classifier provider (MiniMax M3 or no-op)."""
-    return current_app.config["LR_LLM_PROVIDERS"]["classifier"]
+def current_app_text_provider() -> services.llm.LLMProvider:
+    """Pull the text-model provider (OpenRouter chat or no-op)."""
+    return current_app.config["LR_LLM_PROVIDERS"]["text"]
+
+
+# ---------------------------------------------------------------------------
+# Pipeline bookkeeping (shared by the upload + retry routes)
+# ---------------------------------------------------------------------------
+
+# Post-finish statuses the manual retry endpoint accepts. This
+# includes the intermediate pipeline states so sessions stranded by
+# a server restart mid-pipeline (e.g. killed while 'transcribing')
+# can be reset to 'ready' and re-run — the recovery path for that
+# situation. Every transition to 'ready' here is legal per
+# storage.ALLOWED_STATUS_TRANSITIONS.
+_RETRYABLE_STATUSES = frozenset({
+    storage.STATUS_READY,
+    storage.STATUS_TRANSCRIBING,
+    storage.STATUS_TRANSCRIBED,
+    storage.STATUS_CLASSIFYING,
+    storage.STATUS_SUMMARISING,
+    storage.STATUS_EXTRACTING,
+    storage.STATUS_DONE,
+    storage.STATUS_FAILED,
+})
+
+# Sessions with a pipeline running in this process right now, so a
+# background upload run and a manual retry cannot both drive the
+# same session concurrently.
+_PIPELINE_LOCK = threading.Lock()
+_PIPELINES_IN_FLIGHT: set[str] = set()
 
 
 # ---------------------------------------------------------------------------
 # Jinja filters
 # ---------------------------------------------------------------------------
+
+def _parse_summary_artifact(artifact: Optional[dict]) -> Optional[dict]:
+    """Split a summary artifact into display fields.
+
+    The pipeline stores the summary as a JSON payload
+    ``{"text": ..., "key_points": [...]}``. This returns a copy of
+    the artifact dict with ``content`` replaced by the human
+    summary text and a ``key_points`` list added. If the content
+    isn't parseable JSON (legacy/plain payloads), the artifact is
+    returned unchanged with no key points.
+    """
+    if not artifact or not artifact.get("content"):
+        return None
+    try:
+        payload = json.loads(artifact["content"])
+    except (TypeError, ValueError):
+        return artifact
+    if not isinstance(payload, dict) or not isinstance(
+        payload.get("text"), str,
+    ):
+        return artifact
+    out = dict(artifact)
+    out["content"] = payload["text"]
+    raw_points = payload.get("key_points")
+    out["key_points"] = (
+        [str(p) for p in raw_points if str(p).strip()]
+        if isinstance(raw_points, list)
+        else []
+    )
+    return out
+
 
 def _selected_session_context(session_id: str) -> dict[str, Any]:
     """Build the right-pane context dict for a session id.
@@ -185,7 +267,9 @@ def _selected_session_context(session_id: str) -> dict[str, Any]:
             "summary": None,
             "transcript": None,
         }
-    summary = store.get_artifact(session_id, "summary")
+    summary = _parse_summary_artifact(
+        store.get_artifact(session_id, "summary"),
+    )
     transcript = store.get_artifact(session_id, "transcript")
     return {
         "selected_session": sess,
@@ -872,19 +956,22 @@ def _register_routes(app: Flask) -> None:
         """Re-run the post-finish pipeline for ``session_id``.
 
         Useful when the auto-pipeline failed (network blip, no
-        API key at the time, etc.) and the user wants to retry
-        without re-uploading the audio.
+        API key at the time, a server restart mid-pipeline, etc.)
+        and the user wants to retry without re-uploading the audio.
 
         Behaviour:
 
-        * The session must be in ``status='ready'``, ``'done'``,
-          ``'failed'``, ``'transcribed'`` or ``'classifying'``
-          (basically: not actively uploading or stitching).
-        * The session is moved back to ``status='ready'`` if it
-          was ``'done'`` or ``'failed'`` so the pipeline's
-          transition guard lets it run.
-        * The full pipeline (transcribe → classify) runs again
-          and overwrites any prior transcript artifact and kind.
+        * The session must be in a post-finish status: ``ready``,
+          ``transcribing``, ``transcribed``, ``classifying``,
+          ``summarising``, ``extracting``, ``done`` or ``failed``.
+          Intermediate states stranded by a server restart
+          mid-pipeline are reset to ``ready`` here — that is the
+          recovery path for that situation.
+        * The full pipeline (transcribe → classify → summarise →
+          extract) runs again and overwrites any prior transcript
+          artifact and kind.
+        * Returns ``409`` if another pipeline is already running
+          for this session in this process.
 
         Returns ``200`` with ``{"ok": true/false, "session": ...}``.
         Returns ``404`` if the session is unknown.
@@ -893,34 +980,64 @@ def _register_routes(app: Flask) -> None:
         sess = store.get_session(session_id)
         if sess is None:
             return jsonify({"error": "not_found"}), 404
-        # Allow the retry to clobber an existing transcript /
-        # kind. Move 'done' / 'failed' / 'transcribed' /
-        # 'classifying' back to 'ready' so the pipeline can run.
-        if sess.status in (
-            storage.STATUS_DONE,
-            storage.STATUS_FAILED,
-            storage.STATUS_TRANSCRIBED,
-            storage.STATUS_CLASSIFYING,
-        ):
-            try:
-                store.set_status(
-                    session_id, storage.STATUS_READY,
-                    status_detail=None,
-                )
-            except ValueError as exc:
+        if sess.status not in _RETRYABLE_STATUSES:
+            return jsonify({
+                "ok": False,
+                "reason": "not_ready",
+                "status": sess.status,
+                "detail": (
+                    "session is still receiving/stitching audio; "
+                    "retry is only possible after finish"
+                ),
+                "session": sess.to_api_dict(),
+            }), 409
+        # Prevent a background upload run and this retry from both
+        # driving the same session concurrently.
+        with _PIPELINE_LOCK:
+            if session_id in _PIPELINES_IN_FLIGHT:
                 return jsonify({
-                    "error": "illegal_transition",
-                    "detail": str(exc),
+                    "ok": False,
+                    "reason": "pipeline_running",
+                    "detail": (
+                        "an AI pipeline is already running for this "
+                        "session; reload the page in a few seconds"
+                    ),
+                    "session": sess.to_api_dict(),
                 }), 409
-        # Run the pipeline synchronously. Uses the env-var-driven
-        # providers unless the test harness replaced them via
-        # ``app.config['LR_LLM_PROVIDERS']``.
-        result = processing.run_post_finish_pipeline(
-            store, session_id,
-            transcript_provider=current_app_transcript_provider(),
-            classifier=current_app_classifier_provider(),
-            llm_provider=current_app_classifier_provider(),
-        )
+            _PIPELINES_IN_FLIGHT.add(session_id)
+        try:
+            # Allow the retry to clobber an existing transcript /
+            # kind, and recover statuses stranded by a server
+            # restart mid-pipeline: move any post-finish status
+            # back to 'ready' so the pipeline's transition guard
+            # lets it run. All of these transitions are legal.
+            if sess.status != storage.STATUS_READY:
+                try:
+                    store.set_status(
+                        session_id, storage.STATUS_READY,
+                        status_detail=None,
+                    )
+                except ValueError as exc:
+                    return jsonify({
+                        "ok": False,
+                        "reason": "illegal_transition",
+                        "detail": str(exc),
+                        "session": (
+                            store.get_session(session_id).to_api_dict()
+                        ),
+                    }), 409
+            # Run the pipeline synchronously. Uses the env-var-driven
+            # providers unless the test harness replaced them via
+            # ``app.config['LR_LLM_PROVIDERS']``.
+            result = processing.run_post_finish_pipeline(
+                store, session_id,
+                transcript_provider=current_app_transcript_provider(),
+                classifier=current_app_text_provider(),
+                llm_provider=current_app_text_provider(),
+            )
+        finally:
+            with _PIPELINE_LOCK:
+                _PIPELINES_IN_FLIGHT.discard(session_id)
         sess = store.get_session(session_id)
         # ``None`` means the session wasn't 'ready' (e.g. it's
         # still 'receiving'). Surface that as a 409 so the UI can
@@ -1005,8 +1122,8 @@ def _register_routes(app: Flask) -> None:
         """LLM classify a single session.
 
         Looks up the session's most recent ``transcript`` artifact
-        and asks the configured classifier (MiniMax M3 when
-        ``LR_MINIMAX_API_KEY`` is set, no-op otherwise) for a
+        and asks the configured text model (via OpenRouter when
+        ``LR_TEXT_API_KEY`` is set, no-op otherwise) for a
         kind + confidence. On success the kind is persisted on
         the session.
 
@@ -1024,7 +1141,7 @@ def _register_routes(app: Flask) -> None:
             return jsonify({"error": "not_found"}), 404
         outcome = current_app_classification_service().classify_session(
             session_id,
-            classifier=current_app_classifier_provider(),
+            classifier=current_app_text_provider(),
         )
         if outcome is None:
             return jsonify({
@@ -1062,7 +1179,7 @@ def _register_routes(app: Flask) -> None:
             }), 400
         svc = current_app_classification_service()
         store = current_app_storage()
-        classifier = current_app_classifier_provider()
+        classifier = current_app_text_provider()
         results: dict[str, Any] = {}
         for sid in session_ids:
             if not isinstance(sid, str) or not sid:
@@ -1688,7 +1805,8 @@ def _register_routes(app: Flask) -> None:
     @app.post("/api/v1/uploads/audio")
     def api_upload_audio() -> Any:
         """Accept one audio file from the browser, transcode to canonical
-        WAV if needed, and create a one-chunk session.
+        WAV if needed, create a one-chunk session, and run the AI
+        pipeline (transcribe → classify → summarise → extract).
 
         Multipart form fields:
           - file: the audio bytes (any format the browser or ffmpeg can read)
@@ -1799,6 +1917,65 @@ def _register_routes(app: Flask) -> None:
                 pass
             if work_dir is not None and work_dir.exists():
                 shutil.rmtree(work_dir, ignore_errors=True)
+
+        # Run the AI pipeline in a background thread so the upload
+        # returns immediately and the browser lands on the session
+        # page (which polls the live status) instead of babysitting
+        # a request that can take many minutes for long lectures.
+        # The device /finish flow stays synchronous by design (the
+        # device blocks on the response).
+        transcript_provider = current_app_transcript_provider()
+        text_provider = current_app_text_provider()
+        run_in_background = current_app.config.get(
+            "LR_PIPELINE_BACKGROUND", True,
+        )
+        if run_in_background:
+            with _PIPELINE_LOCK:
+                already_running = sess.id in _PIPELINES_IN_FLIGHT
+                if not already_running:
+                    _PIPELINES_IN_FLIGHT.add(sess.id)
+            if already_running:
+                print(
+                    f"[LR ] pipeline already running for "
+                    f"{sess.id[:8]}; skipping background run",
+                    flush=True,
+                )
+            else:
+                def _run_pipeline():
+                    try:
+                        processing.run_post_finish_pipeline(
+                            store, sess.id,
+                            transcript_provider=transcript_provider,
+                            classifier=text_provider,
+                            llm_provider=text_provider,
+                        )
+                    except Exception as exc:
+                        print(
+                            "[LR ] post-upload pipeline error: "
+                            f"{exc!r}", flush=True,
+                        )
+                    finally:
+                        with _PIPELINE_LOCK:
+                            _PIPELINES_IN_FLIGHT.discard(sess.id)
+
+                threading.Thread(
+                    target=_run_pipeline,
+                    name=f"lr-pipeline-{sess.id[:8]}",
+                    daemon=True,
+                ).start()
+        else:
+            # Deterministic mode (used by tests): run synchronously
+            # so the response reflects the final status.
+            try:
+                processing.run_post_finish_pipeline(
+                    store, sess.id,
+                    transcript_provider=transcript_provider,
+                    classifier=text_provider,
+                    llm_provider=text_provider,
+                )
+            except Exception as exc:  # pragma: no cover
+                print(f"[LR ] post-upload pipeline error: {exc!r}", flush=True)
+        sess = store.get_session(sess.id) or sess
 
         return jsonify({
             "created": True,

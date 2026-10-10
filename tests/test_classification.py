@@ -252,8 +252,8 @@ class ClassificationApiTests(LRTestCase):
             sid, "transcript", "all-hands meeting notes",
         )
         # Replace the registered classifier with the stub.
-        original = self.app.config["LR_LLM_PROVIDERS"]["classifier"]
-        self.app.config["LR_LLM_PROVIDERS"]["classifier"] = (
+        original = self.app.config["LR_LLM_PROVIDERS"]["text"]
+        self.app.config["LR_LLM_PROVIDERS"]["text"] = (
             StubClassifier()
         )
         try:
@@ -261,7 +261,7 @@ class ClassificationApiTests(LRTestCase):
                 f"/api/v1/sessions/{sid}/classify",
             )
         finally:
-            self.app.config["LR_LLM_PROVIDERS"]["classifier"] = original
+            self.app.config["LR_LLM_PROVIDERS"]["text"] = original
         self.assertEqual(resp.status_code, 200)
         body = resp.get_json()
         self.assertEqual(body["kind"], "meeting")
@@ -316,8 +316,8 @@ class ClassificationApiTests(LRTestCase):
         self.app.config["LR_STORAGE"].add_artifact(
             a, "transcript", "lecture content",
         )
-        original = self.app.config["LR_LLM_PROVIDERS"]["classifier"]
-        self.app.config["LR_LLM_PROVIDERS"]["classifier"] = (
+        original = self.app.config["LR_LLM_PROVIDERS"]["text"]
+        self.app.config["LR_LLM_PROVIDERS"]["text"] = (
             StubClassifier()
         )
         try:
@@ -327,7 +327,7 @@ class ClassificationApiTests(LRTestCase):
                 content_type="application/json",
             )
         finally:
-            self.app.config["LR_LLM_PROVIDERS"]["classifier"] = original
+            self.app.config["LR_LLM_PROVIDERS"]["text"] = original
         self.assertEqual(resp.status_code, 200)
         body = resp.get_json()
         # 'a' has a transcript → classified

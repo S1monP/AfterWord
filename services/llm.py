@@ -1,19 +1,21 @@
-"""LLM providers for transcription (OpenRouter Whisper) and
-classification (MiniMax M3).
+"""LLM providers for transcription and text-model tasks, both via
+OpenRouter.
 
-The pipeline in :mod:`services.processing` calls two of these
-providers per session:
+The pipeline in :mod:`services.processing` calls these providers per
+session:
 
-1. A **transcript provider** — turns a WAV file into text.
-   The concrete implementation is :class:`OpenRouterProvider`
-   which uses the OpenRouter OpenAI-compatible Whisper endpoint
-   (``POST /api/v1/audio/transcriptions``).
+1. A **transcription provider** — turns a WAV file into text.
+   The concrete implementation is :class:`TranscriptionProvider`
+   which uses the OpenRouter OpenAI-compatible transcription
+   endpoint (``POST /api/v1/audio/transcriptions``). When the
+   upstream model returns diarization data, the transcript is
+   rendered with speaker annotations (``[MM:SS] Speaker 1: ...``).
 
-2. A **classifier** — picks one of the four recording kinds
-   (``lecture``, ``voice_memo``, ``meeting``, ``other``) from
-   the transcript. The concrete implementation is
-   :class:`MiniMaxProvider` which uses the MiniMax M3 chat
-   completions endpoint.
+2. A **text provider** — a chat-completions model used for
+   classification (``lecture`` / ``voice_memo`` / ``meeting`` /
+   ``other``), summarisation, and structured item extraction.
+   The concrete implementation is :class:`TextProvider` which
+   uses the OpenRouter chat completions endpoint.
 
 Each provider takes an ``http_transport`` callable (or falls back
 to the stdlib ``urllib.request``) so tests can inject a fake
@@ -21,8 +23,13 @@ transport without monkey-patching global state.
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
+import shutil
+import struct
+import subprocess
+import tempfile
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -193,17 +200,68 @@ class _NoOpProvider(LLMProvider):
         return []
 
 
-# --- OpenRouter (Whisper) ---------------------------------------------------
+# --- Transcription (OpenRouter) ---------------------------------------------
 #
-# OpenRouter's API is OpenAI-compatible. The transcription endpoint
-# accepts a multipart/form-data POST with the audio file and returns
-# the transcript. We use the stdlib ``email``/``urllib`` machinery
-# to build the multipart body (no third-party dep).
+# OpenRouter's transcription API is OpenAI-compatible. The
+# transcription endpoint accepts a multipart/form-data POST with the
+# audio file and returns the transcript. We use the stdlib
+# ``email``/``urllib`` machinery to build the multipart body (no
+# third-party dep).
+#
+# We request ``response_format=verbose_json`` so the response can
+# carry timestamped segments with speaker (diarization) data. When
+# the upstream model returns speaker labels, the transcript is
+# rendered as annotated dialogue lines; otherwise we fall back to
+# the plain text.
 
 OPENROUTER_TRANSCRIPTIONS_URL = (
     "https://openrouter.ai/api/v1/audio/transcriptions"
 )
-OPENROUTER_WHISPER_MODEL = "microsoft/mai-transcribe-2"
+TRANSCRIPTION_MODEL = "microsoft/mai-transcribe-2"
+
+#: Env flag: render speaker annotations in the transcript when the
+#: transcription model returns diarization data. Set to
+#: ``0``/``false``/``no``/``off`` to always get plain text.
+TRANSCRIBE_SPEAKERS_ENV = "LR_TRANSCRIBE_SPEAKERS"
+
+#: OpenRouter caps inline transcription uploads at 25 MB (multipart)
+#: and JSON request bodies at 50 MB, and upstream providers time out
+#: after ~60 s of processing per request. Longer recordings are
+#: therefore split into chunks.
+TRANSCRIBE_CHUNK_MB_ENV = "LR_TRANSCRIBE_CHUNK_MB"
+TRANSCRIBE_CHUNK_SECONDS_ENV = "LR_TRANSCRIBE_CHUNK_SECONDS"
+# With MP3 compression (~8 KB/s) a 1500 s chunk is ~12 MB of audio
+# (~16 MB request body) — comfortably under the body caps.
+DEFAULT_TRANSCRIBE_CHUNK_SECONDS = 1500
+# WAV fallback (no ffmpeg available): 15 MB / 300 s keeps request
+# bodies at ~21 MB, the largest size known to pass reliably.
+DEFAULT_TRANSCRIBE_CHUNK_MB = 15
+DEFAULT_TRANSCRIBE_CHUNK_SECONDS_WAV = 300
+
+#: Provider-specific options passed as ``provider.options`` on the
+#: transcription request. The default enables Azure diarization so
+#: ``microsoft/mai-transcribe-2`` (hosted by Azure) returns segment
+#: speaker labels — without this option the model emits no
+#: ``speaker`` fields at all. Override with the
+#: ``LR_TRANSCRIBE_PROVIDER_OPTIONS`` env var (a JSON object) when
+#: using a model served by a different provider; set it to ``{}``
+#: to send no provider options.
+TRANSCRIBE_PROVIDER_OPTIONS_ENV = "LR_TRANSCRIBE_PROVIDER_OPTIONS"
+DEFAULT_TRANSCRIBE_PROVIDER_OPTIONS: dict = {
+    "azure": {"diarization": {"enabled": True}},
+}
+
+#: OpenRouter rejects transcription request bodies over 50 MB with
+#: a bare 413. We refuse to send anything close to that and raise
+#: a clear, actionable error instead.
+MAX_TRANSCRIBE_BODY_BYTES = 45 * 1024 * 1024
+
+#: Env flag: transcode WAV chunks to 64 kbps MP3 before upload.
+#: On by default — request bodies drop from ~20 MB (WAV) to ~2 MB,
+#: far below the body caps, and uploads are ~10x faster. Set to
+#: ``0`` to send raw WAV chunks. Requires ffmpeg (falls back to
+#: WAV automatically when ffmpeg is unavailable or fails).
+TRANSCRIBE_COMPRESS_ENV = "LR_TRANSCRIBE_COMPRESS"
 
 #: Valid recording kinds the classifier can return.
 #: Mirrors ``storage.RECORDING_KINDS`` and
@@ -250,31 +308,317 @@ def _build_multipart_body(
     return b"\r\n".join(lines)
 
 
-class OpenRouterProvider(LLMProvider):
-    """Real Whisper transcription via OpenRouter.
+def _read_env_int(name: str, default: int) -> int:
+    """Read an integer env var, falling back to ``default``."""
+    try:
+        return int(os.environ.get(name, "") or default)
+    except ValueError:
+        return default
 
-    Reads the audio file at ``audio_path`` and posts it to
-    ``https://openrouter.ai/api/v1/audio/transcriptions`` as
-    multipart/form-data. Returns the transcript text.
+
+def _wav_header(
+    sample_rate: int, channels: int, bits_per_sample: int,
+    data_size: int,
+) -> bytes:
+    """Build a canonical 44-byte PCM WAV header."""
+    byte_rate = sample_rate * channels * (bits_per_sample // 8)
+    block_align = channels * (bits_per_sample // 8)
+    return struct.pack(
+        "<4sI4s4sIHHIIHH4sI",
+        b"RIFF", 36 + data_size, b"WAVE",
+        b"fmt ", 16, 1, channels, sample_rate, byte_rate,
+        block_align, bits_per_sample,
+        b"data", data_size,
+    )
+
+
+def _parse_wav(data: bytes):
+    """Parse a RIFF/WAVE byte string.
+
+    Returns ``(data_offset, data_size, sample_rate, channels,
+    bits_per_sample)`` for well-formed WAV files, or ``None`` when
+    the bytes are not a WAV we can split.
+    """
+    if len(data) < 12 or data[0:4] != b"RIFF" or data[8:12] != b"WAVE":
+        return None
+    pos = 12
+    fmt = None
+    data_chunk = None
+    while pos + 8 <= len(data):
+        chunk_id = data[pos:pos + 4]
+        chunk_size = int.from_bytes(data[pos + 4:pos + 8], "little")
+        if chunk_id == b"fmt " and chunk_size >= 16:
+            body = data[pos + 8:pos + 8 + chunk_size]
+            channels = int.from_bytes(body[2:4], "little")
+            rate = int.from_bytes(body[4:8], "little")
+            bits = int.from_bytes(body[14:16], "little")
+            fmt = (rate, channels, bits)
+        elif chunk_id == b"data":
+            off = pos + 8
+            size = chunk_size
+            if size in (0, 0xFFFFFFFF):
+                # Streaming-style sizes: use whatever follows.
+                size = max(0, len(data) - off)
+            data_chunk = (off, size)
+            break
+        pos += 8 + chunk_size + (chunk_size & 1)
+    if fmt is None or data_chunk is None:
+        return None
+    rate, channels, bits = fmt
+    frame = channels * (bits // 8)
+    if rate <= 0 or frame <= 0:
+        return None
+    return data_chunk[0], data_chunk[1], rate, channels, bits
+
+
+def _split_wav(
+    path: Path,
+    max_bytes: int,
+    max_seconds: float,
+    out_dir: Path,
+) -> list[tuple[Path, float]]:
+    """Split a WAV file into chunks of at most ``max_bytes`` bytes
+    and ``max_seconds`` seconds (whichever binds first), aligned to
+    whole frames so no sample is corrupted.
+
+    Returns ``[(chunk_path, offset_seconds), ...]``. Files that are
+    not parseable WAVs, or that already fit within the limits, come
+    back whole as ``[(path, 0.0)]``. Chunk files (when any) are
+    written into ``out_dir``.
+    """
+    path = Path(path)
+    data = path.read_bytes()
+    info = _parse_wav(data)
+    if info is None:
+        return [(path, 0.0)]
+    data_off, data_size, rate, channels, bits = info
+    frame = channels * (bits // 8)
+    total_frames = data_size // frame
+    if total_frames <= 0:
+        return [(path, 0.0)]
+    frames_by_bytes = max_bytes // frame
+    frames_by_time = int(max_seconds * rate)
+    chunk_frames = min(frames_by_bytes, frames_by_time)
+    if chunk_frames < 1 or total_frames <= chunk_frames:
+        return [(path, 0.0)]
+    chunks: list[tuple[Path, float]] = []
+    for idx, start in enumerate(range(0, total_frames, chunk_frames)):
+        n = min(chunk_frames, total_frames - start)
+        blob = data[data_off + start * frame:data_off + (start + n) * frame]
+        chunk_path = Path(out_dir) / f"chunk_{idx:04d}.wav"
+        chunk_path.write_bytes(
+            _wav_header(rate, channels, bits, len(blob)) + blob,
+        )
+        chunks.append((chunk_path, start / rate))
+    return chunks
+
+
+def _format_timestamp(seconds: object) -> Optional[str]:
+    """Format a segment start time (float seconds) as ``[MM:SS]``
+    (or ``[H:MM:SS]`` past one hour). Returns ``None`` when the
+    value is missing or not a number.
+    """
+    try:
+        total = float(seconds)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if total < 0:
+        total = 0.0
+    total = int(total)
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
+
+
+def _segments_to_transcript(
+    segments: list,
+    *,
+    annotate_speakers: bool,
+) -> str:
+    """Render verbose_json ``segments`` into transcript text.
+
+    When ``annotate_speakers`` is true and at least one segment
+    carries speaker data (``speaker`` index or ``speaker_label``
+    string), lines are rendered as ``[MM:SS] Speaker N: text``.
+    Otherwise plain per-segment text is joined with newlines.
+    Returns ``""`` when no segment has usable text.
+    """
+    has_speakers = any(
+        isinstance(s, dict)
+        and (s.get("speaker") is not None or s.get("speaker_label"))
+        for s in segments
+    )
+    lines: list[str] = []
+    for seg in segments:
+        if not isinstance(seg, dict):
+            continue
+        text = str(seg.get("text", "")).strip()
+        if not text:
+            continue
+        if annotate_speakers and has_speakers:
+            label = seg.get("speaker_label")
+            if not label and seg.get("speaker") is not None:
+                label = f"Speaker {int(seg['speaker']) + 1}"
+            label = str(label)
+            ts = _format_timestamp(seg.get("start"))
+            if ts:
+                lines.append(f"[{ts}] {label}: {text}")
+            else:
+                lines.append(f"{label}: {text}")
+        else:
+            lines.append(text)
+    return "\n".join(lines).strip()
+
+
+def _speakers_enabled() -> bool:
+    """Resolve the speaker-annotation flag from the environment.
+
+    Defaults to on; set ``LR_TRANSCRIBE_SPEAKERS`` to
+    ``0``/``false``/``no``/``off`` (case-insensitive) to disable.
+    """
+    raw = os.environ.get(TRANSCRIBE_SPEAKERS_ENV, "")
+    return raw.strip().lower() not in ("0", "false", "no", "off")
+
+
+def _compress_enabled() -> bool:
+    """Resolve the chunk-compression flag from the environment.
+
+    Defaults to on; set ``LR_TRANSCRIBE_COMPRESS`` to
+    ``0``/``false``/``no``/``off`` to send raw WAV chunks.
+    """
+    raw = os.environ.get(TRANSCRIBE_COMPRESS_ENV, "")
+    return raw.strip().lower() not in ("0", "false", "no", "off")
+
+
+def _compress_to_mp3(
+    wav_path: Path, work_dir: Path, ffmpeg_path: str,
+) -> Optional[Path]:
+    """Transcode a WAV chunk to 64 kbps MP3 for upload.
+
+    Returns the MP3 path on success, or ``None`` when ffmpeg is
+    unavailable or fails — the caller then falls back to the raw
+    WAV chunk.
+    """
+    mp3_path = Path(work_dir) / (Path(wav_path).stem + ".mp3")
+    cmd = [
+        ffmpeg_path, "-y", "-hide_banner", "-loglevel", "error",
+        "-i", str(wav_path),
+        "-codec:a", "libmp3lame", "-b:a", "64k",
+        str(mp3_path),
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True)
+    except OSError:
+        return None
+    if result.returncode != 0 or not mp3_path.exists():
+        return None
+    return mp3_path
+
+
+class TranscriptionProvider(LLMProvider):
+    """Real audio transcription via OpenRouter.
+
+    Posts audio as base64 JSON (``input_audio``) with
+    ``response_format=verbose_json`` and Azure diarization enabled
+    by default (see ``DEFAULT_TRANSCRIBE_PROVIDER_OPTIONS`` — the
+    JSON request shape is required because provider options are
+    not supported on the multipart path), so supported models
+    return segment-level speaker labels rendered as
+    ``[MM:SS] Speaker N: text`` lines.
+
+    Recordings are automatically split into chunks sized for the
+    transport: with MP3 compression available (default), chunking is
+    duration-driven (default 1500 s ≈ 12 MB of MP3 per request,
+    ~16 MB body); without ffmpeg, conservative WAV caps apply
+    (15 MB / 300 s). Segment timestamps are offset per chunk so the
+    merged transcript has continuous times. If a chunk hits a
+    transient upstream failure (the ~60 s processing timeout, a
+    5xx, or an oversized-body rejection), it is automatically split
+    in half and retried. Caveat: speaker cluster indices are
+    assigned per request, so "Speaker 1" in one chunk is not
+    guaranteed to be the same person in the next chunk.
 
     Pass ``http_transport`` to inject a fake (used in tests); the
     default is the stdlib ``urllib.request`` wrapper.
     """
-    name = "openrouter"
+
+    # ``name`` is stored on artifacts as the generating model, so the
+    # UI can show "generated by microsoft/mai-transcribe-2".
+    name = TRANSCRIPTION_MODEL
 
     def __init__(
         self,
         api_key: str,
         *,
-        model: str = OPENROUTER_WHISPER_MODEL,
+        model: str = TRANSCRIPTION_MODEL,
+        annotate_speakers: Optional[bool] = None,
+        chunk_max_bytes: Optional[int] = None,
+        chunk_max_seconds: Optional[float] = None,
+        provider_options: Optional[dict] = None,
+        compress: Optional[bool] = None,
+        ffmpeg_path: Optional[str] = None,
         http_transport: Optional[HttpTransport] = None,
     ) -> None:
         if not api_key:
             raise LLMConfigError(
-                "OpenRouterProvider requires LR_OPENROUTER_API_KEY"
+                "TranscriptionProvider requires LR_TRANSCRIPTION_API_KEY"
             )
         self._api_key = api_key
         self._model = model
+        self._annotate_speakers = (
+            _speakers_enabled()
+            if annotate_speakers is None
+            else bool(annotate_speakers)
+        )
+        self._chunk_max_bytes = (
+            _read_env_int(
+                TRANSCRIBE_CHUNK_MB_ENV, DEFAULT_TRANSCRIBE_CHUNK_MB,
+            ) * 1024 * 1024
+            if chunk_max_bytes is None
+            else int(chunk_max_bytes)
+        )
+        self._chunk_max_seconds = (
+            float(_read_env_int(
+                TRANSCRIBE_CHUNK_SECONDS_ENV,
+                DEFAULT_TRANSCRIBE_CHUNK_SECONDS,
+            ))
+            if chunk_max_seconds is None
+            else float(chunk_max_seconds)
+        )
+        # Whether the duration limit was set explicitly (kwarg or
+        # env var). When it wasn't, the WAV fallback path clamps it
+        # to the WAV-safe default — see :meth:`_split_limits`.
+        self._chunk_seconds_explicit = (
+            chunk_max_seconds is not None
+            or bool(os.environ.get(
+                TRANSCRIBE_CHUNK_SECONDS_ENV, "",
+            ).strip())
+        )
+        if provider_options is None:
+            raw = os.environ.get(TRANSCRIBE_PROVIDER_OPTIONS_ENV, "").strip()
+            if raw:
+                try:
+                    provider_options = json.loads(raw)
+                except ValueError:
+                    # Unparseable env JSON: fall back to the default
+                    # rather than silently dropping diarization.
+                    provider_options = dict(
+                        DEFAULT_TRANSCRIBE_PROVIDER_OPTIONS,
+                    )
+            else:
+                provider_options = dict(DEFAULT_TRANSCRIBE_PROVIDER_OPTIONS)
+        self._provider_options = provider_options
+        self._compress = (
+            _compress_enabled() if compress is None else bool(compress)
+        )
+        # ffmpeg path for chunk compression; same env var the app
+        # config uses so one setting covers both.
+        self._ffmpeg_path = (
+            ffmpeg_path or os.environ.get("LR_FFMPEG_PATH", "ffmpeg")
+        )
+        self._ffmpeg_ok: Optional[bool] = None
         self._http = http_transport or _urllib_transport
 
     def transcribe(self, audio_path: Path) -> str:
@@ -282,25 +626,115 @@ class OpenRouterProvider(LLMProvider):
             audio_path = Path(audio_path)
         if not audio_path.exists():
             raise FileNotFoundError(str(audio_path))
-        # Build a multipart body. We use a fixed boundary so the
-        # request is reproducible in tests.
-        boundary = "lr-openrouter-boundary"
-        content = audio_path.read_bytes()
-        body = _build_multipart_body(
-            file_field="file",
-            filename=audio_path.name,
-            content=content,
-            content_type="audio/wav",
-            fields={"model": self._model},
-            boundary=boundary,
-        )
+        # Split long recordings into chunks sized for the transport
+        # that will actually be used (MP3 when ffmpeg is available,
+        # raw WAV otherwise); files that already fit come back as a
+        # single chunk.
+        tmp_dir = Path(tempfile.mkdtemp(prefix="lr-stt-"))
+        try:
+            max_bytes, max_seconds = self._split_limits()
+            chunks = _split_wav(
+                audio_path,
+                max_bytes,
+                max_seconds,
+                tmp_dir,
+            )
+            total_chunks = len(chunks)
+            if total_chunks > 1:
+                print(
+                    f"[LR ] transcribing: {total_chunks} chunks to send",
+                    flush=True,
+                )
+            seg_parts: list[dict] = []
+            text_parts: list[str] = []
+            all_chunks_had_segments = True
+            for chunk_no, (chunk_path, offset) in enumerate(
+                chunks, start=1,
+            ):
+                if total_chunks > 1:
+                    # Console progress: a long multi-chunk run is
+                    # completely silent otherwise (the dev server
+                    # only logs the HTTP request once it completes),
+                    # which makes it look hung.
+                    print(
+                        f"[LR ] transcribing: chunk {chunk_no}/"
+                        f"{total_chunks} (starts at {int(offset)} s)",
+                        flush=True,
+                    )
+                had, segs, texts = self._transcribe_chunk(
+                    chunk_path, offset, tmp_dir,
+                )
+                all_chunks_had_segments = all_chunks_had_segments and had
+                seg_parts.extend(segs)
+                text_parts.extend(texts)
+            if total_chunks > 1:
+                print(
+                    f"[LR ] transcribing: merged {total_chunks} chunk(s)",
+                    flush=True,
+                )
+            if all_chunks_had_segments and seg_parts:
+                rendered = _segments_to_transcript(
+                    seg_parts, annotate_speakers=self._annotate_speakers,
+                )
+                if rendered:
+                    return rendered
+            return "\n".join(text_parts).strip()
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    def _post_transcription(
+        self, audio_path: Path, work_dir: Path,
+    ) -> bytes:
+        """POST one audio chunk and return the raw response body.
+
+        Uses OpenRouter's JSON request shape (base64
+        ``input_audio``) because provider-specific options such as
+        Azure diarization are only supported on the JSON path. When
+        compression is enabled and ffmpeg is available, the chunk
+        is first transcoded to 64 kbps MP3 — request bodies drop
+        from ~20 MB (WAV) to ~2 MB, far below OpenRouter's body
+        caps (multipart 25 MB, JSON 50 MB) — otherwise the raw WAV
+        chunk is sent.
+        """
+        send_path = audio_path
+        send_format = "wav"
+        if self._compress:
+            mp3_path = _compress_to_mp3(
+                audio_path, work_dir, self._ffmpeg_path,
+            )
+            if mp3_path is not None:
+                send_path = mp3_path
+                send_format = "mp3"
+        content = send_path.read_bytes()
+        payload: dict = {
+            "model": self._model,
+            "input_audio": {
+                "data": base64.b64encode(content).decode("ascii"),
+                "format": send_format,
+            },
+            "response_format": "verbose_json",
+            "timestamp_granularities": ["segment"],
+        }
+        if self._provider_options:
+            payload["provider"] = {"options": self._provider_options}
+        body = json.dumps(payload).encode("utf-8")
+        # OpenRouter rejects oversized bodies with a bare 413. Fail
+        # fast here with an actionable message instead.
+        if len(body) > MAX_TRANSCRIBE_BODY_BYTES:
+            raise LLMError(
+                f"transcription request body is {len(body)} bytes, "
+                f"over the {MAX_TRANSCRIBE_BODY_BYTES} byte safety "
+                "cap; lower LR_TRANSCRIBE_CHUNK_MB (current chunk "
+                f"cap: {self._chunk_max_bytes} bytes)"
+            )
         headers = {
             "Authorization": f"Bearer {self._api_key}",
-            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Content-Type": "application/json",
         }
         status, raw = self._http(
             OPENROUTER_TRANSCRIPTIONS_URL,
-            data=body, headers=headers, timeout=120.0,
+            data=body,
+            headers=headers, timeout=120.0,
         )
         if status < 200 or status >= 300:
             raise LLMHTTPError(
@@ -308,41 +742,190 @@ class OpenRouterProvider(LLMProvider):
                 f"OpenRouter transcription failed: HTTP {status}: "
                 f"{raw[:200]!r}",
             )
-        # OpenRouter returns either JSON {"text": "..."} or plain
-        # text (depending on response_format). Be tolerant: if the
-        # body parses as JSON with a "text" field, use that;
-        # otherwise decode the body as UTF-8.
-        try:
-            payload = json.loads(raw.decode("utf-8"))
-            if isinstance(payload, dict) and "text" in payload:
-                return str(payload["text"])
-        except (ValueError, UnicodeDecodeError):
-            pass
-        return raw.decode("utf-8", errors="replace")
+        return raw
 
-    # M9: not yet implemented; raise for clarity.
+    def _extract_chunk(
+        self, raw: bytes, offset: float,
+    ) -> tuple[Optional[list[dict]], Optional[str]]:
+        """Parse one transcription response.
+
+        Returns ``(segments, text)``: ``segments`` is the list of
+        verbose_json segment dicts with ``start``/``end`` shifted by
+        ``offset`` (``None`` when the provider returned no
+        segments), and ``text`` is the plain transcript (``None``
+        when unavailable). Tolerates plain-text bodies.
+        """
+        decoded = raw.decode("utf-8", errors="replace")
+        try:
+            payload = json.loads(decoded)
+        except ValueError:
+            return (None, decoded)
+        if not isinstance(payload, dict):
+            return (None, decoded)
+        segments: Optional[list[dict]] = None
+        raw_segments = payload.get("segments")
+        if isinstance(raw_segments, list) and raw_segments:
+            segments = []
+            for seg in raw_segments:
+                if not isinstance(seg, dict):
+                    continue
+                shifted = dict(seg)
+                for field in ("start", "end"):
+                    value = shifted.get(field)
+                    if isinstance(value, (int, float)):
+                        shifted[field] = float(value) + offset
+                segments.append(shifted)
+        text = payload.get("text")
+        return (segments, text if isinstance(text, str) else None)
+
+    def _probe_ffmpeg(self) -> bool:
+        """One-time check that the ffmpeg binary runs (cached)."""
+        if self._ffmpeg_ok is None:
+            try:
+                result = subprocess.run(
+                    [self._ffmpeg_path, "-version"],
+                    capture_output=True,
+                )
+                self._ffmpeg_ok = result.returncode == 0
+            except OSError:
+                self._ffmpeg_ok = False
+        return self._ffmpeg_ok
+
+    def _split_limits(self) -> tuple[int, float]:
+        """Chunk-size limits for :func:`_split_wav`.
+
+        With MP3 compression available, chunking is driven purely by
+        the duration limit (MP3 is ~8 KB/s, so the byte cap is
+        non-binding). Without it, the conservative WAV caps apply:
+        the configured byte cap, and the duration clamped to the
+        WAV-safe default unless the duration was set explicitly.
+        """
+        if self._compress and self._probe_ffmpeg():
+            return (1024 ** 3, self._chunk_max_seconds)
+        seconds = self._chunk_max_seconds
+        if not self._chunk_seconds_explicit:
+            seconds = min(seconds, DEFAULT_TRANSCRIBE_CHUNK_SECONDS_WAV)
+        return (self._chunk_max_bytes, seconds)
+
+    @staticmethod
+    def _chunk_audio_duration(path: Path) -> Optional[float]:
+        """Duration of a WAV chunk in seconds, or ``None`` when the
+        file is not a parseable WAV."""
+        try:
+            data = Path(path).read_bytes()
+        except OSError:
+            return None
+        info = _parse_wav(data)
+        if info is None:
+            return None
+        data_off, data_size, rate, channels, bits = info
+        frame = channels * (bits // 8)
+        if rate <= 0 or frame <= 0:
+            return None
+        return (data_size // frame) / rate
+
+    @staticmethod
+    def _is_transient_failure(exc: Exception) -> bool:
+        """Whether halving the chunk could plausibly help: upstream
+        timeouts / 5xx / oversized-body rejections and network-level
+        errors. Client errors (401, 400) are not retryable."""
+        if isinstance(exc, LLMHTTPError):
+            return exc.status in (408, 413, 500, 502, 503, 504)
+        if isinstance(exc, LLMError):
+            # Our own oversized-body guard raises a plain LLMError.
+            return True
+        # urllib.error.URLError, socket timeouts, and other
+        # network-level OSErrors.
+        return isinstance(exc, (urllib.error.URLError, OSError))
+
+    def _transcribe_chunk(
+        self,
+        chunk_path: Path,
+        offset: float,
+        work_dir: Path,
+        depth: int = 0,
+    ) -> tuple[bool, list[dict], list[str]]:
+        """Transcribe one chunk file.
+
+        Returns ``(had_segments, segments, texts)``. On a transient
+        upstream failure (timeout, 5xx, oversized body), the chunk
+        is split in half and retried recursively — large chunks that
+        would otherwise fail (e.g. against the upstream ~60 s
+        processing timeout) degrade to smaller pieces instead of
+        failing the whole recording.
+        """
+        try:
+            raw = self._post_transcription(chunk_path, work_dir)
+        except (LLMError, urllib.error.URLError, OSError) as exc:
+            duration = self._chunk_audio_duration(chunk_path)
+            if (
+                depth < 3
+                and duration is not None
+                and duration > 90
+                and self._is_transient_failure(exc)
+            ):
+                print(
+                    f"[LR ] transcribing: chunk failed ({exc}); "
+                    "splitting it in half and retrying",
+                    flush=True,
+                )
+                # Sub-chunks go into their own directory so retry
+                # generations never overwrite each other's files.
+                sub_dir = Path(work_dir) / (
+                    f"retry-{depth}-{int(offset * 1000)}"
+                )
+                sub_dir.mkdir(parents=True, exist_ok=True)
+                had_all = True
+                segs: list[dict] = []
+                texts: list[str] = []
+                for sub_path, sub_off in _split_wav(
+                    chunk_path, 1024 ** 3, duration / 2.0, sub_dir,
+                ):
+                    h, s, t = self._transcribe_chunk(
+                        sub_path, offset + sub_off, work_dir,
+                        depth=depth + 1,
+                    )
+                    had_all = had_all and h
+                    segs.extend(s)
+                    texts.extend(t)
+                return (had_all, segs, texts)
+            raise
+        segments, text = self._extract_chunk(raw, offset)
+        texts = (
+            [text] if isinstance(text, str) and text.strip() else []
+        )
+        return (segments is not None, segments or [], texts)
+
+    # The transcription model only transcribes; raise for clarity.
     def classify(self, transcript: str) -> Classification:
         raise LLMConfigError(
-            "OpenRouter is the transcription provider; use "
-            "MiniMaxProvider for classification"
+            "TranscriptionProvider only transcribes; use "
+            "TextProvider for classification"
         )
 
     def summarize(self, transcript: str) -> Summary:
-        raise LLMConfigError("summarisation lands in M9")
+        raise LLMConfigError(
+            "TranscriptionProvider only transcribes; use "
+            "TextProvider for summarisation"
+        )
 
     def extract(self, transcript: str, kind: str) -> list[dict]:
-        raise LLMConfigError("extraction lands in M9")
+        raise LLMConfigError(
+            "TranscriptionProvider only transcribes; use "
+            "TextProvider for extraction"
+        )
 
 
-# --- MiniMax M3 (classification) --------------------------------------------
+# --- Text model (OpenRouter chat completions) -------------------------------
 #
-# MiniMax exposes an OpenAI-compatible chat completions endpoint
-# at https://api.minimax.chat/v1. We POST a small system prompt
-# that constrains the response to a JSON object with ``kind`` and
+# The text model handles classification, summarisation, and
+# structured extraction through OpenRouter's OpenAI-compatible
+# chat completions endpoint. We POST a small system prompt that
+# constrains the response to a JSON object with ``kind`` and
 # ``confidence`` fields, then parse the assistant message.
 
-MINIMAX_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
-MINIMAX_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
+OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
+TEXT_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
 
 # System prompt: keeps the model on task. We give the model the
 # four valid kinds and ask for a JSON object back. The confidence
@@ -485,7 +1068,7 @@ _EXTRACT_SECTION_PROMPT = (
 
 
 def _summarise_one_chunk(
-    provider: "MiniMaxProvider",
+    provider: "TextProvider",
     chunk: str,
     *,
     section_index: int,
@@ -510,7 +1093,7 @@ def _summarise_one_chunk(
 
 
 def _synthesise_summaries(
-    provider: "MiniMaxProvider",
+    provider: "TextProvider",
     partials: list[Summary],
 ) -> Summary:
     """Run the synthesis LLM call that takes the partial
@@ -536,7 +1119,7 @@ def _synthesise_summaries(
 
 
 def _extract_one_chunk(
-    provider: "MiniMaxProvider",
+    provider: "TextProvider",
     chunk: str,
     *,
     kind: str,
@@ -789,27 +1372,30 @@ def _parse_extract_response(raw: bytes) -> list[dict]:
     return out
 
 
-class MiniMaxProvider(LLMProvider):
-    """Real classification via the MiniMax M3 chat completions API.
+class TextProvider(LLMProvider):
+    """Classification / summarisation / extraction via the
+    OpenRouter chat completions API.
 
-    The model is asked to pick one of the four recording kinds
-    from a transcript and return a JSON object with ``kind`` and
-    ``confidence``. The response is parsed defensively — see
-    :func:`_parse_classify_response`.
+    The configured text model is asked to pick one of the four
+    recording kinds from a transcript and return a JSON object
+    with ``kind`` and ``confidence``. The response is parsed
+    defensively — see :func:`_parse_classify_response`.
     """
-    name = "minimax"
+
+    # ``name`` is stored on artifacts as the generating model.
+    name = TEXT_MODEL
 
     def __init__(
         self,
         api_key: str,
         *,
-        model: str = MINIMAX_MODEL,
-        chat_url: str = MINIMAX_CHAT_URL,
+        model: str = TEXT_MODEL,
+        chat_url: str = OPENROUTER_CHAT_URL,
         http_transport: Optional[HttpTransport] = None,
     ) -> None:
         if not api_key:
             raise LLMConfigError(
-                "MiniMaxProvider requires LR_MINIMAX_API_KEY"
+                "TextProvider requires LR_TEXT_API_KEY"
             )
         self._api_key = api_key
         self._model = model
@@ -820,9 +1406,9 @@ class MiniMaxProvider(LLMProvider):
         if not isinstance(transcript, str):
             raise LLMError("transcript must be a string")
         # 12_000 chars ≈ 3k tokens — leaves room for the prompt +
-        # response in MiniMax M3's window. For classification, the
-        # topic is usually established in the first few minutes so
-        # this rarely hurts accuracy.
+        # response in the text model's window. For classification,
+        # the topic is usually established in the first few minutes
+        # so this rarely hurts accuracy.
         message = self._chat(
             _CLASSIFY_SYSTEM_PROMPT,
             f"Classify this transcript:\n\n{transcript}",
@@ -830,15 +1416,15 @@ class MiniMaxProvider(LLMProvider):
         )
         if not isinstance(message, str):
             raise LLMError(
-                f"MiniMax response message is not a string: {message!r}"
+                f"Text model response message is not a string: {message!r}"
             )
         return _parse_classify_response(message.encode("utf-8"))
 
-    # Not used in M8; raise for clarity.
+    # The text model is not a transcription model; raise for clarity.
     def transcribe(self, audio_path: Path) -> str:
         raise LLMConfigError(
-            "MiniMax is the classifier; use OpenRouterProvider for "
-            "transcription"
+            "TextProvider is not a transcription model; use "
+            "TranscriptionProvider for transcription"
         )
 
     def _chat(
@@ -876,20 +1462,20 @@ class MiniMaxProvider(LLMProvider):
         if status < 200 or status >= 300:
             raise LLMHTTPError(
                 status, raw,
-                f"MiniMax chat call failed: HTTP {status}: "
+                f"Text model chat call failed: HTTP {status}: "
                 f"{raw[:200]!r}",
             )
         try:
             payload_resp = json.loads(raw.decode("utf-8"))
         except (ValueError, UnicodeDecodeError) as exc:
             raise LLMError(
-                f"MiniMax returned non-JSON body: {raw[:200]!r}"
+                f"Text model returned non-JSON body: {raw[:200]!r}"
             ) from exc
         try:
             return payload_resp["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
             raise LLMError(
-                f"MiniMax response missing choices[0].message.content: "
+                f"Text model response missing choices[0].message.content: "
                 f"{raw[:200]!r}"
             ) from exc
 
@@ -914,7 +1500,8 @@ class MiniMaxProvider(LLMProvider):
             )
             if not isinstance(message, str):
                 raise LLMError(
-                    f"MiniMax response message is not a string: {message!r}"
+                    f"Text model response message is not a string: "
+                    f"{message!r}"
                 )
             return _parse_summarise_response(message.encode("utf-8"))
         # Long path: map-reduce.
@@ -960,7 +1547,8 @@ class MiniMaxProvider(LLMProvider):
             )
             if not isinstance(message, str):
                 raise LLMError(
-                    f"MiniMax response message is not a string: {message!r}"
+                    f"Text model response message is not a string: "
+                    f"{message!r}"
                 )
             return _parse_extract_response(message.encode("utf-8"))
         # Long path: per-chunk extraction, then dedupe.
@@ -980,44 +1568,61 @@ class MiniMaxProvider(LLMProvider):
 
 def default_providers(
     *,
-    openrouter_key: Optional[str] = None,
-    minimax_key: Optional[str] = None,
+    transcription_key: Optional[str] = None,
+    text_key: Optional[str] = None,
     http_transport: Optional[HttpTransport] = None,
 ) -> dict[str, LLMProvider]:
     """Return the provider registry based on supplied keys.
 
-    Pulls the keys from env vars (``LR_OPENROUTER_API_KEY``,
-    ``LR_MINIMAX_API_KEY``) when the explicit ``openrouter_key`` /
-    ``minimax_key`` arguments are not supplied. Absent keys yield
-    a no-op provider rather than an error — this keeps the test
-    suite (and any local install without keys) working.
+    Pulls the keys from env vars when the explicit arguments are
+    not supplied:
 
-    Pass ``http_transport`` to inject a fake for tests.
+    * transcription key: ``LR_TRANSCRIPTION_API_KEY`` (fallback:
+      legacy ``LR_OPENROUTER_API_KEY``)
+    * text key: ``LR_TEXT_API_KEY`` (fallbacks: legacy
+      ``LR_MINIMAX_API_KEY``, then ``LR_OPENROUTER_API_KEY``)
+
+    Absent keys yield a no-op provider rather than an error — this
+    keeps the test suite (and any local install without keys)
+    working. Pass ``http_transport`` to inject a fake for tests.
+
+    Registry keys: ``"transcript"`` (TranscriptionProvider) and
+    ``"text"`` (TextProvider — used for classify/summarise/extract).
     """
-    or_key = (
-        openrouter_key
-        if openrouter_key is not None
-        else os.environ.get("LR_OPENROUTER_API_KEY", "")
+    t_key = (
+        transcription_key
+        if transcription_key is not None
+        else (
+            os.environ.get("LR_TRANSCRIPTION_API_KEY", "")
+            or os.environ.get("LR_OPENROUTER_API_KEY", "")
+        )
     )
-    mm_key = (
-        minimax_key
-        if minimax_key is not None
-        else os.environ.get("LR_MINIMAX_API_KEY", "")
+    txt_key = (
+        text_key
+        if text_key is not None
+        else (
+            os.environ.get("LR_TEXT_API_KEY", "")
+            or os.environ.get("LR_MINIMAX_API_KEY", "")
+            or os.environ.get("LR_OPENROUTER_API_KEY", "")
+        )
     )
     return {
         "transcript": (
-            OpenRouterProvider(
-                or_key, http_transport=http_transport,
-            )
-            if or_key
+            TranscriptionProvider(t_key, http_transport=http_transport)
+            if t_key
             else _NoOpProvider()
         ),
-        "classifier": (
-            MiniMaxProvider(mm_key, http_transport=http_transport)
-            if mm_key
+        "text": (
+            TextProvider(txt_key, http_transport=http_transport)
+            if txt_key
             else _NoOpProvider()
         ),
     }
+
+
+# Backward-compatible aliases for the pre-rename class names.
+OpenRouterProvider = TranscriptionProvider
+MiniMaxProvider = TextProvider
 
 
 def get_provider(name: str = "transcript") -> LLMProvider:

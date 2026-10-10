@@ -6,11 +6,11 @@ post-finish pipeline, which runs the LLM steps in order:
 
   1. ``OpenRouterProvider.transcribe(full.wav)``  → transcript text
   2. Persist the transcript as an ``artifacts`` row (kind='transcript')
-  3. ``MiniMaxProvider.classify(transcript)``     → (kind, confidence)
+  3. ``TextProvider.classify(transcript)``        → (kind, confidence)
   4. ``Storage.set_kind(...)``                    → session.kind
-  5. ``MiniMaxProvider.summarize(transcript)``    → Summary
+  5. ``TextProvider.summarize(transcript)``       → Summary
   6. Persist the summary as an ``artifacts`` row (kind='summary')
-  7. ``MiniMaxProvider.extract(transcript, kind)`` → list of items
+  7. ``TextProvider.extract(transcript, kind)``   → list of items
   8. Persist the extraction as an ``artifacts`` row (kind='extraction')
 
 Each step updates ``sessions.status`` so the UI can show progress:
@@ -136,11 +136,11 @@ def run_post_finish_pipeline(
     them from env vars — real providers when keys are set, no-op
     otherwise.
 
-    The ``llm_provider`` is the MiniMax (or no-op) provider used for
-    summarisation and extraction. It defaults to the same
-    ``classifier`` provider, since both call the same model. Tests
-    that want to exercise just the classification or just the
-    summary path can pass a different one for each.
+    The ``llm_provider`` is the text-model (or no-op) provider
+    used for summarisation and extraction. It defaults to the
+    same ``classifier`` provider, since both call the same model.
+    Tests that want to exercise just the classification or just
+    the summary path can pass a different one for each.
 
     The pipeline walks these states:
 
@@ -185,10 +185,10 @@ def run_post_finish_pipeline(
         if transcript_provider is None:
             transcript_provider = providers.get("transcript")
         if classifier is None:
-            classifier = providers.get("classifier")
+            classifier = providers.get("text")
         if llm_provider is None:
             # Default to the same provider as the classifier:
-            # both hit MiniMax M3 chat completions.
+            # both hit the text model's chat completions.
             llm_provider = classifier
 
     full_path = ctx["full_path"]

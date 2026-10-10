@@ -30,12 +30,16 @@ class LRTestCase(unittest.TestCase):
             data_dir=self._tmpdir,
             host="127.0.0.1",
             port=0,
-            openrouter_api_key="",
-            minimax_api_key="",
+            transcription_api_key="",
+            text_api_key="",
             ffmpeg_path="ffmpeg-nonexistent-test-binary",
             max_upload_bytes=10 * 1024 * 1024,
         )
         self.app = create_app(self._cfg)
+        # Run upload pipelines synchronously in tests so assertions
+        # on the post-upload status are deterministic. (Production
+        # runs them in a background thread.)
+        self.app.config["LR_PIPELINE_BACKGROUND"] = False
         self.client = self.app.test_client()
 
     def tearDown(self) -> None:

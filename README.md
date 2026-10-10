@@ -171,7 +171,7 @@ Server/
 ├── search.py              # FTS5 search (Phase A: stub)
 ├── services/
 │   ├── __init__.py
-│   ├── llm.py             # OpenRouter + MiniMax provider stubs
+│   ├── llm.py             # Transcription + text-model providers (OpenRouter)
 │   ├── processing.py      # post-finish pipeline orchestrator stub
 │   └── transcode.py       # ffmpeg wrapper, format sniff
 ├── templates/

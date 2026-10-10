@@ -3,8 +3,10 @@
 // UX: user picks a kind from the dropdown next to each recording,
 // then clicks Save. No auto-submit on dropdown change — that's the
 // explicit-confirm requirement. The "Classify all with AI" button
-// is a placeholder that shows a toast explaining the LLM path is not
-// wired yet (it lands in a later milestone).
+// calls POST /api/v1/classifications/bulk: the server runs the
+// text model on each session's transcript and persists the kind.
+// Rows that get classified animate away; anything the model could
+// not classify stays for a manual pick.
 (function () {
   var list = document.querySelector(".lr-sort__list");
   var toast = document.getElementById("lr-sort-toast");
@@ -77,12 +79,68 @@
     });
   }
 
-  // Click "Classify all with AI" -> toast-only placeholder.
+  // Click "Classify all with AI" -> bulk-classify every row via the
+  // text model. Rows with a successful classification animate away;
+  // failures stay in the list for a manual pick.
   function onBulkClick() {
-    showToast(
-      "AI classification lands in a later milestone. "
-      + "Pick a kind manually for now."
-    );
+    var rows = list
+      ? Array.prototype.slice.call(list.querySelectorAll(".lr-sort__row"))
+      : [];
+    if (!rows.length) {
+      showToast("Nothing to classify.");
+      return;
+    }
+    var ids = rows
+      .map(function (row) { return row.getAttribute("data-session-id"); })
+      .filter(Boolean);
+    if (!ids.length) {
+      showToast("Nothing to classify.");
+      return;
+    }
+    bulkBtn.disabled = true;
+    showToast("Asking the AI to classify " + ids.length + " recording(s)\u2026");
+    fetch("/api/v1/classifications/bulk", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({session_ids: ids}),
+    }).then(function (r) {
+      return r.json().then(function (j) { return {ok: r.ok, j: j}; });
+    }).then(function (res) {
+      bulkBtn.disabled = false;
+      if (!res.ok || !res.j || !res.j.results) {
+        showToast("Bulk classification failed (" + (res.ok ? 200 : res.status)
+          + "). Try again.");
+        return;
+      }
+      var classified = 0;
+      rows.forEach(function (row) {
+        var sid = row.getAttribute("data-session-id");
+        var result = sid ? res.j.results[sid] : null;
+        if (result && result.kind) {
+          classified++;
+          row.classList.add("is-leaving");
+          setTimeout(function () {
+            if (row.parentNode) row.parentNode.removeChild(row);
+            if (list && list.children.length === 0) {
+              window.location.reload();
+            }
+          }, 220);
+        }
+      });
+      if (classified === ids.length) {
+        showToast("Classified all " + classified + " recording(s) with AI.");
+      } else if (classified > 0) {
+        showToast("Classified " + classified + " of " + ids.length
+          + ". The rest need a transcript first \u2014 pick manually or retry later.");
+      } else {
+        showToast("The AI could not classify these recordings yet \u2014 "
+          + "transcripts may be missing. Pick a kind manually for now.");
+      }
+    }).catch(function () {
+      bulkBtn.disabled = false;
+      showToast("Network error \u2014 please retry.");
+    });
   }
 
   // Wire up.

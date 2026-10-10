@@ -48,6 +48,10 @@
         <a class="lr-btn"
            href="{{ url_for('api_get_audio', session_id=session.id) }}"
            download="{{ (session.title or session.id) ~ '.wav' }}">Download</a>
+        <button class="lr-btn" id="lr-rerun-ai" type="button"
+                data-session-id="{{ session.id }}">
+          Re-run AI processing
+        </button>
       </div>
       <p class="lr-mono" style="margin-top: var(--lr-s-3);">
         Audio is streamed from
@@ -70,8 +74,13 @@
       <p>{{ session.status_detail or 'No further detail.' }}</p>
       <p>
         The device can re-send any missing chunks and call finish again; a successful
-        finish resets this session to ready.
+        finish resets this session to ready. You can also retry the AI pipeline
+        (transcription, classification, summary, extraction) directly:
       </p>
+      <button class="lr-btn" id="lr-rerun-ai" type="button"
+              data-session-id="{{ session.id }}">
+        Re-run AI processing
+      </button>
     </section>
   {% endif %}
 </div>
@@ -99,6 +108,74 @@
     } else {
       audio.addEventListener("loadedmetadata", seek, { once: true });
     }
+  })();
+</script>
+
+<script>
+  // Re-run AI processing: POST /api/v1/sessions/<id>/transcribe and
+  // reload on success. The pipeline runs synchronously and can take
+  // a while for long recordings, so the button shows progress text.
+  (function () {
+    var btn = document.getElementById("lr-rerun-ai");
+    if (!btn) return;
+    btn.addEventListener("click", function () {
+      btn.disabled = true;
+      btn.textContent =
+        "Running AI pipeline\u2026 (transcribe, classify, summarise, extract)";
+      fetch(
+        "/api/v1/sessions/" + encodeURIComponent(btn.dataset.sessionId)
+        + "/transcribe",
+        { method: "POST", credentials: "same-origin" }
+      ).then(function (r) {
+        return r.json().then(function (j) { return { ok: r.ok, j: j }; });
+      }).then(function (res) {
+        if (res.ok && res.j && res.j.ok) {
+          window.location.reload();
+          return;
+        }
+        btn.disabled = false;
+        btn.textContent = "Re-run AI processing";
+        var detail = (res.j && (res.j.detail || res.j.reason))
+          || ("HTTP " + (res.ok ? 200 : "error"));
+        window.alert("AI pipeline failed: " + detail);
+      }).catch(function () {
+        btn.disabled = false;
+        btn.textContent = "Re-run AI processing";
+        window.alert("Network error \u2014 please retry.");
+      });
+    });
+  })();
+</script>
+
+<script>
+  // Live status polling: while the session is mid-AI-pipeline,
+  // poll the session API every 3 s and reload the page as soon as
+  // it reaches a terminal state (done/failed). Keeps the UI in
+  // sync with the background upload pipeline without manual
+  // refreshing; on 'failed' the page renders the error plus the
+  // "Re-run AI processing" button.
+  (function () {
+    var INTERMEDIATE = [
+      "transcribing", "transcribed", "classifying",
+      "summarising", "extracting",
+    ];
+    if (INTERMEDIATE.indexOf("{{ session.status }}") === -1) return;
+    var sessionId = "{{ session.id }}";
+    var timer = setInterval(function () {
+      fetch(
+        "/api/v1/sessions/" + encodeURIComponent(sessionId),
+        { credentials: "same-origin" }
+      ).then(function (r) {
+        return r.ok ? r.json() : null;
+      }).then(function (j) {
+        if (!j || !j.session) return;
+        var st = j.session.status;
+        if (st === "done" || st === "failed") {
+          clearInterval(timer);
+          window.location.reload();
+        }
+      }).catch(function () { /* transient errors: keep polling */ });
+    }, 3000);
   })();
 </script>
 {% endblock %}

@@ -16,10 +16,6 @@ from pathlib import Path
 from tests.conftest import LRTestCase
 
 
-def _has_ffmpeg() -> bool:
-    return shutil.which("ffmpeg") is not None or os.path.isfile("ffmpeg")
-
-
 def _make_wav_bytes(payload: bytes = b"\x00\x00\x00\x00" * 200,
                     sample_rate: int = 22050,
                     channels: int = 1,
@@ -60,9 +56,14 @@ class UploadPageTests(LRTestCase):
         self.assertIn(b"id=\"dropzone\"", body)
 
     def test_upload_page_mentions_ffmpeg_status(self) -> None:
+        # Check against the ffmpeg binary the app is actually
+        # configured with (conftest points at a dummy path), not
+        # the host PATH.
+        from services import transcode
+        cfg = self.app.config["LR_CONFIG"]
         r = self.client.get("/upload")
         body = r.get_data()
-        if _has_ffmpeg():
+        if transcode.ffmpeg_available(cfg.ffmpeg_path):
             self.assertNotIn(b"ffmpeg is not installed", body)
         else:
             self.assertIn(b"ffmpeg is not installed", body)
@@ -81,7 +82,40 @@ class CanonicalWavUploadTests(LRTestCase):
         self.assertEqual(r.status_code, 201, r.get_data(as_text=True))
         body = r.get_json()
         self.assertTrue(body["created"])
+        # The upload route now runs the AI pipeline; with no API
+        # keys configured the no-op providers complete it, so the
+        # session ends at 'done' (not 'ready').
+        self.assertEqual(body["session"]["status"], "done")
+
+    def test_upload_runs_pipeline_in_background_when_enabled(self):
+        """Production mode: the upload returns immediately with the
+        pre-pipeline status while the pipeline runs in a background
+        thread, then the session reaches 'done'."""
+        import time
+        self.app.config["LR_PIPELINE_BACKGROUND"] = True
+        wav = _make_wav_bytes()
+        r = self.client.post(
+            "/api/v1/uploads/audio",
+            data={"file": (_io_bytes(wav), "lecture.wav")},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(r.status_code, 201, r.get_data(as_text=True))
+        body = r.get_json()
+        # The response is built before the background pipeline has
+        # made any status transitions, so it's still 'ready'.
         self.assertEqual(body["session"]["status"], "ready")
+        # Wait for the background pipeline to finish (no-op
+        # providers complete quickly without API keys).
+        store = self.app.config["LR_STORAGE"]
+        sid = body["session"]["id"]
+        deadline = time.time() + 10
+        status = None
+        while time.time() < deadline:
+            status = store.get_session(sid).status
+            if status in ("done", "failed"):
+                break
+            time.sleep(0.05)
+        self.assertEqual(status, "done")
         self.assertIsNotNone(body["redirect_url"])
         audio = self.client.get(body["session"]["full_audio_url"])
         self.assertEqual(audio.status_code, 200)
@@ -172,27 +206,40 @@ class NonCanonicalUploadTests(LRTestCase):
         self.assertEqual(r.status_code, 503)
         self.assertEqual(r.get_json()["error"], "ffmpeg_missing")
 
-    @unittest.skipUnless(_has_ffmpeg(), "ffmpeg not installed on this host")
     def test_non_wav_with_ffmpeg_succeeds(self) -> None:
         import subprocess
-        src = self._tmpdir / "src.wav"
-        src.write_bytes(_make_wav_bytes(b"\x00\x00\x00\x00" * 500))
-        mp3 = self._tmpdir / "src.mp3"
-        subprocess.run(
-            ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-             "-i", str(src), "-c:a", "libmp3lame", "-b:a", "64k", str(mp3)],
-            check=True,
-        )
-        mp3_bytes = mp3.read_bytes()
-        self.assertGreater(len(mp3_bytes), 0)
+        from dataclasses import replace
+        real_ffmpeg = shutil.which("ffmpeg")
+        if not real_ffmpeg:
+            self.skipTest("ffmpeg not installed on this host")
+        # Point the app at the real ffmpeg binary for this test —
+        # conftest deliberately configures a dummy path so the 503
+        # flow can be tested without ffmpeg.
+        cfg = self.app.config["LR_CONFIG"]
+        self.app.config["LR_CONFIG"] = replace(cfg, ffmpeg_path=real_ffmpeg)
+        try:
+            src = self._tmpdir / "src.wav"
+            src.write_bytes(_make_wav_bytes(b"\x00\x00\x00\x00" * 500))
+            mp3 = self._tmpdir / "src.mp3"
+            subprocess.run(
+                ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                 "-i", str(src), "-c:a", "libmp3lame", "-b:a", "64k",
+                 str(mp3)],
+                check=True,
+            )
+            mp3_bytes = mp3.read_bytes()
+            self.assertGreater(len(mp3_bytes), 0)
 
-        r = self.client.post(
-            "/api/v1/uploads/audio",
-            data={"file": (_io_bytes(mp3_bytes), "lecture.mp3")},
-            content_type="multipart/form-data",
-        )
-        self.assertEqual(r.status_code, 201, r.get_data(as_text=True))
-        self.assertEqual(r.get_json()["session"]["status"], "ready")
+            r = self.client.post(
+                "/api/v1/uploads/audio",
+                data={"file": (_io_bytes(mp3_bytes), "lecture.mp3")},
+                content_type="multipart/form-data",
+            )
+            self.assertEqual(r.status_code, 201, r.get_data(as_text=True))
+            # Pipeline ran (no-op without keys) → session is 'done'.
+            self.assertEqual(r.get_json()["session"]["status"], "done")
+        finally:
+            self.app.config["LR_CONFIG"] = cfg
 
 
 class TranscodeUnitTests(unittest.TestCase):

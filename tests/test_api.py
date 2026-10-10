@@ -214,7 +214,7 @@ class TranscribeRouteTests(LRTestCase):
 
         self.app.config["LR_LLM_PROVIDERS"] = {
             "transcript": StubT(),
-            "classifier": StubC(),
+            "text": StubC(),
         }
 
     def _make_ready_session(self, sid="trnsc0000001"):
@@ -267,6 +267,43 @@ class TranscribeRouteTests(LRTestCase):
         self.assertFalse(body["ok"])
         self.assertEqual(body["reason"], "not_ready")
 
+    def test_transcribe_recovers_stranded_status(self):
+        """Regression: a session stranded in an intermediate status
+        (e.g. the server was restarted mid-pipeline while it was
+        'transcribing') is reset to 'ready' and re-run to 'done'
+        by the retry endpoint. Previously this returned 409
+        forever."""
+        self._stub_providers(kind="lecture", conf=0.9)
+        import storage
+        sid = self._make_ready_session("stranded0001")
+        store = self.app.config["LR_STORAGE"]
+        # Force the stuck state (ready -> transcribing is a legal
+        # transition, exactly where a killed server would leave it).
+        store.set_status(sid, storage.STATUS_TRANSCRIBING)
+        r = self.client.post(f"/api/v1/sessions/{sid}/transcribe")
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+        body = r.get_json()
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["session"]["status"], "done")
+        self.assertEqual(body["session"]["kind"], "lecture")
+
+    def test_transcribe_409_when_pipeline_already_running(self):
+        """The in-process guard refuses a second pipeline for the
+        same session (e.g. a manual retry racing a background
+        upload run)."""
+        import app as app_mod
+        self._stub_providers()
+        sid = self._make_ready_session("stranded0002")
+        with app_mod._PIPELINE_LOCK:
+            app_mod._PIPELINES_IN_FLIGHT.add(sid)
+        try:
+            r = self.client.post(f"/api/v1/sessions/{sid}/transcribe")
+            self.assertEqual(r.status_code, 409)
+            self.assertEqual(r.get_json()["reason"], "pipeline_running")
+        finally:
+            with app_mod._PIPELINE_LOCK:
+                app_mod._PIPELINES_IN_FLIGHT.discard(sid)
+
     def test_transcribe_retries_from_failed(self):
         """A session that previously failed can be re-run by
         POSTing /transcribe."""
@@ -292,7 +329,7 @@ class TranscribeRouteTests(LRTestCase):
                 raise LLMError("first run fails")
 
         self.app.config["LR_LLM_PROVIDERS"] = {
-            "transcript": Bad(), "classifier": Bad(),
+            "transcript": Bad(), "text": Bad(),
         }
         sid = self._make_ready_session("trnsc0000003")
         r1 = self.client.post(f"/api/v1/sessions/{sid}/transcribe")
@@ -324,7 +361,7 @@ class TranscribeRouteTests(LRTestCase):
                 return []
 
         self.app.config["LR_LLM_PROVIDERS"] = {
-            "transcript": Good(), "classifier": Good(),
+            "transcript": Good(), "text": Good(),
         }
         r2 = self.client.post(f"/api/v1/sessions/{sid}/transcribe")
         self.assertEqual(r2.status_code, 200)
@@ -359,7 +396,7 @@ class TranscribeRouteTests(LRTestCase):
                 raise RuntimeError("not used")
 
         self.app.config["LR_LLM_PROVIDERS"] = {
-            "transcript": T(), "classifier": C(),
+            "transcript": T(), "text": C(),
         }
         sid = self._make_ready_session("trnsc0000004")
         r = self.client.post(f"/api/v1/sessions/{sid}/transcribe")

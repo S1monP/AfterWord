@@ -9,16 +9,16 @@ Two paths:
 
 * **LLM-driven classification** via
   :meth:`ClassificationService.classify_session` — calls the
-  MiniMax M3 endpoint with the session's transcript (once
-  transcripts exist) and parses the result into one of
-  ``{lecture, voice_memo, meeting, other}``.
+  configured text model (via OpenRouter) with the session's
+  transcript (once transcripts exist) and parses the result into
+  one of ``{lecture, voice_memo, meeting, other}``.
 
-  In Milestone 6 this method is a **stub** that always returns
-  ``None``. The real implementation lands in Milestone 8 alongside
+  In Milestone 6 this method was a **stub** that always returned
+  ``None``. The real implementation landed in Milestone 8 alongside
   the transcription pipeline: the LLM call needs a transcript,
-  which doesn't exist yet. The contract is stable, so the API
-  routes and the ``/unsorted`` UI can ship now and just light up
-  the LLM button automatically when the backend is ready.
+  which didn't exist yet. The contract is stable, so the API
+  routes and the ``/unsorted`` UI shipped first and the LLM button
+  lights up automatically now that the backend is ready.
 
 The service is constructed with a :class:`storage.Storage` instance
 so it can be tested without a Flask app. Routes get the service via
@@ -91,7 +91,7 @@ class ClassificationService:
         session and asks the LLM to pick one of the four
         :data:`VALID_KINDS`. The classifier is injectable for
         tests; when omitted, the env-var-driven provider factory
-        is used (real ``MiniMaxProvider`` when an API key is set,
+        is used (real ``TextProvider`` when an API key is set,
         no-op otherwise).
 
         Returns ``(kind, confidence)`` on success, or ``None`` if
@@ -123,7 +123,7 @@ class ClassificationService:
         # a circular import with ``services.llm``.
         if classifier is None:
             from services.llm import default_providers
-            classifier = default_providers().get("classifier")
+            classifier = default_providers().get("text")
         try:
             result = classifier.classify(transcript)
         except Exception:

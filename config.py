@@ -1,18 +1,63 @@
-"""Configuration loaded from environment variables.
+"""Configuration loaded from environment variables (and a `.env`
+file if present).
 
 Keep this module dependency-free so it can be imported anywhere (including
 tests) without risk of import side effects.
 """
 from __future__ import annotations
 
+import codecs
 import os
 from dataclasses import dataclass
 from pathlib import Path
 
 
-def _env(key: str, default: str) -> str:
-    value = os.environ.get(key)
-    return value if value is not None and value != "" else default
+def _load_dotenv(path: Path) -> None:
+    """Load ``KEY=VALUE`` pairs from ``path`` into ``os.environ``.
+
+    Stdlib-only replacement for ``python-dotenv``. Existing
+    environment variables always win (no override). Blank lines,
+    comments (``#``), and lines without ``=`` are skipped; values
+    may be wrapped in single or double quotes.
+
+    Encoding is handled defensively because ``.env`` files are
+    hand-edited in whatever the editor defaults to: a UTF-16
+    (Notepad "Unicode") save is detected via its BOM and decoded
+    correctly, a UTF-8 BOM is stripped, and undecodable bytes are
+    replaced rather than crashing startup.
+    """
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return
+    if data.startswith(codecs.BOM_UTF16_LE) or data.startswith(
+        codecs.BOM_UTF16_BE,
+    ):
+        raw = data.decode("utf-16")
+    else:
+        # utf-8-sig strips a leading UTF-8 BOM if present.
+        raw = data.decode("utf-8-sig", errors="replace")
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        if not key or key in os.environ:
+            continue
+        os.environ[key] = value
+
+
+def _env(key: str, *fallback_keys: str, default: str = "") -> str:
+    """First non-empty value among ``key`` and ``fallback_keys``."""
+    for k in (key, *fallback_keys):
+        value = os.environ.get(k)
+        if value is not None and value != "":
+            return value
+    return default
 
 
 def _env_int(key: str, default: int) -> int:
@@ -34,8 +79,8 @@ class Config:
     data_dir: Path
     host: str
     port: int
-    openrouter_api_key: str
-    minimax_api_key: str
+    transcription_api_key: str
+    text_api_key: str
     ffmpeg_path: str
     max_upload_bytes: int
 
@@ -55,13 +100,27 @@ class Config:
 
 
 def load() -> Config:
-    """Build a Config from the current process environment."""
+    """Build a Config from the current process environment.
+
+    A ``.env`` file is loaded first (CWD, then the directory
+    containing this module) without overriding real env vars.
+    """
+    here = Path(__file__).resolve().parent
+    for candidate in (Path.cwd() / ".env", here / ".env"):
+        _load_dotenv(candidate)
     return Config(
-        data_dir=Path(_env("LR_DATA_DIR", "./data")).resolve(),
-        host=_env("LR_HOST", "0.0.0.0"),
+        data_dir=Path(_env("LR_DATA_DIR", default="./data")).resolve(),
+        host=_env("LR_HOST", default="0.0.0.0"),
         port=_env_int("LR_PORT", 8000),
-        openrouter_api_key=_env("LR_OPENROUTER_API_KEY", ""),
-        minimax_api_key=_env("LR_MINIMAX_API_KEY", ""),
-        ffmpeg_path=_env("LR_FFMPEG_PATH", "ffmpeg"),
+        # Both providers go through OpenRouter; the same key works
+        # for both. Legacy var names are accepted as fallbacks.
+        transcription_api_key=_env(
+            "LR_TRANSCRIPTION_API_KEY", "LR_OPENROUTER_API_KEY",
+        ),
+        text_api_key=_env(
+            "LR_TEXT_API_KEY", "LR_MINIMAX_API_KEY",
+            "LR_OPENROUTER_API_KEY",
+        ),
+        ffmpeg_path=_env("LR_FFMPEG_PATH", default="ffmpeg"),
         max_upload_bytes=_env_int("LR_MAX_UPLOAD_BYTES", 500 * 1024 * 1024),
     )
