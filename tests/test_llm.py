@@ -26,6 +26,27 @@ from services.llm import (
     _build_multipart_body,
     _parse_classify_response,
 )
+from tests.conftest import skip_without_ffmpeg
+
+# Real ffmpeg when the host has one — the AAC segmenter/halving
+# tests shell out to it.
+import shutil as _shutil
+FFMPEG_PATH = _shutil.which("ffmpeg") or "ffmpeg-nonexistent-test-binary"
+
+
+def _write_aac(path_dir, seconds: float = 5.0, rate: int = 8000):
+    """Build a real ADTS AAC file from a generated WAV (needs ffmpeg;
+    skip the calling test when it isn't available)."""
+    from pathlib import Path as _P
+    from services import transcode as tx
+    data = b"\x00\x01" * int(seconds * rate)
+    wav = _write_real_wav(
+        _P(path_dir), name="gen.wav", rate=rate, channels=1, bits=16,
+        data=data,
+    )
+    aac = _P(path_dir) / "gen.aac"
+    tx.transcode_to_aac(wav, aac, ffmpeg_path=FFMPEG_PATH)
+    return aac
 
 
 # --- Test transport ---------------------------------------------------------
@@ -104,21 +125,6 @@ class MultipartBuilderTests(unittest.TestCase):
 
 
 class TranscriptionProviderTests(unittest.TestCase):
-    # Chunk compression shells out to ffmpeg, which is slow and
-    # host-dependent; pin it off for these tests. The compression
-    # behaviour itself is covered by dedicated tests below.
-    @classmethod
-    def setUpClass(cls):
-        cls._old_compress = os.environ.get("LR_TRANSCRIBE_COMPRESS")
-        os.environ["LR_TRANSCRIBE_COMPRESS"] = "0"
-
-    @classmethod
-    def tearDownClass(cls):
-        if cls._old_compress is None:
-            os.environ.pop("LR_TRANSCRIBE_COMPRESS", None)
-        else:
-            os.environ["LR_TRANSCRIBE_COMPRESS"] = cls._old_compress
-
     def test_init_requires_key(self):
         with self.assertRaises(LLMConfigError):
             TranscriptionProvider("")
@@ -206,80 +212,102 @@ class TranscriptionProviderTests(unittest.TestCase):
                 os.environ[env_name] = old
         self.assertNotIn(b'"provider"', capture["data"])
 
-    def test_transcribe_compress_disabled_sends_wav(self):
+    def test_transcribe_sends_aac_format(self):
         capture = {}
-        env_name = "LR_TRANSCRIBE_COMPRESS"
-        old = os.environ.get(env_name)
-        os.environ[env_name] = "0"
-        try:
-            p = TranscriptionProvider(
-                "k", http_transport=_fake(200, b'{"text": "x"}', capture),
-            )
-            import tempfile
-            from pathlib import Path
-            with tempfile.TemporaryDirectory() as d:
-                p.transcribe(_write_wav(Path(d)))
-        finally:
-            if old is None:
-                os.environ.pop(env_name, None)
-            else:
-                os.environ[env_name] = old
-        self.assertIn(b'"format": "wav"', capture["data"])
-
-    def test_transcribe_compress_falls_back_without_ffmpeg(self):
-        """Compress on + ffmpeg unavailable -> falls back to the
-        raw WAV chunk instead of failing."""
-        capture = {}
-        envs = ("LR_TRANSCRIBE_COMPRESS", "LR_FFMPEG_PATH")
-        old = {e: os.environ.get(e) for e in envs}
-        os.environ["LR_TRANSCRIBE_COMPRESS"] = "1"
-        os.environ["LR_FFMPEG_PATH"] = "ffmpeg-nonexistent-test-binary"
-        try:
-            p = TranscriptionProvider(
-                "k", http_transport=_fake(200, b'{"text": "x"}', capture),
-            )
-            import tempfile
-            from pathlib import Path
-            with tempfile.TemporaryDirectory() as d:
-                p.transcribe(_write_wav(Path(d)))
-        finally:
-            for e, v in old.items():
-                if v is None:
-                    os.environ.pop(e, None)
-                else:
-                    os.environ[e] = v
-        self.assertIn(b'"format": "wav"', capture["data"])
-
-    def test_split_plan_seconds_driven_with_mp3(self):
-        """With compression + ffmpeg available, the byte cap is
-        non-binding and the duration limit drives chunking."""
         p = TranscriptionProvider(
-            "k", compress=True,
-            ffmpeg_path="ffmpeg-nonexistent-test-binary",
+            "k", http_transport=_fake(200, b'{"text": "x"}', capture),
         )
-        # White-box: pretend the ffmpeg probe succeeded.
-        p._ffmpeg_ok = True
-        max_bytes, max_seconds = p._split_limits()
-        self.assertEqual(max_bytes, 1024 ** 3)
-        self.assertEqual(max_seconds, 1500)
-
-    def test_split_plan_wav_caps_without_mp3(self):
-        """Without compression, the conservative WAV caps apply and
-        a non-explicit duration is clamped to the WAV-safe default."""
-        p = TranscriptionProvider(
-            "k", compress=False,
-            ffmpeg_path="ffmpeg-nonexistent-test-binary",
-        )
-        max_bytes, max_seconds = p._split_limits()
-        self.assertEqual(max_bytes, 15 * 1024 * 1024)
-        self.assertEqual(max_seconds, 300)
-
-    def test_transcribe_halves_chunk_on_transient_failure(self):
-        """A chunk that fails with a transient upstream error is
-        split in half and retried; the merged transcript keeps
-        continuous timestamps."""
         import tempfile
         from pathlib import Path
+        with tempfile.TemporaryDirectory() as d:
+            audio = _write_aac(d, seconds=0.5)
+            p.transcribe(audio)
+        self.assertIn(b'"format": "aac"', capture["data"])
+
+    def test_transcribe_unsniffable_audio_defaults_to_aac(self):
+        capture = {}
+        p = TranscriptionProvider(
+            "k", http_transport=_fake(200, b'{"text": "x"}', capture),
+        )
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as d:
+            audio = _write_wav(Path(d))  # 8 junk bytes
+            p.transcribe(audio)
+        self.assertIn(b'"format": "aac"', capture["data"])
+
+    @skip_without_ffmpeg
+    def test_segment_audio_short_stays_whole(self):
+        import tempfile
+        from pathlib import Path
+        p = TranscriptionProvider("k", chunk_max_seconds=1500)
+        with tempfile.TemporaryDirectory() as d:
+            audio = _write_aac(d, seconds=1.0)
+            pieces = p._segment_audio(audio, Path(d))
+        self.assertEqual(pieces, [(audio, 0.0)])
+
+    @skip_without_ffmpeg
+    def test_segment_audio_long_recording(self):
+        """A recording longer than the piece limit is segmented with
+        stream copy into consecutive pieces with cumulative offsets."""
+        import tempfile
+        from pathlib import Path
+        p = TranscriptionProvider(
+            "k", chunk_max_seconds=2, ffmpeg_path=FFMPEG_PATH,
+        )
+        with tempfile.TemporaryDirectory() as d:
+            audio = _write_aac(d, seconds=5.0)
+            pieces = p._segment_audio(audio, Path(d))
+            self.assertEqual(len(pieces), 3)
+            offsets = [off for _, off in pieces]
+            # Cumulative offsets land at 0 / ~2 / ~4.
+            self.assertAlmostEqual(offsets[0], 0.0, places=0)
+            self.assertAlmostEqual(offsets[1], 2.0, delta=0.5)
+            self.assertAlmostEqual(offsets[2], 4.0, delta=0.6)
+            # Pieces are real AAC.
+            from services import transcode as tx
+            for piece, _ in pieces:
+                self.assertEqual(tx.sniff_format(piece).kind, "aac")
+
+    @skip_without_ffmpeg
+    def test_transcribe_chunks_long_recording(self):
+        calls = []
+
+        def transport(url, *, data=None, headers=None, timeout=60.0):
+            calls.append(json.loads(data.decode("utf-8")))
+            n = len(calls)
+            body = json.dumps({
+                "text": f"part {n}",
+                "segments": [
+                    {"start": 0.0, "end": 1.0, "text": f"part {n}",
+                     "speaker": 0},
+                ],
+            }).encode("utf-8")
+            return (200, body)
+
+        # 5 s of AAC, segmented at 2 s -> 3 pieces with continuous
+        # timestamps after the offsets are applied.
+        p = TranscriptionProvider(
+            "k", chunk_max_seconds=2, ffmpeg_path=FFMPEG_PATH,
+            http_transport=transport,
+        )
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as d:
+            text = p.transcribe(_write_aac(d, seconds=5.0))
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(
+            text,
+            "[00:00] Speaker 1: part 1\n"
+            "[00:02] Speaker 1: part 2\n"
+            "[00:04] Speaker 1: part 3",
+        )
+
+    @skip_without_ffmpeg
+    def test_transcribe_halves_piece_on_transient_failure(self):
+        """A piece that fails with a transient upstream error is cut
+        in half and retried; the merged transcript keeps continuous
+        timestamps."""
         calls = []
 
         def transport(url, *, data=None, headers=None, timeout=60.0):
@@ -296,21 +324,26 @@ class TranscriptionProviderTests(unittest.TestCase):
             }).encode("utf-8")
             return (200, body)
 
-        # 100 s of audio sent as a single 100 s chunk.
+        # ~50 s of AAC (silence at 64 kbps target) sent as a single
+        # piece; the 90 s floor keeps the halves from being halved
+        # again.
         p = TranscriptionProvider(
-            "k", chunk_max_seconds=100,
-            ffmpeg_path="ffmpeg-nonexistent-test-binary",
+            "k", chunk_max_seconds=10 ** 9, ffmpeg_path=FFMPEG_PATH,
             http_transport=transport,
         )
+        import tempfile
+        from pathlib import Path
+        from services import transcode as tx
         with tempfile.TemporaryDirectory() as d:
-            audio = _write_real_wav(
-                Path(d), rate=10, data=b"\x00\x01" * 1000,
-            )
+            audio = _write_aac(d, seconds=100.0)
+            dur = tx.decode_duration(audio, ffmpeg_path=FFMPEG_PATH)
+            self.assertIsNotNone(dur)
+            half = dur / 2.0
             text = p.transcribe(audio)
         self.assertEqual(len(calls), 3)  # 1 failed + 2 halves
         self.assertEqual(
             text,
-            "[00:00] Speaker 1: part 2\n[00:50] Speaker 1: part 3",
+            f"[00:00] Speaker 1: part 2\n[00:{int(half):02d}] Speaker 1: part 3",
         )
 
     def test_transcribe_does_not_halve_on_client_error(self):
@@ -324,8 +357,7 @@ class TranscriptionProviderTests(unittest.TestCase):
             return (401, b"unauthorized")
 
         p = TranscriptionProvider(
-            "k", chunk_max_seconds=100,
-            ffmpeg_path="ffmpeg-nonexistent-test-binary",
+            "k", chunk_max_seconds=100, ffmpeg_path=FFMPEG_PATH,
             http_transport=transport,
         )
         with tempfile.TemporaryDirectory() as d:
@@ -336,12 +368,11 @@ class TranscriptionProviderTests(unittest.TestCase):
                 p.transcribe(audio)
         self.assertEqual(len(calls), 1)
 
+    @skip_without_ffmpeg
     def test_transcribe_halves_oversized_body_automatically(self):
         """A request body over the safety cap is never sent: the
-        chunk is split in half and retried (previously this
-        surfaced as OpenRouter's bare 413)."""
-        import tempfile
-        from pathlib import Path
+        piece is cut in half and retried (previously this surfaced
+        as OpenRouter's bare 413)."""
         bodies = []
 
         def transport(url, *, data=None, headers=None, timeout=60.0):
@@ -352,17 +383,18 @@ class TranscriptionProviderTests(unittest.TestCase):
                 "segments": [],
             }).encode("utf-8"))
 
-        # 40 MB of audio as a single chunk -> ~53 MB body, over the
-        # 45 MB cap -> split in half -> two ~27 MB bodies, fine.
+        # 40 MB of WAV (8 kHz → ~43 min) as a single piece -> ~53 MB
+        # body, over the 45 MB cap -> cut in half -> two ~27 MB
+        # bodies, fine.
         p = TranscriptionProvider(
-            "k", chunk_max_bytes=512 * 1024 * 1024,
-            chunk_max_seconds=10 ** 9,
-            compress=False,
+            "k", chunk_max_seconds=10 ** 9, ffmpeg_path=FFMPEG_PATH,
             http_transport=transport,
         )
+        import tempfile
+        from pathlib import Path
         with tempfile.TemporaryDirectory() as d:
             audio = _write_real_wav(
-                Path(d), data=b"\x00" * (40 * 1024 * 1024),
+                Path(d), rate=8000, data=b"\x00" * (40 * 1024 * 1024),
             )
             text = p.transcribe(audio)
         self.assertEqual(len(bodies), 2)
@@ -448,82 +480,6 @@ class TranscriptionProviderTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             text = p.transcribe(_write_wav(Path(d)))
         self.assertEqual(text, "fallback text")
-
-    def test_transcribe_chunks_long_recording(self):
-        import tempfile
-        from pathlib import Path
-        calls = []
-
-        def transport(url, *, data=None, headers=None, timeout=60.0):
-            calls.append(json.loads(data.decode("utf-8")))
-            n = len(calls)
-            body = json.dumps({
-                "text": f"part {n}",
-                "segments": [
-                    {"start": 0.0, "end": 1.0, "text": f"part {n}",
-                     "speaker": 0},
-                ],
-            }).encode("utf-8")
-            return (200, body)
-
-        # Default WAV: 50 frames @ 2 bytes/frame = 100 bytes of data.
-        # chunk_max_bytes=40 -> 20 frames (2 s at rate 10) per chunk
-        # -> 3 chunks.
-        p = TranscriptionProvider(
-            "k", chunk_max_bytes=40, http_transport=transport,
-        )
-        with tempfile.TemporaryDirectory() as d:
-            text = p.transcribe(_write_real_wav(Path(d)))
-        self.assertEqual(len(calls), 3)
-        self.assertEqual(
-            text,
-            "[00:00] Speaker 1: part 1\n"
-            "[00:02] Speaker 1: part 2\n"
-            "[00:04] Speaker 1: part 3",
-        )
-
-    def test_split_wav_offsets_and_frame_alignment(self):
-        import tempfile
-        from pathlib import Path
-        from services.llm import _parse_wav, _split_wav
-        with tempfile.TemporaryDirectory() as d:
-            audio = _write_real_wav(Path(d))
-            chunks = _split_wav(audio, 40, 300.0, Path(d))
-            self.assertEqual(len(chunks), 3)
-            self.assertEqual(
-                [off for _, off in chunks], [0.0, 2.0, 4.0],
-            )
-            total = 0
-            for chunk_path, _ in chunks:
-                data = chunk_path.read_bytes()
-                info = _parse_wav(data)
-                self.assertIsNotNone(info)
-                off, size, rate, channels, bits = info
-                self.assertEqual(rate, 10)
-                self.assertEqual(size % 2, 0)  # no torn frames
-                total += size
-            # Every frame is present exactly once across chunks.
-            self.assertEqual(
-                total, _parse_wav(audio.read_bytes())[1],
-            )
-
-    def test_split_wav_small_file_stays_whole(self):
-        import tempfile
-        from pathlib import Path
-        from services.llm import _split_wav
-        with tempfile.TemporaryDirectory() as d:
-            audio = _write_real_wav(Path(d))
-            chunks = _split_wav(audio, 1024 * 1024, 300.0, Path(d))
-        self.assertEqual(chunks, [(audio, 0.0)])
-
-    def test_split_wav_unparseable_falls_back_to_whole(self):
-        import tempfile
-        from pathlib import Path
-        from services.llm import _split_wav
-        with tempfile.TemporaryDirectory() as d:
-            audio = _write_wav(Path(d))  # 8 junk bytes, not a WAV
-            chunks = _split_wav(audio, 10, 300.0, Path(d))
-        self.assertEqual(chunks, [(audio, 0.0)])
 
     def test_transcribe_4xx_raises_http_error(self):
         p = TranscriptionProvider(

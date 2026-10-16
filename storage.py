@@ -7,9 +7,9 @@ Phase A responsibilities:
 
 * Maintain the SQLite schema (sessions, chunks, plus the future-use
   courses / artifacts / artifacts_fts tables that are created empty).
-* Write each uploaded chunk atomically: ``chunks/NNN.wav.tmp`` then rename.
-* List and read stitched audio (``full.wav``).
-* Stitch chunks into a single ``full.wav`` and remove the originals.
+* Write each uploaded chunk atomically: ``chunks/NNN.aac.tmp`` then rename.
+* List and read stitched audio (``full.aac``).
+* Stitch chunks into a single ``full.aac`` and remove the originals.
 
 Concurrency model:
 
@@ -143,8 +143,8 @@ def new_session_id() -> str:
 
 
 def _chunk_filename(index: int) -> str:
-    """Three-digit zero-padded chunk filename, e.g. 007.wav."""
-    return f"{index:03d}.wav"
+    """Three-digit zero-padded chunk filename, e.g. 007.aac."""
+    return f"{index:03d}.aac"
 
 
 # ---------------------------------------------------------------------------
@@ -775,7 +775,7 @@ class Storage:
         return self.session_dir(session_id) / "chunks"
 
     def full_audio_path(self, session_id: str) -> Path:
-        return self.session_dir(session_id) / "full.wav"
+        return self.session_dir(session_id) / "full.aac"
 
     def chunk_path(self, session_id: str, chunk_index: int) -> Path:
         return self.chunks_dir(session_id) / _chunk_filename(chunk_index)
@@ -1852,9 +1852,9 @@ class Storage:
         full_audio_size: int
 
     def finish_session(self, session_id: str) -> "Storage.FinishResult":
-        """Validate chunk presence and stitch into full.wav.
+        """Validate chunk presence and stitch into full.aac.
 
-        Idempotent: if the session is already ``ready`` (full.wav exists),
+        Idempotent: if the session is already ``ready`` (full.aac exists),
         return success without re-stitching.
         """
         sess = self.get_session(session_id)
@@ -1909,11 +1909,13 @@ class Storage:
         )
 
     def _stitch_chunks(self, session_id: str, sess: Session) -> int:
-        """Concatenate ``chunks/NNN.wav`` into ``full.wav`` (atomic).
+        """Concatenate ``chunks/NNN.aac`` into ``full.aac`` (atomic).
 
-        Uses a chunk-walking WAV parser so it works with files that
-        contain extra chunks between ``fmt `` and ``data`` (LIST, JUNK,
-        INFO, bext, ...) -- which is what ffmpeg 9.x produces.
+        ADTS AAC is a self-delimiting stream: the concatenation of
+        same-stream chunks is itself a valid ADTS stream, so stitching
+        is a plain binary copy — instant, with no re-encode and no
+        quality loss. Chunks must all sniff as the same audio kind
+        (mixing codecs would produce an invalid stream).
         """
         session_dir = self.session_dir(session_id)
         session_dir.mkdir(parents=True, exist_ok=True)
@@ -1926,66 +1928,37 @@ class Storage:
                 raise FileNotFoundError(f"chunk {n} missing on disk")
             chunk_files.append(p)
 
-        # Read the first chunk's full header so we can verify the audio
-        # format and find the data chunk's offset.
-        with open(chunk_files[0], "rb") as f:
-            first = f.read()
-        _validate_wav_header(first)
-        sample_rate, channels, bits_per_sample = _parse_wav_header(first)
-        if (sample_rate, channels, bits_per_sample) != (
-            sess.sample_rate, sess.channels, sess.bits_per_sample
-        ):
+        from services import transcode as _tx
+        kinds = {
+            _tx.sniff_format(p).kind for p in chunk_files
+        }
+        if len(kinds) > 1 or kinds == {"unknown"}:
             raise ValueError(
-                "chunk header mismatch: "
-                f"file=({sample_rate},{channels},{bits_per_sample}) "
-                f"session=({sess.sample_rate},{sess.channels},{sess.bits_per_sample})"
+                "chunks are not a consistent audio stream: "
+                + ", ".join(sorted(kinds))
             )
 
-        # For each chunk, locate the data chunk and compute how many
-        # bytes of audio are actually present. We trust the header's
-        # declared data size but never assume the file is exactly that
-        # many bytes after a 44-byte header -- ffmpeg may have added
-        # extra chunks, and the file may end with a padding byte.
-        per_chunk_audio: list[tuple[Path, int, int]] = []  # (path, data_offset, audio_len)
-        total_data = 0
-        for p in chunk_files:
-            with open(p, "rb") as f:
-                hdr = f.read()
-            _validate_wav_header(hdr)
-            data_offset = _wav_data_offset(hdr)
-            if data_offset is None:
-                raise ValueError(f"chunk {p.name} has no 'data' chunk")
-            declared = _wav_data_chunk_size(hdr)
-            available = len(hdr) - data_offset
-            audio_len = min(declared, available) if declared else available
-            per_chunk_audio.append((p, data_offset, audio_len))
-            total_data += audio_len
-
-        full_tmp = session_dir / "full.wav.tmp"
-        full_final = session_dir / "full.wav"
+        full_tmp = session_dir / "full.aac.tmp"
+        full_final = session_dir / "full.aac"
 
         with open(full_tmp, "wb") as out:
-            out.write(_build_wav_header(
-                sample_rate, channels, bits_per_sample, total_data
-            ))
-            for p, data_offset, audio_len in per_chunk_audio:
-                if audio_len <= 0:
-                    continue
+            for p in chunk_files:
                 with open(p, "rb") as f:
-                    f.seek(data_offset)
-                    remaining = audio_len
-                    while remaining > 0:
-                        chunk = f.read(min(1024 * 1024, remaining))
-                        if not chunk:
+                    while True:
+                        buf = f.read(1024 * 1024)
+                        if not buf:
                             break
-                        out.write(chunk)
-                        remaining -= len(chunk)
+                        out.write(buf)
+                # Every chunk must contribute bytes; an empty chunk
+                # would silently drop audio.
+                if p.stat().st_size == 0:
+                    raise ValueError(f"chunk {p.name} is empty")
             out.flush()
             os.fsync(out.fileno())
         os.replace(full_tmp, full_final)
 
         # Remove the chunk files; DB rows stay as provenance.
-        for p, _, _ in per_chunk_audio:
+        for p in chunk_files:
             try:
                 p.unlink()
             except FileNotFoundError:
@@ -2216,14 +2189,15 @@ class Storage:
         self,
         session_id: str,
         title: str,
-        wav_bytes: bytes,
+        audio_bytes: bytes,
         started_at: str,
     ) -> Session:
-        """Create a session, write one canonical WAV chunk, finish in one call.
+        """Create a session, write one canonical AAC chunk, finish in
+        one call.
 
-        Used by the web upload path. ``wav_bytes`` must already be in
-        the canonical 22050 Hz mono 32-bit PCM WAV format; transcoding
-        is the caller's responsibility.
+        Used by the web upload path. ``audio_bytes`` must already be
+        canonical AAC (ADTS); transcoding is the caller's
+        responsibility.
         """
         self.upsert_session(
             session_id,
@@ -2231,10 +2205,10 @@ class Storage:
             expected_count=1,
             sample_rate=22050,
             channels=1,
-            bits_per_sample=32,
+            bits_per_sample=16,
             started_at=started_at,
         )
-        self.write_chunk(session_id, 1, wav_bytes)
+        self.write_chunk(session_id, 1, audio_bytes)
         result = self.finish_session(session_id)
         if not result.ok:
             raise RuntimeError(

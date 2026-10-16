@@ -1,7 +1,7 @@
 # Lecture Recorder Server — Phase A
 
 A small personal server that receives audio recordings from an ESP32
-device over the local network, stitches the chunks into a single WAV
+device over the local network, stitches the chunks into a single AAC
 file per session, and serves a minimal web UI to browse and play them.
 
 > **Phase A scope: storage only.** Receive → store → list → play.
@@ -14,7 +14,7 @@ file per session, and serves a minimal web UI to browse and play them.
 2. Device uploads chunks one at a time over
    `PUT /api/v1/sessions/<id>/chunks/<N>`.
 3. Device signals the session is finished.
-4. Server stitches all chunks into a single `full.wav` and marks the
+4. Server stitches all chunks into a single `full.aac` and marks the
    session `ready`.
 5. You open `http://<server-ip>:8000/` in a browser, see the list of
    recordings, click one, and the audio plays in the browser.
@@ -30,8 +30,10 @@ everything; deleting the `data/` directory gives a clean slate.
 
 * **Python 3.11 or newer** (3.12 / 3.13 / 3.14 all work). Verify
   with `python --version`.
-* **ffmpeg** (recommended) — needed to transcode iPhone Voice Memos
-  (M4A / AAC) and other non-WAV formats on the web upload path.
+* **ffmpeg** (required) — all audio is stored as canonical AAC-LC
+  (22050 Hz mono 64 kbps); uploads in any other format are
+  transcoded on ingest, and transcription needs ffmpeg to segment
+  long recordings.
   * Windows: `winget install Gyan.FFmpeg` (or `choco install ffmpeg`)
   * Linux: `sudo apt install ffmpeg` (or `dnf install ffmpeg`)
   * macOS: `brew install ffmpeg`
@@ -235,15 +237,15 @@ Content-Type: application/json
 
 ### `PUT /api/v1/sessions/<id>/chunks/<N>` — upload one chunk
 
-Body: the raw WAV bytes (PCM, little-endian, as produced by the device).
-Re-PUT is safe (atomic write via temp file + rename). Out-of-order
-uploads are fine.
+Body: the raw AAC (ADTS) bytes, as encoded by the device from its
+recorded WAV. Re-PUT is safe (atomic write via temp file + rename).
+Out-of-order uploads are fine.
 
 ```http
 PUT /api/v1/sessions/a3f1c0ffeebbeef00/chunks/1 HTTP/1.1
-Content-Type: audio/wav
+Content-Type: audio/aac
 
-<binary WAV bytes>
+<binary AAC bytes>
 ```
 
 * `200 OK` with `{session_id, chunk_index, byte_size, received_at}`.
@@ -257,9 +259,15 @@ Content-Type: audio/wav
 Empty body. On success the server:
 
 1. Confirms every chunk `1..expected_count` is present.
-2. Stitches the chunks into a single `full.wav` (atomic write).
+2. Stitches the chunks into a single `full.aac` (atomic write).
+   ADTS AAC is self-delimiting, so stitching is a plain binary
+   concatenation — no re-encode, no quality loss.
 3. Deletes the chunk files (the DB rows stay as provenance).
-4. Marks the session `ready` and sets `finished_at`.
+4. Marks the session `ready`, sets `finished_at`, and returns
+   immediately — the AI pipeline runs on the background worker
+   afterwards (see "Background AI pipeline & restarts").
+5. Is idempotent: re-sending finish for an already-stitched session
+   returns `200` with `reason: "already_ready"` and does nothing.
 
 ```http
 POST /api/v1/sessions/a3f1c0ffeebbeef00/finish HTTP/1.1
@@ -271,6 +279,38 @@ POST /api/v1/sessions/a3f1c0ffeebbeef00/finish HTTP/1.1
   present: [1,2,4,5,6,8]}` if any chunks are missing.
 * `500 Internal Server Error` if stitching itself fails.
 
+## Background AI pipeline & restarts
+
+The AI pipeline (transcribe → classify → summarise → extract) runs on
+a single FIFO background worker: sessions are processed strictly one
+at a time, in the order they were finished or uploaded, so three
+lectures recorded in a day are transcribed sequentially instead of
+hammering the transcription API in parallel.
+
+What each failure looks like:
+
+* **Device finish times out** — the stitch itself is fast (<1 s);
+  only the AI work is slow. The device should re-send finish: the
+  server replies `200 already_ready` without re-stitching. The
+  already-queued pipeline keeps running.
+* **Server restart mid-pipeline** — the session would be stranded in
+  an intermediate status (`transcribing`, `summarising`, ...) with
+  the chunk files already deleted. On the next boot a sweep finds
+  every such session, resets it to `ready`, and requeues it.
+  Artifacts persisted before the crash (transcript, summary) are
+  reused, so the expensive transcription step is **not** repeated —
+  a restart costs nothing except the steps that hadn't run yet.
+* **Pipeline fails** (bad audio, API error) — the session is marked
+  `failed` with a reason in `status_detail`. Failed sessions are
+  deliberately *not* auto-retried (a missing API key would loop
+  forever): use the "Retry" action on the session page (the
+  `POST /api/v1/sessions/<id>/transcribe` endpoint), which re-runs
+  the whole pipeline from scratch.
+
+Set `LR_PIPELINE_BACKGROUND=0` to run the pipeline synchronously
+inside the HTTP request instead (slower responses; useful for
+debugging).
+
 ### `GET /api/v1/sessions` — list all sessions
 
 JSON list, newest first.
@@ -279,9 +319,9 @@ JSON list, newest first.
 
 JSON: `{session: {...}}` matching the schema below.
 
-### `GET /api/v1/sessions/<id>/audio` — stream the WAV
+### `GET /api/v1/sessions/<id>/audio` — stream the audio
 
-Streams `full.wav` with `Content-Type: audio/wav` and HTTP Range
+Streams `full.aac` with `Content-Type: audio/aac` and HTTP Range
 support, so the browser's `<audio>` element can seek. Returns
 `409 Conflict` if the session is not yet `ready`.
 
@@ -296,14 +336,14 @@ no-op until the FTS5 index is populated.
 Used by the `/upload` page. Accepts a multipart form with:
 
 * `file` — the audio bytes (any format the server's ffmpeg can read,
-  plus WAV always).
+  plus AAC always).
 * `title` — optional. Defaults to `rec_YYYY-MM-DDTHHMM` (the device's
   naming scheme) based on the current time.
 
-The server sniffs the file format. If it's already a canonical
-22050 Hz mono 32-bit WAV, it skips ffmpeg. Otherwise it transcodes
-the file to that format, creates a one-chunk session, finishes it
-(equivalent to one-shot stitch), and returns:
+The server sniffs the file format. If it's already canonical AAC
+(ADTS), it skips ffmpeg. Otherwise it transcodes the file to
+AAC-LC 22050 Hz mono 64 kbps, creates a one-chunk session, finishes
+it (equivalent to one-shot stitch), and returns:
 
 ```json
 {
@@ -331,7 +371,7 @@ Status badges:
 
 * **Receiving** (blue): announced, chunks still arriving.
 * **Stitching** (amber): all chunks present, server is concatenating.
-* **Ready** (green): `full.wav` exists, playable.
+* **Ready** (green): `full.aac` exists, playable.
 * **Failed** (red): something went wrong (missing chunks, stitch
   error). The device can re-send missing chunks and call `/finish`
   again to recover.
@@ -342,8 +382,8 @@ Use the **Upload** link in the header to open `/upload`. Drag a single
 audio file onto the drop zone (or click to browse), optionally edit
 the title, and click Upload. The page accepts:
 
-* **WAV** at any sample rate / channel / bit depth (transcoded to the
-  canonical 22050 Hz mono 32-bit).
+* **WAV** at any sample rate / channel / bit depth (transcoded to
+  canonical AAC).
 * **M4A / AAC** from iPhone Voice Memos (needs ffmpeg on the server).
 * **MP3, OGG, FLAC, WebM** (needs ffmpeg).
 
@@ -352,8 +392,8 @@ uses) based on the current server time. Edit it before uploading if
 you want a different label.
 
 Without ffmpeg, the upload page shows a yellow warning and rejects any
-non-WAV file. Install ffmpeg (or set `LR_FFMPEG_PATH` to your binary)
-to enable the iPhone / MP3 / OGG paths.
+non-AAC file. Install ffmpeg (or set `LR_FFMPEG_PATH` to your binary)
+to enable the WAV / iPhone / MP3 / OGG paths.
 
 ## Data model
 
@@ -365,11 +405,11 @@ data/
 │   └── metadata.db          # SQLite (WAL mode)
 └── sessions/
     └── <session_id>/
-        ├── full.wav         # stitched audio (only after finish)
+        ├── full.aac         # stitched audio (only after finish)
         ├── meta.json        # debug-friendly mirror of the SQLite row
         └── chunks/          # exists only before stitching
-            ├── 001.wav
-            ├── 002.wav
+            ├── 001.aac
+            ├── 002.aac
             └── ...
 ```
 
@@ -407,13 +447,20 @@ When the firmware is updated to upload, the contract is:
    - 201 = first time, server created the row.
    - 200 = server already had the id (you crashed previously);
            that's fine, the original session is preserved.
-3. For each chunk file (1.wav, 2.wav, ..., N.wav) on the SD card, in
+3. For each chunk file (1.aac, 2.aac, ..., N.aac) on the SD card, in
    any order:
-     PUT /api/v1/sessions/<id>/chunks/<N>  with the raw WAV bytes
+     PUT /api/v1/sessions/<id>/chunks/<N>  with the raw AAC bytes
        - 200 = ok.
        - 409 = session not in receiving state; re-list and decide.
 4. POST /api/v1/sessions/<id>/finish
-   - 200 + session.status=ready → done.
+   - 200 + reason=stitched  → the server has stitched the audio and
+     queued the AI pipeline in the background. **Safe to delete the
+     chunk files on the SD card now** — transcription happens
+     server-side and can take many minutes, which is why finish
+     returns before it completes.
+   - 200 + reason=already_ready → this session was already stitched
+     (e.g. your previous finish timed out or the server restarted).
+     Treat exactly like stitched: safe to delete the SD files.
    - 409 + missing_chunks → re-PUT the missing chunks, retry finish.
 ```
 
@@ -428,7 +475,7 @@ The following are intentionally out of scope for Phase A. The data
 model already accommodates them — adding the code is a future task.
 
 * **Transcription**: post-finish pipeline calls OpenRouter with
-  `full.wav`, writes a `transcript` artifact, mirrors it into
+  `full.aac`, writes a `transcript` artifact, mirrors it into
   `artifacts_fts`.
 * **Summarisation / extraction**: MiniMax M3 consumes the transcript,
   writes `summary`, `key_points`, `deadlines`, `topics` artifacts.
@@ -447,7 +494,7 @@ model already accommodates them — adding the code is a future task.
 * **Browser shows old / empty list after uploads**: hard-refresh
   (Ctrl+Shift+R). The UI does not auto-poll yet; that's a future
   enhancement.
-* **WAV file in browser "could not be decoded"**: the chunk headers
+* **AAC file in browser "could not be decoded"**: the chunk headers
   were inconsistent. The session will be marked `failed`; check
   `data/sessions/<id>/meta.json` for `status_detail`.
 

@@ -13,7 +13,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tests.conftest import LRTestCase
+from tests.conftest import LRTestCase, skip_without_ffmpeg
 
 
 def _make_wav_bytes(payload: bytes = b"\x00\x00\x00\x00" * 200,
@@ -69,10 +69,11 @@ class UploadPageTests(LRTestCase):
             self.assertIn(b"ffmpeg is not installed", body)
 
 
-class CanonicalWavUploadTests(LRTestCase):
-    """A WAV that is already in the device format: no transcode needed."""
+class WavUploadTests(LRTestCase):
+    """A WAV upload is transcoded to canonical AAC at ingest."""
 
-    def test_canonical_wav_skips_transcode(self) -> None:
+    @skip_without_ffmpeg
+    def test_wav_upload_transcoded_to_aac(self) -> None:
         wav = _make_wav_bytes()
         r = self.client.post(
             "/api/v1/uploads/audio",
@@ -87,6 +88,7 @@ class CanonicalWavUploadTests(LRTestCase):
         # session ends at 'done' (not 'ready').
         self.assertEqual(body["session"]["status"], "done")
 
+    @skip_without_ffmpeg
     def test_upload_runs_pipeline_in_background_when_enabled(self):
         """Production mode: the upload returns immediately with the
         pre-pipeline status while the pipeline runs in a background
@@ -119,8 +121,12 @@ class CanonicalWavUploadTests(LRTestCase):
         self.assertIsNotNone(body["redirect_url"])
         audio = self.client.get(body["session"]["full_audio_url"])
         self.assertEqual(audio.status_code, 200)
-        self.assertEqual(audio.get_data(), wav)
+        self.assertEqual(
+            audio.mimetype, "audio/aac",
+            audio.get_data(as_text=False)[:16],
+        )
 
+    @skip_without_ffmpeg
     def test_canonical_wav_default_title(self) -> None:
         wav = _make_wav_bytes()
         r = self.client.post(
@@ -131,6 +137,7 @@ class CanonicalWavUploadTests(LRTestCase):
         self.assertEqual(r.status_code, 201)
         self.assertTrue(r.get_json()["session"]["title"].startswith("rec_"))
 
+    @skip_without_ffmpeg
     def test_canonical_wav_explicit_title(self) -> None:
         wav = _make_wav_bytes()
         r = self.client.post(
@@ -142,6 +149,7 @@ class CanonicalWavUploadTests(LRTestCase):
         self.assertEqual(r.status_code, 201)
         self.assertEqual(r.get_json()["session"]["title"], "CS101 Lec 3")
 
+    @skip_without_ffmpeg
     def test_empty_title_uses_default(self) -> None:
         wav = _make_wav_bytes()
         r = self.client.post(
@@ -193,20 +201,30 @@ class CanonicalWavUploadTests(LRTestCase):
 
 
 class NonCanonicalUploadTests(LRTestCase):
-    """Non-canonical uploads need ffmpeg; the test conftest points to a
-    nonexistent binary so we can test the 503 path without ffmpeg."""
+    """Non-AAC uploads need ffmpeg; the 503 path is tested by
+    pointing the app at a nonexistent binary explicitly (conftest
+    uses the real ffmpeg when one is installed)."""
 
-    def test_non_wav_without_ffmpeg_returns_503(self) -> None:
-        fake_mp3 = b"ID3\x04\x00\x00\x00\x00\x00\x00" + b"\xff" * 256
-        r = self.client.post(
-            "/api/v1/uploads/audio",
-            data={"file": (_io_bytes(fake_mp3), "voice.m4a")},
-            content_type="multipart/form-data",
+    def test_upload_without_ffmpeg_returns_503(self) -> None:
+        from dataclasses import replace
+        cfg = self.app.config["LR_CONFIG"]
+        self.app.config["LR_CONFIG"] = replace(
+            cfg, ffmpeg_path="ffmpeg-nonexistent-test-binary",
         )
-        self.assertEqual(r.status_code, 503)
-        self.assertEqual(r.get_json()["error"], "ffmpeg_missing")
+        try:
+            fake_mp3 = b"ID3\x04\x00\x00\x00\x00\x00\x00" + b"\xff" * 256
+            r = self.client.post(
+                "/api/v1/uploads/audio",
+                data={"file": (_io_bytes(fake_mp3), "voice.m4a")},
+                content_type="multipart/form-data",
+            )
+            self.assertEqual(r.status_code, 503)
+            self.assertEqual(r.get_json()["error"], "ffmpeg_missing")
+        finally:
+            self.app.config["LR_CONFIG"] = cfg
 
-    def test_non_wav_with_ffmpeg_succeeds(self) -> None:
+    @skip_without_ffmpeg
+    def test_non_aac_with_ffmpeg_succeeds(self) -> None:
         import subprocess
         from dataclasses import replace
         real_ffmpeg = shutil.which("ffmpeg")
@@ -246,7 +264,7 @@ class TranscodeUnitTests(unittest.TestCase):
     """Unit tests for the transcode helpers and title formatters."""
 
     def test_sniff_wav(self) -> None:
-        from services.transcode import sniff_format, is_canonical_wav
+        from services.transcode import sniff_format
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
             f.write(_make_wav_bytes())
             path = Path(f.name)
@@ -256,9 +274,29 @@ class TranscodeUnitTests(unittest.TestCase):
             self.assertEqual(fmt.sample_rate, 22050)
             self.assertEqual(fmt.channels, 1)
             self.assertEqual(fmt.bits_per_sample, 32)
-            self.assertTrue(is_canonical_wav(fmt))
+            # A WAV is NOT the canonical format anymore.
+            self.assertFalse(fmt.kind == "aac")
         finally:
             path.unlink()
+
+    @skip_without_ffmpeg
+    def test_sniff_aac(self) -> None:
+        from services.transcode import sniff_format, is_canonical_aac
+        wav = _make_wav_bytes()
+        with tempfile.TemporaryDirectory() as d:
+            src = Path(d) / "sniff.wav"
+            src.write_bytes(wav)
+            dst = Path(d) / "sniff.aac"
+            from services import transcode
+            transcode.transcode_to_aac(
+                src, dst, ffmpeg_path=shutil.which("ffmpeg") or "ffmpeg",
+            )
+            fmt = sniff_format(dst)
+            self.assertEqual(fmt.kind, "aac")
+            self.assertTrue(is_canonical_aac(fmt))
+            # AAC must be detected before the generic MPEG fallback
+            # (an ADTS header would otherwise sniff as MP3).
+            self.assertNotEqual(fmt.kind, "mp3")
 
     def test_sniff_mp4(self) -> None:
         from services.transcode import sniff_format

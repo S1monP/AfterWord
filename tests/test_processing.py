@@ -79,7 +79,7 @@ class _StubClassifier(LLMProvider):
 
 
 def _make_ready_session(case):
-    """Create a session in status='ready' with a real full.wav on disk."""
+    """Create a session in status='ready' with a real full.aac on disk."""
     sid = uuid.uuid4().hex
     store = case.app.config["LR_STORAGE"]
     store.upsert_session(
@@ -157,7 +157,7 @@ class PipelineHappyPathTests(LRTestCase):
         )
         self.assertEqual(len(transcript.calls), 1)
         self.assertIsInstance(transcript.calls[0], Path)
-        self.assertEqual(transcript.calls[0].name, "full.wav")
+        self.assertEqual(transcript.calls[0].name, "full.aac")
         self.assertEqual(classifier.calls, ["xyz"])
 
 

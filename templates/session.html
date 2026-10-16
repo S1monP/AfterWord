@@ -47,7 +47,7 @@
                src="{{ url_for('api_get_audio', session_id=session.id) }}"></audio>
         <a class="lr-btn"
            href="{{ url_for('api_get_audio', session_id=session.id) }}"
-           download="{{ (session.title or session.id) ~ '.wav' }}">Download</a>
+           download="{{ (session.title or session.id) ~ '.aac' }}">Download</a>
         <button class="lr-btn" id="lr-rerun-ai" type="button"
                 data-session-id="{{ session.id }}">
           Re-run AI processing

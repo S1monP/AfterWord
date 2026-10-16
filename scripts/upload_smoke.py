@@ -1,8 +1,9 @@
 """Live smoke test for the web audio upload path.
 
-Generates a tiny canonical WAV in memory, starts the dev server in a
-background thread, POSTs it as multipart to /api/v1/uploads/audio, and
-verifies the result. Skips if ffmpeg is needed but missing.
+Generates a tiny audio file in memory (WAV, transcoded to canonical
+AAC by the server), starts the dev server in a background thread,
+POSTs it as multipart to /api/v1/uploads/audio, and verifies the
+result. Requires ffmpeg on the host (uploads are transcoded to AAC).
 
 Run: ``python upload_smoke.py``.
 """
@@ -18,6 +19,8 @@ import shutil
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+
+FFMPEG = shutil.which("ffmpeg") or "ffmpeg-nonexistent-test-binary"
 
 
 def make_wav(payload: bytes = b"\x00\x00\x00\x00" * 800,
@@ -76,7 +79,7 @@ def main() -> int:
     cfg = config_mod.Config(
         data_dir=tmp, host="127.0.0.1", port=0,
         openrouter_api_key="", minimax_api_key="",
-        ffmpeg_path="ffmpeg-nonexistent-test-binary",
+        ffmpeg_path=FFMPEG,
         max_upload_bytes=10 * 1024 * 1024,
     )
 
@@ -110,13 +113,15 @@ def main() -> int:
         j = json.loads(b)
         assert j["session"]["status"] == "ready"
         assert j["session"]["title"] == "Smoke Title"
-        print(f"2. Canonical WAV upload OK, session={j['session']['id']}")
+        print(f"2. WAV upload (transcoded to AAC) OK, "
+              f"session={j['session']['id']}")
 
         s, b, hdr = req("GET", j["session"]["full_audio_url"])
-        assert s == 200 and b[0:4] == b"RIFF" and b[8:12] == b"WAVE"
-        assert hdr.get("Content-Type", "").startswith("audio/wav")
-        assert len(b) == len(wav)
-        print(f"3. Audio playable, size={len(b)}")
+        assert s == 200 and b[0] == 0xFF and (b[1] & 0xF6) == 0xF0
+        assert hdr.get("Content-Type", "").startswith("audio/aac")
+        # AAC is far smaller than the source WAV.
+        assert 0 < len(b) < len(wav)
+        print(f"3. Audio playable (AAC), size={len(b)}")
 
         body, ctype = build_multipart(wav, "default.wav", "")
         s, b, _ = req("POST", "/api/v1/uploads/audio",
@@ -131,8 +136,10 @@ def main() -> int:
         s, b, _ = req("POST", "/api/v1/uploads/audio",
                        data=body, headers={"Content-Type": ctype})
         assert s == 503, (s, b)
-        assert json.loads(b)["error"] == "ffmpeg_missing"
-        print("5. Non-WAV without ffmpeg -> 503 OK")
+        assert json.loads(b)["error"] in (
+            "ffmpeg_missing", "ffmpeg_failed",
+        )
+        print("5. Bogus media -> 503 OK")
 
         boundary = "----lr-smoke-empty"
         empty = f"--{boundary}--\r\n".encode()

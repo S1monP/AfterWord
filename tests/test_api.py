@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import json
+import time
 import unittest
 
+import storage
+from app import _enqueue_pipeline, sweep_stranded_sessions
 from tests.conftest import LRTestCase
 
 
@@ -132,7 +135,7 @@ class DeviceFlowTests(LRTestCase):
         self._upload_complete_session()
         r = self.client.get("/api/v1/sessions/abcdef1234567890/audio")
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.mimetype, "audio/wav")
+        self.assertEqual(r.mimetype, "audio/aac")
         r2 = self.client.get(
             "/api/v1/sessions/abcdef1234567890/audio",
             headers={"Range": "bytes=0-99"},
@@ -761,6 +764,214 @@ class EventsApiTests(LRTestCase):
         )
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.get_json()["imported"], 2)
+
+
+class PipelineResilienceTests(LRTestCase):
+    """Background FIFO worker, finish idempotency across restarts,
+    and the boot sweep that recovers sessions stranded mid-pipeline."""
+
+    def _announce_and_fill(self, sid: str, n: int = 1) -> None:
+        self.client.post(
+            "/api/v1/sessions",
+            data=json.dumps({
+                "id": sid,
+                "title": "Resilience",
+                "expected_count": n,
+                "sample_rate": 22050,
+                "channels": 1,
+                "bits_per_sample": 32,
+                "started_at": "2026-10-15T12:00:00Z",
+            }),
+            content_type="application/json",
+        )
+        for i in range(1, n + 1):
+            r = self.client.put(
+                f"/api/v1/sessions/{sid}/chunks/{i}",
+                data=self.make_wav(bytes([i]) * 200),
+                content_type="audio/wav",
+            )
+            self.assertEqual(r.status_code, 200)
+
+    def _stranded_session(self, sid: str, to_status: str) -> None:
+        """Create a stitched session and strand it at ``to_status``
+        (simulating a server restart mid-pipeline)."""
+        store = self.app.config["LR_STORAGE"]
+        store.upsert_session(
+            sid, title="Stranded", expected_count=1,
+            sample_rate=22050, channels=1, bits_per_sample=32,
+            started_at=storage.now_iso(),
+        )
+        store.write_chunk(sid, 1, self.make_wav(b"\x00" * 200))
+        result = store.finish_session(sid)  # → ready + full.aac on disk
+        self.assertTrue(result.ok, result.reason)
+        # Walk the legal pipeline chain up to the target status (the
+        # transition guard refuses jumps like ready → transcribed).
+        chain = [
+            storage.STATUS_TRANSCRIBING,
+            storage.STATUS_TRANSCRIBED,
+            storage.STATUS_CLASSIFYING,
+            storage.STATUS_SUMMARISING,
+            storage.STATUS_EXTRACTING,
+        ]
+        if to_status != storage.STATUS_READY:
+            for step in chain:
+                store.update_status(sid, step)
+                if step == to_status:
+                    break
+
+    def _wait_status(self, sid: str, want: str, timeout: float = 10.0):
+        store = self.app.config["LR_STORAGE"]
+        deadline = time.time() + timeout
+        status = None
+        while time.time() < deadline:
+            status = store.get_session(sid).status
+            if status == want:
+                break
+            time.sleep(0.05)
+        return status
+
+    def test_finish_returns_fast_and_worker_completes(self) -> None:
+        """Device flow, production mode: finish returns right after
+        the stitch (before the AI work is done) while the pipeline
+        runs on the FIFO worker, then completes to 'done'."""
+        sid = "resfinish00000001"
+        self._announce_and_fill(sid)
+        self.app.config["LR_PIPELINE_BACKGROUND"] = True
+        r = self.client.post(f"/api/v1/sessions/{sid}/finish")
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+        j = r.get_json()
+        self.assertTrue(j["ok"])
+        self.assertEqual(j["reason"], "stitched")
+        self.assertNotEqual(j["session"]["status"], "failed")
+        status = self._wait_status(sid, storage.STATUS_DONE)
+        self.assertEqual(status, storage.STATUS_DONE)
+
+    def test_finish_idempotent_after_restart(self) -> None:
+        """A device re-sending finish after a server restart (session
+        stranded mid-pipeline) gets 200 already_ready and does NOT
+        trigger a second pipeline run."""
+        sid = "residemppotent001"
+        self._stranded_session(sid, storage.STATUS_TRANSCRIBING)
+        r = self.client.post(f"/api/v1/sessions/{sid}/finish")
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+        j = r.get_json()
+        self.assertEqual(j["reason"], "already_ready")
+        # Give any (wrongly) queued pipeline time to move the status.
+        time.sleep(0.3)
+        self.assertEqual(
+            self.app.config["LR_STORAGE"].get_session(sid).status,
+            storage.STATUS_TRANSCRIBING,
+        )
+
+    def test_sweep_requeues_stranded_session(self) -> None:
+        """The boot sweep resets a stranded session to 'ready' and
+        the worker drives it to 'done'."""
+        sid = "ressweep000000001"
+        self._stranded_session(sid, storage.STATUS_TRANSCRIBING)
+        requeued = sweep_stranded_sessions(self.app)
+        self.assertIn(sid, requeued)
+        status = self._wait_status(sid, storage.STATUS_DONE)
+        self.assertEqual(status, storage.STATUS_DONE)
+
+    def test_sweep_resumes_without_retranscribing(self) -> None:
+        """A stranded session with a persisted transcript artifact
+        skips transcription entirely (the expensive step is not
+        repeated after a restart)."""
+        store = self.app.config["LR_STORAGE"]
+        sid = "resresume00000001"
+        self._stranded_session(sid, storage.STATUS_TRANSCRIBED)
+        store.add_artifact(sid, "transcript", "kept transcript", model="stub")
+
+        class _Boom:
+            name = "boom"
+
+            def transcribe(self, audio_path):
+                raise AssertionError("must not re-transcribe on resume")
+
+            def classify(self, t):
+                raise AssertionError("must not classify on resume")
+
+            def summarize(self, t):
+                raise AssertionError("must not re-summarise on resume")
+
+            def extract(self, t, k):
+                raise AssertionError("must not re-extract on resume")
+
+        noop_text = self.app.config["LR_LLM_PROVIDERS"]["text"]
+        self.app.config["LR_LLM_PROVIDERS"] = {
+            "transcript": _Boom(), "text": noop_text,
+        }
+        requeued = sweep_stranded_sessions(self.app)
+        self.assertIn(sid, requeued)
+        status = self._wait_status(sid, storage.STATUS_DONE)
+        self.assertEqual(status, storage.STATUS_DONE)
+        artifact = store.get_artifact(sid, "transcript")
+        self.assertEqual(artifact["content"], "kept transcript")
+
+    def test_sweep_skips_failed_sessions(self) -> None:
+        """Failed sessions are never auto-retried (a missing API key
+        would loop forever); they stay for the manual retry endpoint."""
+        sid = "resfailed00000001"
+        self._stranded_session(sid, storage.STATUS_TRANSCRIBING)
+        store = self.app.config["LR_STORAGE"]
+        store.update_status(
+            sid, storage.STATUS_FAILED, status_detail="boom",
+        )
+        requeued = sweep_stranded_sessions(self.app)
+        self.assertNotIn(sid, requeued)
+        self.assertEqual(
+            store.get_session(sid).status, storage.STATUS_FAILED,
+        )
+
+    def test_worker_processes_sessions_in_fifo_order(self) -> None:
+        """Two queued sessions are transcribed one at a time, in
+        queue order."""
+        from pathlib import Path
+        store = self.app.config["LR_STORAGE"]
+        sids = ["resfifo0000000001", "resfifo0000000002"]
+        for k, sid in enumerate(sids):
+            store.upsert_session(
+                sid, title=f"fifo{k}", expected_count=1,
+                sample_rate=22050, channels=1, bits_per_sample=32,
+                started_at=storage.now_iso(),
+            )
+            store.write_chunk(sid, 1, self.make_wav(b"\x00" * 200))
+            self.assertTrue(store.finish_session(sid).ok)
+
+        noop_text = self.app.config["LR_LLM_PROVIDERS"]["text"]
+
+        class _Recorder:
+            name = "recorder"
+
+            def __init__(self):
+                self.paths = []
+
+            def transcribe(self, audio_path):
+                self.paths.append(Path(audio_path).parent.name)
+                return "t"
+
+            def classify(self, t):
+                return noop_text.classify(t)
+
+            def summarize(self, t):
+                return noop_text.summarize(t)
+
+            def extract(self, t, k):
+                return noop_text.extract(t, k)
+
+        rec = _Recorder()
+        self.app.config["LR_LLM_PROVIDERS"] = {
+            "transcript": rec, "text": noop_text,
+        }
+        for sid in sids:
+            self.assertTrue(_enqueue_pipeline(self.app, sid))
+        for sid in sids:
+            self.assertEqual(
+                self._wait_status(sid, storage.STATUS_DONE),
+                storage.STATUS_DONE,
+            )
+        self.assertEqual(rec.paths, sids)
+
 
 if __name__ == "__main__":
     unittest.main()

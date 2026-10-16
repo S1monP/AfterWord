@@ -133,7 +133,7 @@ class ChunkWriteTests(LRTestCase):
         self.assertEqual(data, b)
         # No .tmp file should remain after a successful write.
         self.assertFalse(
-            store.chunk_path(sid, 1).with_suffix(".wav.tmp").exists()
+            store.chunk_path(sid, 1).with_suffix(".aac.tmp").exists()
         )
 
     def test_write_chunk_too_high_index_rejected(self) -> None:
@@ -184,7 +184,7 @@ class FinishTests(LRTestCase):
         self.assertEqual(result.reason, "missing_chunks")
         self.assertEqual(result.missing, [2, 3])
 
-    def test_finish_stitches_full_wav(self) -> None:
+    def test_finish_stitches_full_aac(self) -> None:
         sid = self._make_full_session(n=3)
         store = self.app.config["LR_STORAGE"]
         result = store.finish_session(sid)
@@ -192,10 +192,14 @@ class FinishTests(LRTestCase):
         full = store.open_full_audio(sid)
         self.assertIsNotNone(full)
         data = full.read_bytes()
-        self.assertEqual(data[0:4], b"RIFF")
-        self.assertEqual(data[8:12], b"WAVE")
-        # 3 * 200 + 44 (header)
-        self.assertEqual(len(data), 3 * 200 + 44)
+        # Binary concat of the chunk files (verbatim copy, headers
+        # included): 3 * 244-byte WAV chunks.
+        self.assertEqual(len(data), 3 * 244)
+        # Chunks concatenate in order: chunk k's marker byte is at
+        # (k-1)*244 + 44 (its first payload byte).
+        self.assertEqual(data[0 * 244 + 44], 1)
+        self.assertEqual(data[1 * 244 + 44], 2)
+        self.assertEqual(data[2 * 244 + 44], 3)
 
     def test_finish_removes_chunk_files(self) -> None:
         sid = self._make_full_session(n=2)
@@ -228,8 +232,9 @@ class NonMinimalWavTests(LRTestCase):
     """Regression: WAV files that aren't a strict 44-byte header.
 
     ffmpeg 9.x writes a LIST chunk between fmt and data, and other
-    encoders may write JUNK, INFO, or bext. The stitcher must locate
-    the data chunk by walking, not by trusting fixed offsets.
+    encoders may write JUNK, INFO, or bext. The stitcher is now a
+    plain binary concat, so it accepts any consistent audio stream
+    and copies chunk files verbatim into full.aac.
     """
 
     @staticmethod
@@ -305,9 +310,9 @@ class NonMinimalWavTests(LRTestCase):
         result = store.finish_session(sid)
         self.assertTrue(result.ok, result.reason)
 
-    def test_stitched_full_wav_contains_only_audio_data(self) -> None:
-        """The full.wav output must be a strict 44-byte header + raw
-        audio, with no LIST/JUNK leakage from the chunk."""
+    def test_stitched_full_aac_concatenates_chunk_files(self) -> None:
+        """The full.aac output must be the exact byte concatenation
+        of the chunk files (stream copy, no header surgery)."""
         payload = b"ABCD" * 500  # 2000 bytes, easy to identify in output
         wav = self._build_wav_with_extra_chunk(payload)
         store = self.app.config["LR_STORAGE"]
@@ -321,10 +326,28 @@ class NonMinimalWavTests(LRTestCase):
         result = store.finish_session(sid)
         self.assertTrue(result.ok, result.reason)
         full = store.open_full_audio(sid).read_bytes()
-        # full.wav is 44 (new header) + 2000 (payload) = 2044 bytes.
-        self.assertEqual(len(full), 44 + len(payload))
-        # The payload bytes must be at the end, untouched.
-        self.assertEqual(full[44:], payload)
+        # full.aac is the chunk file copied verbatim.
+        self.assertEqual(full, wav)
+
+    def test_stitched_multi_chunk_concatenates_in_order(self) -> None:
+        store = self.app.config["LR_STORAGE"]
+        sid = "concat1234567890a"
+        store.upsert_session(
+            sid, title="t", expected_count=3,
+            sample_rate=22050, channels=1, bits_per_sample=32,
+            started_at=storage.now_iso(),
+        )
+        chunks = [
+            self._build_wav_with_extra_chunk(b"\x01" * 100),
+            self._build_wav_with_extra_chunk(b"\x02" * 100),
+            self._build_wav_with_extra_chunk(b"\x03" * 100),
+        ]
+        for i, c in enumerate(chunks, start=1):
+            store.write_chunk(sid, i, c)
+        result = store.finish_session(sid)
+        self.assertTrue(result.ok, result.reason)
+        full = store.open_full_audio(sid).read_bytes()
+        self.assertEqual(full, b"".join(chunks))
 
 
 if __name__ == "__main__":

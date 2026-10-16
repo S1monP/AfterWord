@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import re
 import shutil
 import threading
@@ -104,13 +105,32 @@ def create_app(config: Optional[config_mod.Config] = None) -> Flask:
     if not transcode.ffmpeg_available(cfg.ffmpeg_path):
         print(
             f"[LR ] WARNING: ffmpeg not found at {cfg.ffmpeg_path!r}; "
-            "non-WAV uploads (iPhone M4A, etc.) will be rejected. "
+            "non-AAC uploads (iPhone M4A, etc.) will be rejected. "
             "Install ffmpeg or set LR_FFMPEG_PATH.",
             flush=True,
         )
     else:
         v = transcode.ffmpeg_version(cfg.ffmpeg_path)
         print(f"[LR ] ffmpeg: {v}", flush=True)
+
+    # Background pipeline worker + boot sweep. Always started: in
+    # tests the queue stays empty (sync mode runs pipelines inline
+    # inside the request), and the sweep is a no-op on a fresh data
+    # directory. In production this is what survives a restart: any
+    # session stranded mid-pipeline is requeued automatically.
+    # The flag is env-wired here so operators can run fully
+    # synchronous pipelines with LR_PIPELINE_BACKGROUND=0; tests
+    # override app.config directly, which still wins.
+    app.config.setdefault(
+        "LR_PIPELINE_BACKGROUND",
+        os.environ.get("LR_PIPELINE_BACKGROUND", "").strip().lower()
+        not in ("0", "false", "no", "off"),
+    )
+    _start_pipeline_worker(app)
+    try:
+        sweep_stranded_sessions(app)
+    except Exception as exc:  # pragma: no cover
+        print(f"[LR ] boot sweep error: {exc!r}", flush=True)
 
     @app.context_processor
     def _inject_globals():
@@ -209,6 +229,128 @@ _RETRYABLE_STATUSES = frozenset({
     storage.STATUS_DONE,
     storage.STATUS_FAILED,
 })
+
+# Statuses a server restart can strand mid-pipeline. The boot sweep
+# resets these to 'ready' and requeues them. 'failed' is deliberately
+# excluded — the failure may be a missing API key, which would loop
+# forever; failed sessions are retried manually via the /transcribe
+# endpoint. 'ready' sessions are swept too (a crash can strike in the
+# gap between stitch and pipeline start), but only when no transcript
+# artifact exists yet (i.e. the pipeline never got to persist one).
+_STRANDED_STATUSES = frozenset({
+    storage.STATUS_READY,
+    storage.STATUS_TRANSCRIBING,
+    storage.STATUS_TRANSCRIBED,
+    storage.STATUS_CLASSIFYING,
+    storage.STATUS_SUMMARISING,
+    storage.STATUS_EXTRACTING,
+})
+
+
+def _enqueue_pipeline(app: Flask, session_id: str) -> bool:
+    """Queue a session for the background pipeline worker.
+
+    The worker processes sessions strictly one at a time (FIFO), so
+    three lectures recorded in a day are transcribed sequentially
+    instead of hammering the transcription API in parallel.
+
+    Returns ``False`` when a pipeline for this session is already
+    queued or running (the in-flight guard), ``True`` otherwise.
+    """
+    with _PIPELINE_LOCK:
+        if session_id in _PIPELINES_IN_FLIGHT:
+            return False
+        _PIPELINES_IN_FLIGHT.add(session_id)
+    app.config["LR_PIPELINE_QUEUE"].put(session_id)
+    return True
+
+
+def _start_pipeline_worker(app: Flask) -> threading.Thread:
+    """Start the FIFO pipeline worker for ``app`` (one per app, daemon).
+
+    The worker resolves providers from ``app.config`` on every
+    iteration (cheap), so tests can swap ``LR_LLM_PROVIDERS`` and
+    the next queued run picks up the stubs. Runs the pipeline with
+    ``resume=True``: artifacts persisted before a crash are reused.
+    """
+    q = app.config["LR_PIPELINE_QUEUE"] = queue.Queue()
+
+    def _worker() -> None:
+        while True:
+            session_id = q.get()
+            try:
+                store = app.config["LR_STORAGE"]
+                providers = app.config["LR_LLM_PROVIDERS"]
+                processing.run_post_finish_pipeline(
+                    store, session_id,
+                    transcript_provider=providers.get("transcript"),
+                    classifier=providers.get("text"),
+                    llm_provider=providers.get("text"),
+                    resume=True,
+                )
+            except Exception as exc:  # pragma: no cover
+                print(
+                    f"[LR ] background pipeline error: {exc!r}",
+                    flush=True,
+                )
+            finally:
+                with _PIPELINE_LOCK:
+                    _PIPELINES_IN_FLIGHT.discard(session_id)
+                q.task_done()
+
+    t = threading.Thread(
+        target=_worker, name="lr-pipeline-worker", daemon=True,
+    )
+    t.start()
+    return t
+
+
+def sweep_stranded_sessions(app: Flask) -> list[str]:
+    """Reset and requeue sessions stranded by a server restart.
+
+    A crash mid-pipeline leaves the session in an intermediate
+    status with no thread driving it — and because stitching
+    deleted the chunk files, the device can't help either. On boot
+    (and callable from tests), every such session is reset to
+    ``ready`` — a legal transition — and requeued on the FIFO
+    worker with ``resume=True`` so already-persisted artifacts
+    (transcript, summary) are not recomputed.
+
+    Sessions in ``failed`` are NOT auto-retried; see
+    ``_STRANDED_STATUSES``. Returns the requeued session ids.
+    """
+    store = app.config["LR_STORAGE"]
+    requeued: list[str] = []
+    for sess in reversed(store.list_sessions()):
+        # list_sessions is newest-first; reversed → oldest first so
+        # the queue drains in recording order.
+        if sess.status not in _STRANDED_STATUSES:
+            continue
+        if sess.status == storage.STATUS_READY:
+            # Only when the pipeline never persisted anything:
+            # a ready session WITH a transcript artifact was reset
+            # by something else and will be handled deliberately.
+            try:
+                if store.get_artifact(sess.id, "transcript") is not None:
+                    continue
+            except Exception:  # pragma: no cover  (defensive)
+                pass
+        try:
+            if sess.status != storage.STATUS_READY:
+                store.set_status(
+                    sess.id, storage.STATUS_READY, status_detail=None,
+                )
+        except ValueError:
+            continue  # unresolvable transition; leave for manual retry
+        if _enqueue_pipeline(app, sess.id):
+            requeued.append(sess.id)
+    if requeued:
+        print(
+            f"[LR ] boot sweep: requeued {len(requeued)} stranded "
+            "session(s)",
+            flush=True,
+        )
+    return requeued
 
 # Sessions with a pipeline running in this process right now, so a
 # background upload run and a manual retry cannot both drive the
@@ -329,17 +471,33 @@ _STATUS_LABEL = {
 
 
 def _estimate_duration_seconds(session: storage.Session) -> float:
-    """Best-effort duration estimate from full.wav size."""
-    if not session.full_audio_size or session.full_audio_size <= 44:
+    """Duration of a session's stitched audio via ffprobe.
+
+    Results are cached per (session id, file size) — the stitched
+    file never changes, so the probe runs once per file per process
+    instead of once per list render.
+    """
+    if not session.full_audio_size or session.full_audio_size <= 8:
         return 0.0
-    if not session.channels or not session.bits_per_sample:
+    cache = _DURATION_CACHE
+    key = (session.id, session.full_audio_size)
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+    full = current_app_storage().full_audio_path(session.id)
+    if not full.exists():
         return 0.0
-    bytes_per_sample = session.bits_per_sample // 8
-    bytes_per_sec = session.sample_rate * session.channels * bytes_per_sample
-    payload = session.full_audio_size - 44
-    if bytes_per_sec <= 0:
+    cfg = current_app.config["LR_CONFIG"]
+    duration = transcode.probe_duration(full, ffmpeg_path=cfg.ffmpeg_path)
+    if duration is None:
         return 0.0
-    return payload / bytes_per_sec
+    cache[key] = duration
+    return duration
+
+
+# Bounded just in case; keyed by immutable (id, size) so stale
+# entries are harmless.
+_DURATION_CACHE: dict[tuple[str, int], float] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -964,10 +1122,35 @@ def _register_routes(app: Flask) -> None:
     # --- API: finish ----------------------------------------------------
     @app.post("/api/v1/sessions/<session_id>/finish")
     def api_finish_session(session_id: str) -> Any:
+        """Validate + stitch chunks; return fast.
+
+        The stitch is synchronous and quick (<1 s even for hours of
+        AAC — it's a binary concat), so the device gets a definitive
+        answer and can safely delete its SD files. The AI pipeline
+        (transcribe → classify → summarise → extract) then runs on
+        the FIFO background worker and can take many minutes.
+
+        Idempotent across restarts: if the session has already been
+        stitched (any post-finish status) and ``full.aac`` is on
+        disk, a re-sent finish — after a timeout, a server restart,
+        or a missed response — returns ``200 already_ready``
+        immediately without re-stitching. (A stranded pipeline is
+        recovered by the boot sweep, not by device retries.)
+        """
         store = current_app_storage()
         sess = store.get_session(session_id)
         if sess is None:
             return jsonify({"error": "not_found"}), 404
+        if (
+            sess.status in _RETRYABLE_STATUSES
+            and store.open_full_audio(session_id) is not None
+        ):
+            fresh = store.get_session(session_id)
+            return jsonify({
+                "ok": True,
+                "reason": "already_ready",
+                "session": fresh.to_api_dict() if fresh else None,
+            })
         result = store.finish_session(session_id)
         if not result.ok:
             if result.reason == "missing_chunks":
@@ -981,10 +1164,15 @@ def _register_routes(app: Flask) -> None:
                 "error": result.reason,
                 "detail": sess.status_detail,
             }), 500
-        try:
-            processing.run_post_finish_pipeline(store, session_id)
-        except Exception as exc:  # pragma: no cover
-            print(f"[LR ] post-finish pipeline error: {exc!r}", flush=True)
+        if current_app.config.get("LR_PIPELINE_BACKGROUND", True):
+            _enqueue_pipeline(current_app._get_current_object(), session_id)
+        else:
+            # Deterministic mode (used by tests): run inline so the
+            # response reflects the final status.
+            try:
+                processing.run_post_finish_pipeline(store, session_id)
+            except Exception as exc:  # pragma: no cover
+                print(f"[LR ] post-finish pipeline error: {exc!r}", flush=True)
         sess = store.get_session(session_id)
         return jsonify({
             "ok": True,
@@ -1109,15 +1297,15 @@ def _register_routes(app: Flask) -> None:
         if full is None:
             return jsonify({
                 "error": "not_ready",
-                "detail": "session has no full.wav yet",
+                "detail": "session has no full.aac yet",
                 "status": sess.status,
             }), 409
         return send_file(
             str(full),
-            mimetype="audio/wav",
+            mimetype="audio/aac",
             conditional=True,
             as_attachment=False,
-            download_name=f"{sess.title or sess.id}.wav",
+            download_name=f"{sess.title or sess.id}.aac",
         )
 
     # --- API: recording-kind classification (manual override) ----------
@@ -1866,7 +2054,7 @@ def _register_routes(app: Flask) -> None:
     @app.post("/api/v1/uploads/audio")
     def api_upload_audio() -> Any:
         """Accept one audio file from the browser, transcode to canonical
-        WAV if needed, create a one-chunk session, and run the AI
+        AAC if needed, create a one-chunk session, and run the AI
         pipeline (transcribe → classify → summarise → extract).
 
         Multipart form fields:
@@ -1928,8 +2116,8 @@ def _register_routes(app: Flask) -> None:
         work_dir: Optional[Path] = None
         try:
             fmt = transcode.sniff_format(inbox_path)
-            if transcode.is_canonical_wav(fmt):
-                wav_path = inbox_path
+            if transcode.is_canonical_aac(fmt):
+                aac_path = inbox_path
             else:
                 if not transcode.ffmpeg_available(cfg.ffmpeg_path):
                     return jsonify({
@@ -1943,22 +2131,22 @@ def _register_routes(app: Flask) -> None:
                     }), 503
                 work_dir = cfg.inbox_dir / f"work-{inbox_token}"
                 work_dir.mkdir(parents=True, exist_ok=True)
-                wav_path = work_dir / "out.wav"
-                transcode.transcode_to_wav(
-                    inbox_path, wav_path, ffmpeg_path=cfg.ffmpeg_path,
+                aac_path = work_dir / "out.aac"
+                transcode.transcode_to_aac(
+                    inbox_path, aac_path, ffmpeg_path=cfg.ffmpeg_path,
                 )
 
-            wav_bytes = wav_path.read_bytes()
-            if len(wav_bytes) < 44 or wav_bytes[0:4] != b"RIFF":
+            aac_bytes = aac_path.read_bytes()
+            if transcode.sniff_format(aac_path).kind != "aac":
                 return jsonify({
                     "error": "transcode_failed",
-                    "detail": "output is not a valid WAV",
+                    "detail": "output is not valid AAC",
                 }), 500
 
             sess = store.ingest_single_audio(
                 session_id=inbox_token,
                 title=title,
-                wav_bytes=wav_bytes,
+                audio_bytes=aac_bytes,
                 started_at=started_at,
             )
         except transcode.TranscodeError as exc:
@@ -1979,51 +2167,19 @@ def _register_routes(app: Flask) -> None:
             if work_dir is not None and work_dir.exists():
                 shutil.rmtree(work_dir, ignore_errors=True)
 
-        # Run the AI pipeline in a background thread so the upload
-        # returns immediately and the browser lands on the session
-        # page (which polls the live status) instead of babysitting
-        # a request that can take many minutes for long lectures.
-        # The device /finish flow stays synchronous by design (the
-        # device blocks on the response).
+        # The AI pipeline runs on the FIFO background worker so the
+        # upload returns immediately and the browser lands on the
+        # session page (which polls the live status) instead of
+        # babysitting a request that can take many minutes for long
+        # lectures. Tests pin LR_PIPELINE_BACKGROUND=False and get
+        # the deterministic inline run.
         transcript_provider = current_app_transcript_provider()
         text_provider = current_app_text_provider()
         run_in_background = current_app.config.get(
             "LR_PIPELINE_BACKGROUND", True,
         )
         if run_in_background:
-            with _PIPELINE_LOCK:
-                already_running = sess.id in _PIPELINES_IN_FLIGHT
-                if not already_running:
-                    _PIPELINES_IN_FLIGHT.add(sess.id)
-            if already_running:
-                print(
-                    f"[LR ] pipeline already running for "
-                    f"{sess.id[:8]}; skipping background run",
-                    flush=True,
-                )
-            else:
-                def _run_pipeline():
-                    try:
-                        processing.run_post_finish_pipeline(
-                            store, sess.id,
-                            transcript_provider=transcript_provider,
-                            classifier=text_provider,
-                            llm_provider=text_provider,
-                        )
-                    except Exception as exc:
-                        print(
-                            "[LR ] post-upload pipeline error: "
-                            f"{exc!r}", flush=True,
-                        )
-                    finally:
-                        with _PIPELINE_LOCK:
-                            _PIPELINES_IN_FLIGHT.discard(sess.id)
-
-                threading.Thread(
-                    target=_run_pipeline,
-                    name=f"lr-pipeline-{sess.id[:8]}",
-                    daemon=True,
-                ).start()
+            _enqueue_pipeline(current_app._get_current_object(), sess.id)
         else:
             # Deterministic mode (used by tests): run synchronously
             # so the response reflects the final status.

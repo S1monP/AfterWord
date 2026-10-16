@@ -1,10 +1,11 @@
-"""Audio transcoding using the ffmpeg binary.
+"""Audio transcoding and probing using the ffmpeg/ffprobe binaries.
 
-The web upload path accepts arbitrary audio files and turns them into
-the canonical 22050 Hz mono 32-bit WAV format the device uses. The
-browser tries to decode and re-encode first (faster, no ffmpeg
-required); when it can't (iPhone Voice Memos M4A is the common case),
-the server does it here.
+The canonical storage format is **AAC-LC** (~64 kbps, 22050 Hz mono):
+the device encodes its WAV chunks to AAC before upload, web uploads
+are transcoded to AAC at ingest, and stitching is a plain binary
+concatenation of ADTS AAC chunks. AAC keeps request bodies ~5x
+smaller than WAV (well under OpenRouter's upload caps), plays in
+every browser, and is accepted natively by the transcription API.
 
 We use ffmpeg via subprocess rather than a Python binding for two
 reasons: it supports every format under the sun without extra deps, and
@@ -14,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -24,6 +26,12 @@ from typing import Optional
 
 
 log = logging.getLogger("lr.transcode")
+
+#: Canonical AAC encoding parameters (speech-grade, transparent for
+#: ASR; ~2.4 MB per 5-minute chunk instead of ~13 MB of WAV).
+AAC_SAMPLE_RATE = 22050
+AAC_CHANNELS = 1
+AAC_BITRATE = "64k"
 
 
 class TranscodeError(Exception):
@@ -47,7 +55,7 @@ class TranscodeError(Exception):
 @dataclass
 class AudioFormat:
     """Result of sniffing the first few bytes of a file."""
-    kind: str            # 'wav' | 'mp3' | 'mp4' | 'ogg' | 'flac' | 'webm' | 'unknown'
+    kind: str            # 'aac' | 'wav' | 'mp3' | 'mp4' | 'ogg' | 'flac' | 'webm' | 'unknown'
     sample_rate: int = 0
     channels: int = 0
     bits_per_sample: int = 0
@@ -61,8 +69,8 @@ def sniff_format(path: Path) -> AudioFormat:
     """Read a few bytes from ``path`` and report the audio format.
 
     Best-effort: returns ``kind='unknown'`` if nothing matches; never
-    raises. The format is reliable for our purposes (we only use it to
-    skip transcoding when the file is already the canonical WAV).
+    raises. Used by ingest (skip transcoding when the file is already
+    canonical AAC) and by stitching (consistency check).
     """
     try:
         with open(path, "rb") as f:
@@ -72,6 +80,14 @@ def sniff_format(path: Path) -> AudioFormat:
 
     if len(head) < 4:
         return AudioFormat(kind="unknown")
+
+    # ADTS AAC: syncword 0xFFFx (12-bit sync + MPEG-4 layer bits).
+    # Must be checked BEFORE the generic MPEG-audio fallback below,
+    # which would otherwise misclassify the same bytes as MP3.
+    if (
+        len(head) >= 2 and head[0] == 0xFF and (head[1] & 0xF6) == 0xF0
+    ):
+        return AudioFormat(kind="aac")
 
     if head[0:4] == b"RIFF" and len(head) >= 12 and head[8:12] == b"WAVE":
         fmt = AudioFormat(kind="wav")
@@ -146,38 +162,131 @@ def ffmpeg_version(ffmpeg_path: str = "ffmpeg") -> Optional[str]:
     return None
 
 
-def is_canonical_wav(fmt: AudioFormat) -> bool:
-    """True if a sniffed WAV already matches the device format.
-
-    The device records at 22050 Hz mono 32-bit. If the upload is already
-    in that shape, we skip the ffmpeg round-trip.
+def is_canonical_aac(fmt: AudioFormat) -> bool:
+    """True if the sniffed file is already AAC (the canonical
+    storage format) — used to skip the ffmpeg round-trip at ingest.
     """
-    return (
-        fmt.kind == "wav"
-        and fmt.sample_rate == 22050
-        and fmt.channels == 1
-        and fmt.bits_per_sample == 32
-    )
+    return fmt.kind == "aac"
+
+
+def _ffprobe_path(ffmpeg_path: str) -> str:
+    """Derive the ffprobe binary path from the ffmpeg path.
+
+    Handles ``ffmpeg``, ``ffmpeg.exe``, and absolute paths.
+    """
+    name = Path(ffmpeg_path).name
+    if "ffprobe" in name:
+        return ffmpeg_path
+    probe_name = name.replace("ffmpeg", "ffprobe")
+    return str(Path(ffmpeg_path).with_name(probe_name))
+
+
+def ffprobe_available(ffmpeg_path: str = "ffmpeg") -> bool:
+    """True if the ffprobe binary can be found and run."""
+    probe = _ffprobe_path(ffmpeg_path)
+    return shutil.which(probe) is not None or os.path.isfile(probe)
+
+
+def probe_duration(
+    path: Path,
+    *,
+    ffmpeg_path: str = "ffmpeg",
+    timeout_sec: int = 60,
+) -> Optional[float]:
+    """Duration of an audio file in seconds via ffprobe.
+
+    Returns ``None`` when ffprobe is unavailable or the file can't
+    be probed — callers must treat that as "unknown", not zero.
+    """
+    if not path.exists() or path.stat().st_size == 0:
+        return None
+    probe = _ffprobe_path(ffmpeg_path)
+    if not ffprobe_available(ffmpeg_path):
+        return None
+    cmd = [
+        probe, "-v", "error", "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1", str(path),
+    ]
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True,
+            timeout=timeout_sec, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        return float(proc.stdout.strip())
+    except ValueError:
+        return None
+
+
+def decode_duration(
+    path: Path,
+    *,
+    ffmpeg_path: str = "ffmpeg",
+    timeout_sec: int = 600,
+) -> Optional[float]:
+    """Exact duration of an audio file in seconds by decoding it.
+
+    ADTS AAC has no container duration; ffprobe *estimates* it from
+    the bitrate, which drifts badly for quiet audio (silence encodes
+    far below the target bitrate). Decoding the whole file and
+    reading the last progress ``time=`` is always accurate, at the
+    cost of a full decode (fast for compressed audio).
+
+    Returns ``None`` when ffmpeg is unavailable or the file can't
+    be decoded.
+    """
+    if not path.exists() or path.stat().st_size == 0:
+        return None
+    if not ffmpeg_available(ffmpeg_path):
+        return None
+    cmd = [
+        ffmpeg_path, "-hide_banner", "-loglevel", "error",
+        "-progress", "pipe:1",
+        "-i", str(path), "-map", "0:a:0", "-f", "null", "-",
+    ]
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True,
+            timeout=timeout_sec, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    # With -progress pipe:1, structured progress goes to stdout
+    # regardless of loglevel; the final row for a stream is
+    # "out_time=00:25:07.551000" (also out_time_us/out_time_ms).
+    matches = re.findall(r"out_time=(\d+):(\d+):(\d+\.\d+)", proc.stdout or "")
+    if not matches:
+        return None
+    h, m, s = matches[-1]
+    try:
+        return int(h) * 3600 + int(m) * 60 + float(s)
+    except ValueError:
+        return None
 
 
 # ---------------------------------------------------------------------------
 # Transcode
 # ---------------------------------------------------------------------------
 
-def transcode_to_wav(
+def transcode_to_aac(
     src: Path,
     dst: Path,
     *,
     ffmpeg_path: str = "ffmpeg",
-    sample_rate: int = 22050,
-    channels: int = 1,
-    bits_per_sample: int = 32,
+    sample_rate: int = AAC_SAMPLE_RATE,
+    channels: int = AAC_CHANNELS,
+    bitrate: str = AAC_BITRATE,
     timeout_sec: int = 600,
 ) -> int:
-    """Convert ``src`` to a canonical WAV at ``dst`` using ffmpeg.
+    """Convert ``src`` to canonical AAC-LC (ADTS) at ``dst``.
 
-    Returns the size of the produced WAV. Raises :class:`TranscodeError`
-    on any failure with a stable ``reason`` code.
+    Returns the size of the produced file. Raises
+    :class:`TranscodeError` on any failure with a stable ``reason``
+    code.
     """
     if not src.exists() or src.stat().st_size == 0:
         raise TranscodeError(TranscodeError.REASON_BAD_INPUT,
@@ -197,22 +306,15 @@ def transcode_to_wav(
         except OSError:
             pass
 
-    codec_map = {16: "pcm_s16le", 24: "pcm_s24le", 32: "pcm_s32le"}
-    codec = codec_map.get(bits_per_sample)
-    if codec is None:
-        raise TranscodeError(
-            TranscodeError.REASON_BAD_INPUT,
-            f"unsupported bits_per_sample: {bits_per_sample}",
-        )
-
     cmd = [
         ffmpeg_path,
         "-y", "-hide_banner", "-loglevel", "error",
         "-i", str(src),
         "-ar", str(sample_rate),
         "-ac", str(channels),
-        "-c:a", codec,
-        "-f", "wav",
+        "-c:a", "aac",
+        "-b:a", bitrate,
+        "-f", "adts",
         str(dst),
     ]
 
@@ -237,10 +339,17 @@ def transcode_to_wav(
         log.warning("ffmpeg failed: %s", detail)
         raise TranscodeError(TranscodeError.REASON_FFMPEG_FAILED, detail)
 
-    if not dst.exists() or dst.stat().st_size < 44:
+    if not dst.exists() or dst.stat().st_size < 8:
         raise TranscodeError(
             TranscodeError.REASON_FFMPEG_FAILED,
             "ffmpeg produced no usable output",
+        )
+
+    # Verify the output is really ADTS AAC.
+    if sniff_format(dst).kind != "aac":
+        raise TranscodeError(
+            TranscodeError.REASON_FFMPEG_FAILED,
+            "ffmpeg output is not AAC",
         )
 
     return dst.stat().st_size
@@ -252,19 +361,20 @@ def ingest_audio_file(
     ffmpeg_path: str = "ffmpeg",
     work_dir: Optional[Path] = None,
 ) -> tuple[Path, AudioFormat]:
-    """Ensure ``src`` is a canonical WAV; transcode if not.
+    """Ensure ``src`` is canonical AAC; transcode if not.
 
-    Returns ``(wav_path, sniffed_format)`` where ``wav_path`` is the
-    final canonical WAV. If transcoding was needed, the returned path
-    is a new file in ``work_dir`` (or a temp dir); if not, it's ``src``
-    itself. Caller cleans up the returned path if it's not ``src``.
+    Returns ``(aac_path, sniffed_format)`` where ``aac_path`` is the
+    final canonical AAC file. If transcoding was needed, the returned
+    path is a new file in ``work_dir`` (or a temp dir); if not, it's
+    ``src`` itself. Caller cleans up the returned path if it's not
+    ``src``.
     """
     fmt = sniff_format(src)
-    if is_canonical_wav(fmt):
+    if is_canonical_aac(fmt):
         return src, fmt
 
     work = Path(work_dir) if work_dir else Path(tempfile.mkdtemp(prefix="lr-tx-"))
     work.mkdir(parents=True, exist_ok=True)
-    dst = work / f"{src.stem}.canonical.wav"
-    transcode_to_wav(src, dst, ffmpeg_path=ffmpeg_path)
+    dst = work / f"{src.stem}.aac"
+    transcode_to_aac(src, dst, ffmpeg_path=ffmpeg_path)
     return dst, fmt

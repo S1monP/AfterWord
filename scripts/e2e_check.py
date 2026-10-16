@@ -19,6 +19,8 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+FFMPEG = shutil.which("ffmpeg") or "ffmpeg-nonexistent-test-binary"
+
 
 def make_wav(payload: bytes, sr: int = 22050, ch: int = 1, bps: int = 32) -> bytes:
     byte_rate = sr * ch * (bps // 8)
@@ -42,6 +44,17 @@ def make_wav(payload: bytes, sr: int = 22050, ch: int = 1, bps: int = 32) -> byt
     return bytes(h) + payload
 
 
+def make_aac(payload: bytes) -> bytes:
+    """Canonical ADTS AAC chunk (as the device would upload)."""
+    from services import transcode
+    with tempfile.TemporaryDirectory(prefix="lr-e2e-enc-") as d:
+        src = Path(d) / "in.wav"
+        src.write_bytes(make_wav(payload))
+        dst = Path(d) / "out.aac"
+        transcode.transcode_to_aac(src, dst, ffmpeg_path=FFMPEG)
+        return dst.read_bytes()
+
+
 def run_checks(req) -> int:
     # 1. Empty state
     s, b, _ = req("GET", "/")
@@ -59,20 +72,20 @@ def run_checks(req) -> int:
     print("2. Announce OK")
 
     # 3. Upload chunks
-    wav1 = make_wav(b"A" * 200)
-    wav2 = make_wav(b"B" * 200)
-    s, b, _ = req("PUT", f"/api/v1/sessions/{sid}/chunks/1", data=wav1,
-                  headers={"Content-Type": "audio/wav"})
+    aac1 = make_aac(b"A" * 200)
+    aac2 = make_aac(b"B" * 200)
+    s, b, _ = req("PUT", f"/api/v1/sessions/{sid}/chunks/1", data=aac1,
+                  headers={"Content-Type": "audio/aac"})
     assert s == 200, (s, b)
-    s, b, _ = req("PUT", f"/api/v1/sessions/{sid}/chunks/2", data=wav2,
-                  headers={"Content-Type": "audio/wav"})
+    s, b, _ = req("PUT", f"/api/v1/sessions/{sid}/chunks/2", data=aac2,
+                  headers={"Content-Type": "audio/aac"})
     assert s == 200, (s, b)
     print("3. Chunks OK")
 
     # 4. Re-PUT chunk 1 (idempotency)
-    wav1b = make_wav(b"X" * 200)
-    s, b, _ = req("PUT", f"/api/v1/sessions/{sid}/chunks/1", data=wav1b,
-                  headers={"Content-Type": "audio/wav"})
+    aac1b = make_aac(b"X" * 200)
+    s, b, _ = req("PUT", f"/api/v1/sessions/{sid}/chunks/1", data=aac1b,
+                  headers={"Content-Type": "audio/aac"})
     assert s == 200
     print("4. Re-PUT OK")
 
@@ -92,9 +105,9 @@ def run_checks(req) -> int:
 
     # 7. Audio
     s, b, hdr = req("GET", f"/api/v1/sessions/{sid}/audio")
-    assert s == 200 and b[0:4] == b"RIFF" and b[8:12] == b"WAVE"
-    assert hdr.get("Content-Type", "").startswith("audio/wav")
-    assert len(b) == 444 and b"X" in b and b"B" in b
+    assert s == 200 and b[0] == 0xFF and (b[1] & 0xF6) == 0xF0
+    assert hdr.get("Content-Type", "").startswith("audio/aac")
+    assert len(b) == len(aac1b) + len(aac2) and b"X" in b and b"B" in b
     print(f"7. Audio OK, size={len(b)}")
 
     # 8. UI index
@@ -112,8 +125,8 @@ def run_checks(req) -> int:
     req("POST", "/api/v1/sessions",
         data=json.dumps({"id": sid2, "expected_count": 3}).encode(),
         headers={"Content-Type": "application/json"})
-    req("PUT", f"/api/v1/sessions/{sid2}/chunks/1", data=make_wav(b"Y" * 100),
-        headers={"Content-Type": "audio/wav"})
+    req("PUT", f"/api/v1/sessions/{sid2}/chunks/1", data=make_aac(b"Y" * 100),
+        headers={"Content-Type": "audio/aac"})
     s, b, _ = req("POST", f"/api/v1/sessions/{sid2}/finish")
     assert s == 409 and json.loads(b)["error"] == "missing_chunks"
     print("10. Missing chunks 409 OK")
@@ -137,7 +150,7 @@ def main() -> int:
     cfg = config_mod.Config(
         data_dir=tmp, host="127.0.0.1", port=0,
         openrouter_api_key="", minimax_api_key="",
-        ffmpeg_path="ffmpeg-nonexistent-test-binary",
+        ffmpeg_path=FFMPEG,
         max_upload_bytes=10 * 1024 * 1024,
     )
 

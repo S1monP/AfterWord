@@ -27,7 +27,6 @@ import base64
 import json
 import os
 import shutil
-import struct
 import subprocess
 import tempfile
 import urllib.error
@@ -226,17 +225,12 @@ TRANSCRIBE_SPEAKERS_ENV = "LR_TRANSCRIBE_SPEAKERS"
 
 #: OpenRouter caps inline transcription uploads at 25 MB (multipart)
 #: and JSON request bodies at 50 MB, and upstream providers time out
-#: after ~60 s of processing per request. Longer recordings are
-#: therefore split into chunks.
-TRANSCRIBE_CHUNK_MB_ENV = "LR_TRANSCRIBE_CHUNK_MB"
+#: after ~60 s of processing per request. Canonical storage is AAC
+#: (~8 KB/s), so a 1500 s (25 min) piece is ~12 MB — comfortably
+#: under the body caps. Longer stitched recordings are segmented to
+#: this length (stream copy, no re-encode) before transcription.
 TRANSCRIBE_CHUNK_SECONDS_ENV = "LR_TRANSCRIBE_CHUNK_SECONDS"
-# With MP3 compression (~8 KB/s) a 1500 s chunk is ~12 MB of audio
-# (~16 MB request body) — comfortably under the body caps.
 DEFAULT_TRANSCRIBE_CHUNK_SECONDS = 1500
-# WAV fallback (no ffmpeg available): 15 MB / 300 s keeps request
-# bodies at ~21 MB, the largest size known to pass reliably.
-DEFAULT_TRANSCRIBE_CHUNK_MB = 15
-DEFAULT_TRANSCRIBE_CHUNK_SECONDS_WAV = 300
 
 #: Provider-specific options passed as ``provider.options`` on the
 #: transcription request. The default enables Azure diarization so
@@ -255,13 +249,6 @@ DEFAULT_TRANSCRIBE_PROVIDER_OPTIONS: dict = {
 #: a bare 413. We refuse to send anything close to that and raise
 #: a clear, actionable error instead.
 MAX_TRANSCRIBE_BODY_BYTES = 45 * 1024 * 1024
-
-#: Env flag: transcode WAV chunks to 64 kbps MP3 before upload.
-#: On by default — request bodies drop from ~20 MB (WAV) to ~2 MB,
-#: far below the body caps, and uploads are ~10x faster. Set to
-#: ``0`` to send raw WAV chunks. Requires ffmpeg (falls back to
-#: WAV automatically when ffmpeg is unavailable or fails).
-TRANSCRIBE_COMPRESS_ENV = "LR_TRANSCRIBE_COMPRESS"
 
 #: Valid recording kinds the classifier can return.
 #: Mirrors ``storage.RECORDING_KINDS`` and
@@ -314,103 +301,6 @@ def _read_env_int(name: str, default: int) -> int:
         return int(os.environ.get(name, "") or default)
     except ValueError:
         return default
-
-
-def _wav_header(
-    sample_rate: int, channels: int, bits_per_sample: int,
-    data_size: int,
-) -> bytes:
-    """Build a canonical 44-byte PCM WAV header."""
-    byte_rate = sample_rate * channels * (bits_per_sample // 8)
-    block_align = channels * (bits_per_sample // 8)
-    return struct.pack(
-        "<4sI4s4sIHHIIHH4sI",
-        b"RIFF", 36 + data_size, b"WAVE",
-        b"fmt ", 16, 1, channels, sample_rate, byte_rate,
-        block_align, bits_per_sample,
-        b"data", data_size,
-    )
-
-
-def _parse_wav(data: bytes):
-    """Parse a RIFF/WAVE byte string.
-
-    Returns ``(data_offset, data_size, sample_rate, channels,
-    bits_per_sample)`` for well-formed WAV files, or ``None`` when
-    the bytes are not a WAV we can split.
-    """
-    if len(data) < 12 or data[0:4] != b"RIFF" or data[8:12] != b"WAVE":
-        return None
-    pos = 12
-    fmt = None
-    data_chunk = None
-    while pos + 8 <= len(data):
-        chunk_id = data[pos:pos + 4]
-        chunk_size = int.from_bytes(data[pos + 4:pos + 8], "little")
-        if chunk_id == b"fmt " and chunk_size >= 16:
-            body = data[pos + 8:pos + 8 + chunk_size]
-            channels = int.from_bytes(body[2:4], "little")
-            rate = int.from_bytes(body[4:8], "little")
-            bits = int.from_bytes(body[14:16], "little")
-            fmt = (rate, channels, bits)
-        elif chunk_id == b"data":
-            off = pos + 8
-            size = chunk_size
-            if size in (0, 0xFFFFFFFF):
-                # Streaming-style sizes: use whatever follows.
-                size = max(0, len(data) - off)
-            data_chunk = (off, size)
-            break
-        pos += 8 + chunk_size + (chunk_size & 1)
-    if fmt is None or data_chunk is None:
-        return None
-    rate, channels, bits = fmt
-    frame = channels * (bits // 8)
-    if rate <= 0 or frame <= 0:
-        return None
-    return data_chunk[0], data_chunk[1], rate, channels, bits
-
-
-def _split_wav(
-    path: Path,
-    max_bytes: int,
-    max_seconds: float,
-    out_dir: Path,
-) -> list[tuple[Path, float]]:
-    """Split a WAV file into chunks of at most ``max_bytes`` bytes
-    and ``max_seconds`` seconds (whichever binds first), aligned to
-    whole frames so no sample is corrupted.
-
-    Returns ``[(chunk_path, offset_seconds), ...]``. Files that are
-    not parseable WAVs, or that already fit within the limits, come
-    back whole as ``[(path, 0.0)]``. Chunk files (when any) are
-    written into ``out_dir``.
-    """
-    path = Path(path)
-    data = path.read_bytes()
-    info = _parse_wav(data)
-    if info is None:
-        return [(path, 0.0)]
-    data_off, data_size, rate, channels, bits = info
-    frame = channels * (bits // 8)
-    total_frames = data_size // frame
-    if total_frames <= 0:
-        return [(path, 0.0)]
-    frames_by_bytes = max_bytes // frame
-    frames_by_time = int(max_seconds * rate)
-    chunk_frames = min(frames_by_bytes, frames_by_time)
-    if chunk_frames < 1 or total_frames <= chunk_frames:
-        return [(path, 0.0)]
-    chunks: list[tuple[Path, float]] = []
-    for idx, start in enumerate(range(0, total_frames, chunk_frames)):
-        n = min(chunk_frames, total_frames - start)
-        blob = data[data_off + start * frame:data_off + (start + n) * frame]
-        chunk_path = Path(out_dir) / f"chunk_{idx:04d}.wav"
-        chunk_path.write_bytes(
-            _wav_header(rate, channels, bits, len(blob)) + blob,
-        )
-        chunks.append((chunk_path, start / rate))
-    return chunks
 
 
 def _format_timestamp(seconds: object) -> Optional[str]:
@@ -482,41 +372,6 @@ def _speakers_enabled() -> bool:
     return raw.strip().lower() not in ("0", "false", "no", "off")
 
 
-def _compress_enabled() -> bool:
-    """Resolve the chunk-compression flag from the environment.
-
-    Defaults to on; set ``LR_TRANSCRIBE_COMPRESS`` to
-    ``0``/``false``/``no``/``off`` to send raw WAV chunks.
-    """
-    raw = os.environ.get(TRANSCRIBE_COMPRESS_ENV, "")
-    return raw.strip().lower() not in ("0", "false", "no", "off")
-
-
-def _compress_to_mp3(
-    wav_path: Path, work_dir: Path, ffmpeg_path: str,
-) -> Optional[Path]:
-    """Transcode a WAV chunk to 64 kbps MP3 for upload.
-
-    Returns the MP3 path on success, or ``None`` when ffmpeg is
-    unavailable or fails — the caller then falls back to the raw
-    WAV chunk.
-    """
-    mp3_path = Path(work_dir) / (Path(wav_path).stem + ".mp3")
-    cmd = [
-        ffmpeg_path, "-y", "-hide_banner", "-loglevel", "error",
-        "-i", str(wav_path),
-        "-codec:a", "libmp3lame", "-b:a", "64k",
-        str(mp3_path),
-    ]
-    try:
-        result = subprocess.run(cmd, capture_output=True)
-    except OSError:
-        return None
-    if result.returncode != 0 or not mp3_path.exists():
-        return None
-    return mp3_path
-
-
 class TranscriptionProvider(LLMProvider):
     """Real audio transcription via OpenRouter.
 
@@ -528,17 +383,18 @@ class TranscriptionProvider(LLMProvider):
     return segment-level speaker labels rendered as
     ``[MM:SS] Speaker N: text`` lines.
 
-    Recordings are automatically split into chunks sized for the
-    transport: with MP3 compression available (default), chunking is
-    duration-driven (default 1500 s ≈ 12 MB of MP3 per request,
-    ~16 MB body); without ffmpeg, conservative WAV caps apply
-    (15 MB / 300 s). Segment timestamps are offset per chunk so the
-    merged transcript has continuous times. If a chunk hits a
-    transient upstream failure (the ~60 s processing timeout, a
-    5xx, or an oversized-body rejection), it is automatically split
-    in half and retried. Caveat: speaker cluster indices are
-    assigned per request, so "Speaker 1" in one chunk is not
-    guaranteed to be the same person in the next chunk.
+    Storage is canonical AAC (the device encodes before upload and
+    web uploads are transcoded at ingest), so requests stay small
+    (~12 MB per 25-minute piece). A stitched recording longer than
+    ``LR_TRANSCRIBE_CHUNK_SECONDS`` (default 1500 s) is segmented
+    with ffmpeg stream-copy (no re-encode, no quality loss) and the
+    pieces are transcribed with cumulative offsets so the merged
+    transcript has continuous times. If a piece hits a transient
+    upstream failure (the ~60 s processing timeout, a 5xx, or an
+    oversized-body rejection), it is automatically cut in half and
+    retried. Caveat: speaker cluster indices are assigned per
+    request, so "Speaker 1" in one piece is not guaranteed to be
+    the same person in the next piece.
 
     Pass ``http_transport`` to inject a fake (used in tests); the
     default is the stdlib ``urllib.request`` wrapper.
@@ -554,10 +410,8 @@ class TranscriptionProvider(LLMProvider):
         *,
         model: str = TRANSCRIPTION_MODEL,
         annotate_speakers: Optional[bool] = None,
-        chunk_max_bytes: Optional[int] = None,
         chunk_max_seconds: Optional[float] = None,
         provider_options: Optional[dict] = None,
-        compress: Optional[bool] = None,
         ffmpeg_path: Optional[str] = None,
         http_transport: Optional[HttpTransport] = None,
     ) -> None:
@@ -572,13 +426,6 @@ class TranscriptionProvider(LLMProvider):
             if annotate_speakers is None
             else bool(annotate_speakers)
         )
-        self._chunk_max_bytes = (
-            _read_env_int(
-                TRANSCRIBE_CHUNK_MB_ENV, DEFAULT_TRANSCRIBE_CHUNK_MB,
-            ) * 1024 * 1024
-            if chunk_max_bytes is None
-            else int(chunk_max_bytes)
-        )
         self._chunk_max_seconds = (
             float(_read_env_int(
                 TRANSCRIBE_CHUNK_SECONDS_ENV,
@@ -586,15 +433,6 @@ class TranscriptionProvider(LLMProvider):
             ))
             if chunk_max_seconds is None
             else float(chunk_max_seconds)
-        )
-        # Whether the duration limit was set explicitly (kwarg or
-        # env var). When it wasn't, the WAV fallback path clamps it
-        # to the WAV-safe default — see :meth:`_split_limits`.
-        self._chunk_seconds_explicit = (
-            chunk_max_seconds is not None
-            or bool(os.environ.get(
-                TRANSCRIBE_CHUNK_SECONDS_ENV, "",
-            ).strip())
         )
         if provider_options is None:
             raw = os.environ.get(TRANSCRIBE_PROVIDER_OPTIONS_ENV, "").strip()
@@ -610,10 +448,7 @@ class TranscriptionProvider(LLMProvider):
             else:
                 provider_options = dict(DEFAULT_TRANSCRIBE_PROVIDER_OPTIONS)
         self._provider_options = provider_options
-        self._compress = (
-            _compress_enabled() if compress is None else bool(compress)
-        )
-        # ffmpeg path for chunk compression; same env var the app
+        # ffmpeg path for segmentation/cutting; same env var the app
         # config uses so one setting covers both.
         self._ffmpeg_path = (
             ffmpeg_path or os.environ.get("LR_FFMPEG_PATH", "ffmpeg")
@@ -626,53 +461,45 @@ class TranscriptionProvider(LLMProvider):
             audio_path = Path(audio_path)
         if not audio_path.exists():
             raise FileNotFoundError(str(audio_path))
-        # Split long recordings into chunks sized for the transport
-        # that will actually be used (MP3 when ffmpeg is available,
-        # raw WAV otherwise); files that already fit come back as a
-        # single chunk.
+        # Segment long stitched recordings into ~25-minute pieces
+        # (stream copy); short files come back as a single piece.
         tmp_dir = Path(tempfile.mkdtemp(prefix="lr-stt-"))
         try:
-            max_bytes, max_seconds = self._split_limits()
-            chunks = _split_wav(
-                audio_path,
-                max_bytes,
-                max_seconds,
-                tmp_dir,
-            )
-            total_chunks = len(chunks)
-            if total_chunks > 1:
+            pieces = self._segment_audio(audio_path, tmp_dir)
+            total = len(pieces)
+            if total > 1:
                 print(
-                    f"[LR ] transcribing: {total_chunks} chunks to send",
+                    f"[LR ] transcribing: {total} pieces to send",
                     flush=True,
                 )
             seg_parts: list[dict] = []
             text_parts: list[str] = []
-            all_chunks_had_segments = True
-            for chunk_no, (chunk_path, offset) in enumerate(
-                chunks, start=1,
+            all_had_segments = True
+            for piece_no, (piece_path, offset) in enumerate(
+                pieces, start=1,
             ):
-                if total_chunks > 1:
-                    # Console progress: a long multi-chunk run is
+                if total > 1:
+                    # Console progress: a long multi-piece run is
                     # completely silent otherwise (the dev server
                     # only logs the HTTP request once it completes),
                     # which makes it look hung.
                     print(
-                        f"[LR ] transcribing: chunk {chunk_no}/"
-                        f"{total_chunks} (starts at {int(offset)} s)",
+                        f"[LR ] transcribing: piece {piece_no}/"
+                        f"{total} (starts at {int(offset)} s)",
                         flush=True,
                     )
-                had, segs, texts = self._transcribe_chunk(
-                    chunk_path, offset, tmp_dir,
+                had, segs, texts = self._transcribe_piece(
+                    piece_path, offset, tmp_dir,
                 )
-                all_chunks_had_segments = all_chunks_had_segments and had
+                all_had_segments = all_had_segments and had
                 seg_parts.extend(segs)
                 text_parts.extend(texts)
-            if total_chunks > 1:
+            if total > 1:
                 print(
-                    f"[LR ] transcribing: merged {total_chunks} chunk(s)",
+                    f"[LR ] transcribing: merged {total} piece(s)",
                     flush=True,
                 )
-            if all_chunks_had_segments and seg_parts:
+            if all_had_segments and seg_parts:
                 rendered = _segments_to_transcript(
                     seg_parts, annotate_speakers=self._annotate_speakers,
                 )
@@ -683,34 +510,27 @@ class TranscriptionProvider(LLMProvider):
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
     def _post_transcription(
-        self, audio_path: Path, work_dir: Path,
+        self, audio_path: Path, audio_format: Optional[str] = None,
     ) -> bytes:
-        """POST one audio chunk and return the raw response body.
+        """POST one audio piece and return the raw response body.
 
         Uses OpenRouter's JSON request shape (base64
         ``input_audio``) because provider-specific options such as
-        Azure diarization are only supported on the JSON path. When
-        compression is enabled and ffmpeg is available, the chunk
-        is first transcoded to 64 kbps MP3 — request bodies drop
-        from ~20 MB (WAV) to ~2 MB, far below OpenRouter's body
-        caps (multipart 25 MB, JSON 50 MB) — otherwise the raw WAV
-        chunk is sent.
+        Azure diarization are only supported on the JSON path.
+        The format label defaults to the sniffed kind of the file
+        (canonical storage is AAC; halving pieces inherit whatever
+        the source was).
         """
-        send_path = audio_path
-        send_format = "wav"
-        if self._compress:
-            mp3_path = _compress_to_mp3(
-                audio_path, work_dir, self._ffmpeg_path,
-            )
-            if mp3_path is not None:
-                send_path = mp3_path
-                send_format = "mp3"
-        content = send_path.read_bytes()
+        if audio_format is None:
+            from services import transcode as _tx
+            fmt = _tx.sniff_format(audio_path).kind
+            audio_format = fmt if fmt != "unknown" else "aac"
+        content = audio_path.read_bytes()
         payload: dict = {
             "model": self._model,
             "input_audio": {
                 "data": base64.b64encode(content).decode("ascii"),
-                "format": send_format,
+                "format": audio_format,
             },
             "response_format": "verbose_json",
             "timestamp_granularities": ["segment"],
@@ -724,8 +544,8 @@ class TranscriptionProvider(LLMProvider):
             raise LLMError(
                 f"transcription request body is {len(body)} bytes, "
                 f"over the {MAX_TRANSCRIBE_BODY_BYTES} byte safety "
-                "cap; lower LR_TRANSCRIBE_CHUNK_MB (current chunk "
-                f"cap: {self._chunk_max_bytes} bytes)"
+                "cap; lower LR_TRANSCRIBE_CHUNK_SECONDS (current "
+                f"piece limit: {self._chunk_max_seconds} s)"
             )
         headers = {
             "Authorization": f"Bearer {self._api_key}",
@@ -791,42 +611,122 @@ class TranscriptionProvider(LLMProvider):
                 self._ffmpeg_ok = False
         return self._ffmpeg_ok
 
-    def _split_limits(self) -> tuple[int, float]:
-        """Chunk-size limits for :func:`_split_wav`.
+    def _probe_duration(self, path: Path) -> Optional[float]:
+        """Accurate duration of an audio file, or ``None``.
 
-        With MP3 compression available, chunking is driven purely by
-        the duration limit (MP3 is ~8 KB/s, so the byte cap is
-        non-binding). Without it, the conservative WAV caps apply:
-        the configured byte cap, and the duration clamped to the
-        WAV-safe default unless the duration was set explicitly.
+        ADTS AAC has no container duration; ffprobe *estimates* it
+        from the bitrate, which drifts badly for quiet audio. The
+        decode-based probe is exact, so prefer it and fall back to
+        ffprobe only when ffmpeg is missing (where nothing else
+        works anyway).
         """
-        if self._compress and self._probe_ffmpeg():
-            return (1024 ** 3, self._chunk_max_seconds)
-        seconds = self._chunk_max_seconds
-        if not self._chunk_seconds_explicit:
-            seconds = min(seconds, DEFAULT_TRANSCRIBE_CHUNK_SECONDS_WAV)
-        return (self._chunk_max_bytes, seconds)
+        from services import transcode as _tx
+        d = _tx.decode_duration(path, ffmpeg_path=self._ffmpeg_path)
+        if d is not None:
+            return d
+        return _tx.probe_duration(path, ffmpeg_path=self._ffmpeg_path)
 
-    @staticmethod
-    def _chunk_audio_duration(path: Path) -> Optional[float]:
-        """Duration of a WAV chunk in seconds, or ``None`` when the
-        file is not a parseable WAV."""
+    def _segment_audio(
+        self, audio_path: Path, work_dir: Path,
+    ) -> list[tuple[Path, float]]:
+        """Split a long recording into ≤``chunk_max_seconds`` pieces.
+
+        Stream-copy segmentation (``-f segment -c copy``): no
+        re-encode, no quality loss, fast. Returns
+        ``[(piece_path, offset_seconds), ...]`` with offsets taken
+        from the segment muxer's exact start times (via its
+        ``-segment_list`` CSV; ffprobe estimates for ADTS drift,
+        especially for quiet audio). Files that are short enough —
+        or systems without ffprobe/ffmpeg — come back whole as
+        ``[(audio_path, 0.0)]`` (the per-request body guard still
+        applies).
+        """
+        duration = self._probe_duration(audio_path)
+        if duration is None or duration <= self._chunk_max_seconds:
+            return [(audio_path, 0.0)]
+        if not self._probe_ffmpeg():
+            # Can't segment without ffmpeg: send the whole file and
+            # let the body guard produce a clear error if too big.
+            return [(audio_path, 0.0)]
+        list_path = Path(work_dir) / "pieces.csv"
+        cmd = [
+            self._ffmpeg_path, "-y", "-hide_banner", "-loglevel", "error",
+            "-i", str(audio_path),
+            "-f", "segment",
+            "-segment_time", str(int(self._chunk_max_seconds)),
+            "-c", "copy",
+            "-segment_list", str(list_path),
+            "-segment_list_type", "csv",
+            str(Path(work_dir) / "piece_%04d.aac"),
+        ]
         try:
-            data = Path(path).read_bytes()
-        except OSError:
-            return None
-        info = _parse_wav(data)
-        if info is None:
-            return None
-        data_off, data_size, rate, channels, bits = info
-        frame = channels * (bits // 8)
-        if rate <= 0 or frame <= 0:
-            return None
-        return (data_size // frame) / rate
+            result = subprocess.run(cmd, capture_output=True)
+        except OSError as exc:
+            raise LLMError(f"ffmpeg segmentation failed: {exc}") from exc
+        if result.returncode != 0:
+            stderr = (result.stderr or b"").decode(
+                "utf-8", errors="replace",
+            ).strip().splitlines()
+            raise LLMError(
+                "ffmpeg segmentation failed: "
+                + (stderr[-1] if stderr else f"exit {result.returncode}")
+            )
+        # Exact piece start times from the segment list
+        # (filename,start_time,end_time rows). Fall back to ffprobe
+        # estimates if the list is missing or unparseable.
+        starts: Optional[list[float]] = None
+        try:
+            rows = list_path.read_text().splitlines()
+            starts = [float(r.split(",")[1]) for r in rows if r.strip()]
+        except (OSError, IndexError, ValueError):
+            starts = None
+        pieces: list[tuple[Path, float]] = []
+        files = sorted(Path(work_dir).glob("piece_*.aac"))
+        if not files:
+            return [(audio_path, 0.0)]
+        if starts is not None and len(starts) == len(files):
+            return list(zip(files, starts))
+        offset = 0.0
+        for p in files:
+            pieces.append((p, offset))
+            d = self._probe_duration(p)
+            offset += d if d is not None else self._chunk_max_seconds
+        return pieces
+
+    def _cut_piece(
+        self, src: Path, start: float, duration: float,
+        out_dir: Path, depth: int, idx: int,
+    ) -> Path:
+        """Stream-copy ``[start, start+duration)`` of ``src`` to a
+        new audio file for the halving retry.
+
+        The output keeps the source's extension: with ``-c copy``
+        the muxer must match the stream codec, and halving pieces
+        inherit whatever format the recording was (canonical AAC,
+        or WAV for a legacy recording).
+        """
+        suffix = src.suffix if src.suffix else ".aac"
+        out = Path(out_dir) / f"cut_{depth}_{idx}_{int(start * 1000)}{suffix}"
+        cmd = [
+            self._ffmpeg_path, "-y", "-hide_banner", "-loglevel", "error",
+            "-ss", f"{start:.3f}", "-i", str(src),
+            "-t", f"{duration:.3f}",
+            "-c", "copy",
+            str(out),
+        ]
+        try:
+            result = subprocess.run(cmd, capture_output=True)
+        except OSError as exc:
+            raise LLMError(f"ffmpeg cut failed: {exc}") from exc
+        if result.returncode != 0 or not out.exists():
+            raise LLMError(
+                f"ffmpeg cut failed: exit {result.returncode}"
+            )
+        return out
 
     @staticmethod
     def _is_transient_failure(exc: Exception) -> bool:
-        """Whether halving the chunk could plausibly help: upstream
+        """Whether halving the piece could plausibly help: upstream
         timeouts / 5xx / oversized-body rejections and network-level
         errors. Client errors (401, 400) are not retryable."""
         if isinstance(exc, LLMHTTPError):
@@ -838,51 +738,56 @@ class TranscriptionProvider(LLMProvider):
         # network-level OSErrors.
         return isinstance(exc, (urllib.error.URLError, OSError))
 
-    def _transcribe_chunk(
+    def _transcribe_piece(
         self,
-        chunk_path: Path,
+        piece_path: Path,
         offset: float,
         work_dir: Path,
         depth: int = 0,
     ) -> tuple[bool, list[dict], list[str]]:
-        """Transcribe one chunk file.
+        """Transcribe one piece file.
 
         Returns ``(had_segments, segments, texts)``. On a transient
-        upstream failure (timeout, 5xx, oversized body), the chunk
-        is split in half and retried recursively — large chunks that
+        upstream failure (timeout, 5xx, oversized body), the piece
+        is cut in half and retried recursively — large pieces that
         would otherwise fail (e.g. against the upstream ~60 s
         processing timeout) degrade to smaller pieces instead of
         failing the whole recording.
         """
         try:
-            raw = self._post_transcription(chunk_path, work_dir)
+            raw = self._post_transcription(piece_path)
         except (LLMError, urllib.error.URLError, OSError) as exc:
-            duration = self._chunk_audio_duration(chunk_path)
+            duration = self._probe_duration(piece_path)
             if (
                 depth < 3
                 and duration is not None
                 and duration > 90
+                and self._probe_ffmpeg()
                 and self._is_transient_failure(exc)
             ):
                 print(
-                    f"[LR ] transcribing: chunk failed ({exc}); "
-                    "splitting it in half and retrying",
+                    f"[LR ] transcribing: piece failed ({exc}); "
+                    "cutting it in half and retrying",
                     flush=True,
                 )
-                # Sub-chunks go into their own directory so retry
+                # Sub-pieces go into their own directory so retry
                 # generations never overwrite each other's files.
                 sub_dir = Path(work_dir) / (
                     f"retry-{depth}-{int(offset * 1000)}"
                 )
                 sub_dir.mkdir(parents=True, exist_ok=True)
+                half = duration / 2.0
                 had_all = True
                 segs: list[dict] = []
                 texts: list[str] = []
-                for sub_path, sub_off in _split_wav(
-                    chunk_path, 1024 ** 3, duration / 2.0, sub_dir,
+                for idx, (start, dur) in enumerate(
+                    ((0.0, half), (half, duration - half)), start=1,
                 ):
-                    h, s, t = self._transcribe_chunk(
-                        sub_path, offset + sub_off, work_dir,
+                    sub_path = self._cut_piece(
+                        piece_path, start, dur, sub_dir, depth, idx,
+                    )
+                    h, s, t = self._transcribe_piece(
+                        sub_path, offset + start, work_dir,
                         depth=depth + 1,
                     )
                     had_all = had_all and h

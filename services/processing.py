@@ -4,7 +4,7 @@ The ``/finish`` endpoint stitches the session's audio and leaves it in
 ``status='ready'``. Right after that, the server kicks off the
 post-finish pipeline, which runs the LLM steps in order:
 
-  1. ``OpenRouterProvider.transcribe(full.wav)``  → transcript text
+  1. ``TranscriptionProvider.transcribe(full.aac)``  → transcript text
   2. Persist the transcript as an ``artifacts`` row (kind='transcript')
   3. ``TextProvider.classify(transcript)``        → (kind, confidence)
   4. ``Storage.set_kind(...)``                    → session.kind
@@ -112,7 +112,7 @@ def _resolve_session(storage: Storage, session_id: str) -> dict:
     full_path = storage.open_full_audio(session_id)
     if full_path is None:
         raise _PipelineError(
-            f"session {session_id!r} has no full.wav",
+            f"session {session_id!r} has no full.aac",
             reason=REASON_NO_AUDIO,
         )
     return {
@@ -128,6 +128,7 @@ def run_post_finish_pipeline(
     transcript_provider: Optional[LLMProvider] = None,
     classifier: Optional[LLMProvider] = None,
     llm_provider: Optional[LLMProvider] = None,
+    resume: bool = False,
 ) -> Optional[dict]:
     """Run the post-stitch pipeline for ``session_id``.
 
@@ -142,6 +143,16 @@ def run_post_finish_pipeline(
     same ``classifier`` provider, since both call the same model.
     Tests that want to exercise just the classification or just
     the summary path can pass a different one for each.
+
+    With ``resume=True`` (used by the boot sweep for sessions
+    stranded by a server restart), steps whose artifact was
+    already persisted by a previous run are skipped: an existing
+    transcript artifact means the recording is not transcribed
+    again (the expensive step), an existing summary artifact means
+    summarisation is skipped. Statuses still walk the legal
+    transition chain so the transition guard stays satisfied. The
+    manual retry endpoint deliberately uses ``resume=False`` (full
+    redo).
 
     The pipeline walks these states:
 
@@ -201,45 +212,72 @@ def run_post_finish_pipeline(
     # manual overrides are never clobbered.
     _time_match_session(storage, session_id)
 
-    # 3. Transcribe.
+    # 3. Transcribe. On resume, a transcript artifact persisted by
+    # a previous run is reused verbatim — the recording is NOT
+    # transcribed again. Statuses still walk the legal chain so
+    # the transition guard stays satisfied.
+    resume_transcript: Optional[str] = None
+    if resume:
+        try:
+            existing = storage.get_artifact(session_id, "transcript")
+        except Exception:  # pragma: no cover  (defensive)
+            existing = None
+        if (
+            isinstance(existing, dict)
+            and isinstance(existing.get("content"), str)
+            and existing["content"].strip()
+        ):
+            resume_transcript = existing["content"]
+
     try:
         _set_status(storage, session_id, STATUS_TRANSCRIBING)
     except _PipelineError as exc:
         return _mark_failed(
             storage, session_id, "bad_transition", str(exc),
         )
-    try:
-        transcript = transcript_provider.transcribe(full_path)
-    except LLMError as exc:
-        return _mark_failed(
-            storage, session_id, REASON_TRANSCRIBE_FAILED,
-            f"transcribe: {exc}",
-        )
-    except Exception as exc:  # pragma: no cover  (defensive)
-        return _mark_failed(
-            storage, session_id, REASON_TRANSCRIBE_FAILED,
-            f"transcribe: {exc!r}",
-        )
+    if resume_transcript is not None:
+        transcript = resume_transcript
+    else:
+        try:
+            transcript = transcript_provider.transcribe(full_path)
+        except LLMError as exc:
+            return _mark_failed(
+                storage, session_id, REASON_TRANSCRIBE_FAILED,
+                f"transcribe: {exc}",
+            )
+        except Exception as exc:  # pragma: no cover  (defensive)
+            return _mark_failed(
+                storage, session_id, REASON_TRANSCRIBE_FAILED,
+                f"transcribe: {exc!r}",
+            )
     if not isinstance(transcript, str) or not transcript.strip():
         return _mark_failed(
             storage, session_id, REASON_TRANSCRIBE_FAILED,
             "transcribe: empty result",
         )
     # 4. Persist the transcript as an artifact and bump status.
+    #    (Skipped on resume — the artifact is already there.)
+    if resume_transcript is None:
+        try:
+            storage.add_artifact(
+                session_id, "transcript", transcript,
+                model=getattr(transcript_provider, "name", None),
+            )
+        except _PipelineError as exc:
+            return _mark_failed(
+                storage, session_id, "bad_transition", str(exc),
+            )
+        except Exception as exc:  # pragma: no cover
+            return _mark_failed(
+                storage, session_id, REASON_TRANSCRIBE_FAILED,
+                f"persist transcript: {exc!r}",
+            )
+    # 4b. Bump status either way (transcribing → transcribed is legal).
     try:
-        storage.add_artifact(
-            session_id, "transcript", transcript,
-            model=getattr(transcript_provider, "name", None),
-        )
         _set_status(storage, session_id, STATUS_TRANSCRIBED)
     except _PipelineError as exc:
         return _mark_failed(
             storage, session_id, "bad_transition", str(exc),
-        )
-    except Exception as exc:  # pragma: no cover
-        return _mark_failed(
-            storage, session_id, REASON_TRANSCRIBE_FAILED,
-            f"persist transcript: {exc!r}",
         )
 
     # 5. Classify — unless the kind is already known. The calendar
@@ -299,46 +337,71 @@ def run_post_finish_pipeline(
 
     # 7. Summarise. A no-op summariser (no API key configured)
     # returns an empty Summary, so this step always succeeds in
-    # the no-key case.
+    # the no-key case. On resume, a summary artifact persisted by
+    # a previous run is reused instead of re-calling the model.
+    resume_summary: Optional[Summary] = None
+    if resume:
+        try:
+            existing = storage.get_artifact(session_id, "summary")
+        except Exception:  # pragma: no cover  (defensive)
+            existing = None
+        if isinstance(existing, dict) and isinstance(
+            existing.get("content"), str,
+        ):
+            try:
+                prior = json.loads(existing["content"])
+                resume_summary = Summary(
+                    text=str(prior.get("text", "")),
+                    key_points=list(prior.get("key_points", [])),
+                )
+            except (ValueError, TypeError, AttributeError):
+                resume_summary = None  # corrupt artifact; redo
     try:
         _set_status(storage, session_id, STATUS_SUMMARISING)
     except _PipelineError as exc:
         return _mark_failed(
             storage, session_id, "bad_transition", str(exc),
         )
-    try:
-        summary = llm_provider.summarize(transcript)
-        # Serialise the Summary as JSON so the storage layer
-        # doesn't need to know the dataclass shape. ``text`` is
-        # the display string; ``key_points`` is a list.
+    if resume_summary is not None:
+        summary = resume_summary
         summary_payload = json.dumps({
             "text": summary.text,
             "key_points": list(summary.key_points),
         })
-    except LLMError as exc:
-        return _mark_failed(
-            storage, session_id, REASON_SUMMARISE_FAILED,
-            f"summarise: {exc}",
-        )
-    except Exception as exc:  # pragma: no cover
-        return _mark_failed(
-            storage, session_id, REASON_SUMMARISE_FAILED,
-            f"summarise: {exc!r}",
-        )
-    try:
-        storage.add_artifact(
-            session_id, "summary", summary_payload,
-            model=getattr(llm_provider, "name", None),
-        )
-    except _PipelineError as exc:
-        return _mark_failed(
-            storage, session_id, "bad_transition", str(exc),
-        )
-    except Exception as exc:  # pragma: no cover
-        return _mark_failed(
-            storage, session_id, REASON_SUMMARISE_FAILED,
-            f"persist summary: {exc!r}",
-        )
+    else:
+        try:
+            summary = llm_provider.summarize(transcript)
+            # Serialise the Summary as JSON so the storage layer
+            # doesn't need to know the dataclass shape. ``text`` is
+            # the display string; ``key_points`` is a list.
+            summary_payload = json.dumps({
+                "text": summary.text,
+                "key_points": list(summary.key_points),
+            })
+        except LLMError as exc:
+            return _mark_failed(
+                storage, session_id, REASON_SUMMARISE_FAILED,
+                f"summarise: {exc}",
+            )
+        except Exception as exc:  # pragma: no cover
+            return _mark_failed(
+                storage, session_id, REASON_SUMMARISE_FAILED,
+                f"summarise: {exc!r}",
+            )
+        try:
+            storage.add_artifact(
+                session_id, "summary", summary_payload,
+                model=getattr(llm_provider, "name", None),
+            )
+        except _PipelineError as exc:
+            return _mark_failed(
+                storage, session_id, "bad_transition", str(exc),
+            )
+        except Exception as exc:  # pragma: no cover
+            return _mark_failed(
+                storage, session_id, REASON_SUMMARISE_FAILED,
+                f"persist summary: {exc!r}",
+            )
 
     # 8. Extract. Same pattern: LLM error → mark failed;
     # otherwise persist as an ``extraction`` artifact.
