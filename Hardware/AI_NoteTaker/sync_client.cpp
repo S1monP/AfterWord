@@ -96,6 +96,35 @@ void syncClearAbort()   { g_syncAbort = false; }
 bool syncAborted()      { return g_syncAbort; }
 
 // ---------------------------------------------------------------------------
+//  UI hook + abortable upload stream
+// ---------------------------------------------------------------------------
+static void (*g_uiHook)() = nullptr;
+
+void syncSetUiHook(void (*fn)()) { g_uiHook = fn; }
+
+// Wraps the SD file for HTTPClient::sendRequest().  Runs the UI hook on
+// every block HTTPClient reads (~1.4 KB), so the LED and button stay live
+// during a multi-second PUT, and reports available() == -1 once an abort is
+// requested, which makes HTTPClient stop sending and fail the request.  The
+// server then holds at most a torn chunk, which the next attempt re-PUTs.
+class UiPumpStream : public Stream {
+ public:
+  explicit UiPumpStream(File &f) : f_(f) {}
+  using Stream::readBytes;
+  int available() override { return g_syncAbort ? -1 : f_.available(); }
+  int read() override { return f_.read(); }
+  int peek() override { return f_.peek(); }
+  size_t readBytes(char *buf, size_t len) override {
+    if (g_uiHook) g_uiHook();
+    return f_.read((uint8_t *)buf, len);
+  }
+  size_t write(uint8_t) override { return 0; }
+
+ private:
+  File &f_;
+};
+
+// ---------------------------------------------------------------------------
 //  Deterministic session id + ISO timestamp
 // ---------------------------------------------------------------------------
 size_t syncBuildSessionId(const char *folderName, char *out, size_t outLen) {
@@ -243,11 +272,18 @@ bool syncPutChunk(const char *sessionId, int chunkIndex, const char *filePath) {
   http.addHeader("Content-Type", "audio/aac");
   addAuthHeader(http);
 
-  // Stream the file straight off the SD card -- sendRequest with a File*
+  // Stream the file straight off the SD card -- sendRequest with a Stream*
   // reads and writes in bounded chunks internally, so a 2.4 MB chunk never
   // sits in RAM.  This is the whole reason we do not build a String body.
   unsigned long t0 = millis();
-  int code = http.sendRequest("PUT", &f, size);
+  UiPumpStream body(f);
+  int code = http.sendRequest("PUT", &body, size);
+  if (g_syncAbort) {
+    Serial.printf("[SYNC] chunk %d: upload aborted\n", chunkIndex);
+    http.end();
+    f.close();
+    return false;
+  }
 
   if (code == 200) {
     Serial.printf("[SYNC] chunk %d: %u B in %u s\n",

@@ -214,10 +214,10 @@
 // not the user -- is the recovery path, so this can be generous.
 #define SYNC_RETRY_INTERVAL_MS      (5UL * 60 * 1000)
 
-// Maximum chunk index we will look for in one session folder.  Matches the
-// server's own expected_count ceiling in practice (5 min chunks -> ~48 per
-// 4 h session).
-#define SYNC_MAX_CHUNKS             64
+// Maximum chunks per session folder, for both transcoding and sync.  5 min
+// chunks -> 48 per 4 h session; every pause/resume starts a new chunk too,
+// so leave plenty of headroom.
+#define SYNC_MAX_CHUNKS             128
 
 // V0.6 -- STATE_SYNCING uses BLUE, which is otherwise only used during
 // BOOTING (blue slow blink = trying networks) and AP setup (solid blue).
@@ -347,6 +347,19 @@ unsigned long lastSyncMs = 0;
 // so the LED shows a green confirmation before falling back to IDLE solid.
 unsigned long syncOkFlashUntilMs = 0;
 bool          syncOkFlashActive  = false;
+
+// The chunks of one session as found on the SD card.  Local chunk numbers
+// can have gaps (the transcoder drops header-only WAVs), but the server
+// wants 1..N, so server index k is the k-th smallest local number.  Every
+// step -- the announced count, each PUT, the missing-chunk repair and the
+// final purge -- goes through this one list, so a file is only ever deleted
+// if it was part of the upload the server confirmed.
+struct SessionChunks {
+  uint16_t local[SYNC_MAX_CHUNKS];   // sorted local chunk numbers (N.aac)
+  int      count;                    // == expected_count sent to the server
+  bool     pendingWav;               // a .wav still waits for transcoding
+  bool     overflow;                 // more than SYNC_MAX_CHUNKS .aac files
+};
 
 // -----------------------------------------------------------------------------
 //  FORWARD DECLARATIONS
@@ -530,13 +543,9 @@ void loop() {
         setState(STATE_IDLE);
         break;
 
-      // V0.6 -- long-press during SYNCING aborts the in-flight attempt.
-      // Files are untouched; the periodic retry picks it up later.  This is
-      // safe even mid-PUT because re-PUT is idempotent server-side.
-      case STATE_SYNCING:
-        Serial.println("[EVT ] Long press -> abort sync");
-        syncAbort();
-        break;
+      // Long-press during SYNCING (abort) is handled inside the sync sweep
+      // by serviceUiDuringSync(): the sweep blocks loop(), so it never
+      // reaches this switch.
 
       // STATE_TRANSCODING ignores long-press; let the pipeline finish so a
       // partially-renamed chunk doesn't leave us with a stranded .tmp file.
@@ -1028,8 +1037,7 @@ void endSession() {
   // fall through to IDLE and the periodic retry takes over.
   if (justEndedFolder[0] != '\0' && WiFi.status() == WL_CONNECTED) {
     Serial.printf("[SYNC] uploading %s ...\n", justEndedFolder);
-    setState(STATE_SYNCING);
-    syncOneSession(justEndedFolder);
+    runSyncSweep(justEndedFolder);
     lastSyncMs = millis();
   } else if (justEndedFolder[0] != '\0') {
     Serial.println("[SYNC] no WiFi, will retry later");
@@ -1251,7 +1259,7 @@ void transcodeSessionFolder(const char *folderPath) {
   }
 
   // Pass 1: collect candidate .wav files (those without a sibling .aac).
-  static struct Candidate { char path[64]; } cands[64];
+  static struct Candidate { char path[64]; } cands[SYNC_MAX_CHUNKS];
   uint16_t candCount = 0;
 
   File d1 = SD.open(folderPath);
@@ -1397,47 +1405,109 @@ void runTranscodingSweep(const char *onlyFolder) {
 //  Guard: runSyncSweep() is only ever entered from BOOTING-sweep, IDLE, or
 //  endSession() -- i.e. never while RECORDING or PAUSED.
 
-// Count contiguous .aac files 1..N in the folder and return the highest
-// index present.  Returns 0 when there are none.  Chunks are named by the
-// recorder as 1.wav -> 1.aac, 2.aac, ... so a contiguous 1..N run is the
-// normal case; we stop at the first gap so a half-uploaded set does not
-// claim a higher expected_count than the server can satisfy.
-static int countAacChunks(const char *folderPath) {
-  int highest = 0;
-  for (int i = 1; i <= SYNC_MAX_CHUNKS; i++) {
-    char p[128];
-    snprintf(p, sizeof(p), "%s/%d.aac", folderPath, i);
-    if (SD.exists(p)) highest = i;
-    else break;
-  }
-  return highest;
+static void chunkAacPath(const char *folderPath, uint16_t localNum,
+                         char *out, size_t len) {
+  snprintf(out, len, "%s/%u.aac", folderPath, (unsigned)localNum);
 }
 
-// Delete every .aac in the folder and then the folder itself.  Only called
-// after a confirmed stitch.
-static void purgeSessionFolder(const char *folderPath) {
-  for (int i = 1; i <= SYNC_MAX_CHUNKS; i++) {
-    char p[128];
-    snprintf(p, sizeof(p), "%s/%d.aac", folderPath, i);
-    if (SD.exists(p)) SD.remove(p);
+// "<digits><ext>" -> the number, or 0 when the name does not fit (so
+// "3.aac.tmp" and "start.txt" are not chunks).
+static uint16_t chunkNumber(const char *name, const char *ext) {
+  size_t nlen = strlen(name), elen = strlen(ext);
+  if (nlen <= elen || strcmp(name + nlen - elen, ext) != 0) return 0;
+  uint32_t v = 0;
+  for (size_t i = 0; i < nlen - elen; i++) {
+    if (name[i] < '0' || name[i] > '9') return 0;
+    v = v * 10 + (uint32_t)(name[i] - '0');
+    if (v > 0xFFFF) return 0;
+  }
+  return (uint16_t)v;
+}
+
+static bool listSessionChunks(const char *folderPath, SessionChunks &sc) {
+  sc.count = 0;
+  sc.pendingWav = false;
+  sc.overflow = false;
+  File d = SD.open(folderPath);
+  if (!d || !d.isDirectory()) {
+    if (d) d.close();
+    return false;
+  }
+  while (true) {
+    File e = d.openNextFile();
+    if (!e) break;
+    if (!e.isDirectory()) {
+      const char *name = e.name();
+      if (chunkNumber(name, ".wav")) sc.pendingWav = true;
+      uint16_t n = chunkNumber(name, ".aac");
+      if (n) {
+        if (sc.count < SYNC_MAX_CHUNKS) sc.local[sc.count++] = n;
+        else sc.overflow = true;
+      }
+    }
+    e.close();
+  }
+  d.close();
+  // Insertion sort: directory order is not numeric order.
+  for (int i = 1; i < sc.count; i++) {
+    uint16_t v = sc.local[i];
+    int j = i - 1;
+    while (j >= 0 && sc.local[j] > v) { sc.local[j + 1] = sc.local[j]; j--; }
+    sc.local[j + 1] = v;
+  }
+  return true;
+}
+
+// Delete exactly the uploaded chunks, then the folder.  Only called after a
+// confirmed stitch.  Anything else left in the folder keeps rmdir from
+// succeeding, which is the safe outcome.
+static void purgeSessionFolder(const char *folderPath, const SessionChunks &sc) {
+  char p[96];
+  for (int i = 0; i < sc.count; i++) {
+    chunkAacPath(folderPath, sc.local[i], p, sizeof(p));
+    SD.remove(p);
   }
   if (!SD.rmdir(folderPath)) {
-    Serial.printf("[SYNC] could not rmdir %s (may not be empty)\n", folderPath);
+    Serial.printf("[SYNC] could not rmdir %s (not empty?)\n", folderPath);
   } else {
     Serial.printf("[SYNC] purged session folder %s\n", folderPath);
   }
 }
 
+// Runs between sync steps and, via syncSetUiHook, on every block of a chunk
+// PUT: keeps the LED alive and turns a long press into an abort.  Short
+// presses are swallowed so they cannot fire as stale events afterwards.
+static void serviceUiDuringSync() {
+  updateLeds();
+  if (pollLongPressEvent() && !syncAborted()) {
+    Serial.println("[EVT ] Long press -> abort sync");
+    syncAbort();
+  }
+  (void)pollShortPressEvent();
+}
+
 bool syncOneSession(const char *folderPath) {
-  if (!SD.exists(folderPath)) {
+  static SessionChunks sc;   // static: keeps ~270 B off the loop() stack
+  if (!listSessionChunks(folderPath, sc)) {
     Serial.printf("[SYNC] folder missing: %s\n", folderPath);
     return false;
   }
-
-  int expected = countAacChunks(folderPath);
-  if (expected == 0) {
-    // Nothing encoded yet -- not an error, just nothing to send.  (The
-    // transcode sweep owns turning .wav into .aac.)
+  if (sc.pendingWav) {
+    // Uploading now would stitch a session with a hole in it.  The
+    // transcoder (end of session / boot sweep) owns turning .wav into .aac.
+    Serial.printf("[SYNC] %s: .wav not transcoded yet, skipping\n", folderPath);
+    return false;
+  }
+  if (sc.overflow) {
+    Serial.printf("[SYNC] %s: more than %d chunks, skipping\n",
+                  folderPath, SYNC_MAX_CHUNKS);
+    return false;
+  }
+  if (sc.count == 0) {
+    // Every chunk was empty and dropped: nothing to send, remove the folder.
+    if (SD.rmdir(folderPath)) {
+      Serial.printf("[SYNC] %s held no audio, removed\n", folderPath);
+    }
     return false;
   }
 
@@ -1446,6 +1516,7 @@ bool syncOneSession(const char *folderPath) {
   syncFolderToIso(folderPath, iso, sizeof(iso));
   snprintf(title, sizeof(title), "%s", folderPath);
   for (char *p = title; *p; p++) if (*p == '/') { memmove(title, p + 1, strlen(p)); break; }
+  const int expected = sc.count;
 
   Serial.printf("[SYNC] session %s: %d chunk(s), started_at=%s\n",
                 sessionId, expected, iso);
@@ -1457,25 +1528,25 @@ bool syncOneSession(const char *folderPath) {
     Serial.println("[SYNC] announce failed, keeping files for retry");
     return false;
   }
-  if (syncAborted()) return false;
 
   // ---- 2. Upload chunks ----
-  for (int i = 1; i <= expected; i++) {
+  char chunkPath[96];
+  for (int k = 1; k <= expected; k++) {
+    serviceUiDuringSync();
     if (syncAborted()) {
-      Serial.println("[SYNC] aborted mid-upload; partial chunks kept for retry");
+      Serial.println("[SYNC] aborted mid-upload; files kept for retry");
       return false;
     }
-    char chunkPath[128];
-    snprintf(chunkPath, sizeof(chunkPath), "%s/%d.aac", folderPath, i);
+    chunkAacPath(folderPath, sc.local[k - 1], chunkPath, sizeof(chunkPath));
 
-    if (!syncPutChunk(sessionId, i, chunkPath)) {
+    if (!syncPutChunk(sessionId, k, chunkPath)) {
+      if (syncAborted()) return false;
       // 404/409 mean the server lost our session (restart, or it moved on
-      // to ready).  Re-announce once and retry this chunk, per the brief.
-      Serial.printf("[SYNC] chunk %d failed, re-announcing and retrying once\n", i);
-      updateLeds();
+      // to ready).  Re-announce once and retry this chunk.
+      Serial.printf("[SYNC] chunk %d failed, re-announcing and retrying once\n", k);
       if (!syncAnnounce(sessionId, title, expected, iso)) return false;
-      if (!syncPutChunk(sessionId, i, chunkPath)) {
-        Serial.printf("[SYNC] chunk %d failed again, keeping files\n", i);
+      if (!syncPutChunk(sessionId, k, chunkPath)) {
+        Serial.printf("[SYNC] chunk %d failed again, keeping files\n", k);
         return false;
       }
     }
@@ -1484,7 +1555,9 @@ bool syncOneSession(const char *folderPath) {
   // ---- 3. Finish ----
   // missing[] handling: if the server says a chunk is absent we re-PUT
   // exactly those and finish once more, then give up (one round only).
-  int missing[SYNC_MAX_CHUNKS];
+  static int missing[SYNC_MAX_CHUNKS];
+  memset(missing, 0, sizeof(missing));   // the list ends at the first 0
+  serviceUiDuringSync();
   SyncFinishResult fr = syncFinish(sessionId, missing, SYNC_MAX_CHUNKS);
 
   if (fr == SYNC_FINISH_MISSING_CHUNKS) {
@@ -1492,9 +1565,9 @@ bool syncOneSession(const char *folderPath) {
     for (int m = 0; m < SYNC_MAX_CHUNKS && missing[m] > 0; m++) {
       int idx = missing[m];
       if (idx < 1 || idx > expected) continue;
+      serviceUiDuringSync();
       if (syncAborted()) return false;
-      char chunkPath[128];
-      snprintf(chunkPath, sizeof(chunkPath), "%s/%d.aac", folderPath, idx);
+      chunkAacPath(folderPath, sc.local[idx - 1], chunkPath, sizeof(chunkPath));
       if (!syncPutChunk(sessionId, idx, chunkPath)) {
         Serial.printf("[SYNC] repair of chunk %d failed, keeping files\n", idx);
         return false;
@@ -1507,7 +1580,7 @@ bool syncOneSession(const char *folderPath) {
   if (syncFinishMeansSafeToDelete(fr)) {
     Serial.printf("[SYNC] session %s confirmed server-side, deleting local AAC\n",
                   sessionId);
-    purgeSessionFolder(folderPath);
+    purgeSessionFolder(folderPath, sc);
     return true;   // caller may flash green
   }
 
@@ -1522,56 +1595,59 @@ bool syncOneSession(const char *folderPath) {
 void runSyncSweep(const char *onlyFolder) {
   // Clear any stale abort left over from a previous user-initiated abort.
   syncClearAbort();
+  syncSetUiHook(serviceUiDuringSync);
 
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("[SYNC] no WiFi, deferring sync");
     return;
   }
 
-  if (onlyFolder != nullptr) {
-    syncOneSession(onlyFolder);
-    return;
-  }
-
-  // Walk the SD root for /rec_* folders that still hold .aac chunks.
-  File root = SD.open("/");
-  if (!root || !root.isDirectory()) {
-    if (root) root.close();
-    Serial.println("[SYNC] cannot open SD root");
-    return;
-  }
-
+  // Walk the SD root for /rec_* folders (or just the one we were given).
   static char folders[16][32];
   uint8_t folderCount = 0;
-  while (folderCount < (uint8_t)(sizeof(folders)/sizeof(folders[0]))) {
-    File entry = root.openNextFile();
-    if (!entry) break;
-    if (entry.isDirectory()) {
-      const char *name = entry.name();
-      if (strncmp(name, "rec_", 4) == 0) {
-        snprintf(folders[folderCount], sizeof(folders[folderCount]),
-                 "/%s", name);
-        folderCount++;
-      }
+  if (onlyFolder != nullptr) {
+    snprintf(folders[0], sizeof(folders[0]), "%s", onlyFolder);
+    folderCount = 1;
+  } else {
+    File root = SD.open("/");
+    if (!root || !root.isDirectory()) {
+      if (root) root.close();
+      Serial.println("[SYNC] cannot open SD root");
+      return;
     }
-    entry.close();
+    while (folderCount < (uint8_t)(sizeof(folders)/sizeof(folders[0]))) {
+      File entry = root.openNextFile();
+      if (!entry) break;
+      if (entry.isDirectory()) {
+        const char *name = entry.name();
+        if (strncmp(name, "rec_", 4) == 0) {
+          snprintf(folders[folderCount], sizeof(folders[folderCount]),
+                   "/%s", name);
+          folderCount++;
+        }
+      }
+      entry.close();
+    }
+    root.close();
   }
-  root.close();
 
   if (folderCount == 0) {
     Serial.println("[SYNC] no /rec_* folders to sync");
     return;
   }
 
+  // Blue blink for the duration of the sweep, whoever called us.
+  State prevState = currentState;
+  setState(STATE_SYNCING);
+
   Serial.printf("[SYNC] sweep: %u session folder(s)\n", (unsigned)folderCount);
   int synced = 0, skipped = 0;
   for (uint8_t i = 0; i < folderCount; i++) {
+    serviceUiDuringSync();
     if (syncAborted()) {
       Serial.println("[SYNC] sweep aborted by user");
       break;
     }
-    // Keep the LED blinking and let a long-press land between sessions.
-    updateLeds();
 
     if (syncOneSession(folders[i])) {
       synced++;
@@ -1579,6 +1655,7 @@ void runSyncSweep(const char *onlyFolder) {
       syncOkFlashActive  = true;
       syncOkFlashUntilMs = millis() + SYNC_OK_FLASH_MS;
       Serial.printf("[OK  ] synced %s\n", folders[i]);
+      ledPhaseOn = false;          // force the green repaint
       updateLeds();
       delay(SYNC_OK_FLASH_MS);
       syncOkFlashActive = false;
@@ -1589,6 +1666,7 @@ void runSyncSweep(const char *onlyFolder) {
   }
 
   Serial.printf("[SYNC] sweep done: %d synced, %d pending\n", synced, skipped);
+  setState(prevState);
 }
 // =============================================================================
 //  WIFI PROVISIONING  (V0.3 -- preserved as-is for the AP/portal flow)

@@ -88,6 +88,11 @@ void syncAbort();
 void syncClearAbort();
 bool syncAborted();
 
+// Called repeatedly while a chunk PUT is streaming (every ~1.4 KB read), so
+// the caller can keep LEDs updated and poll the button -- typically calling
+// syncAbort() on a long press.  Must not call back into this module.
+void syncSetUiHook(void (*fn)());
+
 // Build a deterministic session id from the 4-hex efuse MAC prefix and a
 // folder name, e.g. "a1b2_rec_2026-10-15T1430".  Returns bytes written.
 size_t syncBuildSessionId(const char *folderName, char *out, size_t outLen);
