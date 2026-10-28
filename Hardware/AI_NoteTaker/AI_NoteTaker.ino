@@ -203,6 +203,9 @@
 // and move on.  The boot sweep will retry it next boot.
 #define AAC_MAX_ATTEMPTS    2
 
+// Size of the plain RIFF/WAVE header writeWavHeader() emits.
+#define WAV_HEADER_BYTES    44
+
 // -----------------------------------------------------------------------------
 //  SERVER / SYNC CONFIG  (V0.6)
 // -----------------------------------------------------------------------------
@@ -1145,6 +1148,21 @@ bool transcodeOneChunk(const char *wavPath, const char *aacPath) {
   if (SD.exists(aacPath)) {
     Serial.printf("[ENC ] target AAC already exists: %s (skipping)\n", aacPath);
     return true;
+  }
+
+  // A header-only WAV (e.g. pause straight after resume, or power lost
+  // before the first buffer landed) holds no audio.  Encoding it would fail
+  // forever and block the session from syncing, so drop it.  The sync step
+  // tolerates the resulting gap in chunk numbers.
+  {
+    File w = SD.open(wavPath, FILE_READ);
+    uint32_t wsize = w ? (uint32_t)w.size() : 0;
+    if (w) w.close();
+    if (wsize <= WAV_HEADER_BYTES) {
+      Serial.printf("[ENC ] %s has no audio (%u B), removing\n",
+                    wavPath, (unsigned)wsize);
+      return SD.remove(wavPath);
+    }
   }
 
   // Stage 1: encode to "<aacPath>.tmp".

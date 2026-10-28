@@ -27,10 +27,15 @@
 #include <SD.h>
 #include <VOAACEncoder.h>
 
-// Output buffer per AAC frame.  vo-aacenc emits at most ~135-byte payloads
-// for our 22050 Hz/64 kbps/mono settings, so 256 bytes is comfortable
-// headroom even for slightly larger frames and the ADTS header is included.
-#define AAC_OUT_BUF_BYTES        256
+// Output buffer per AAC frame.  At 64 kbps / 22050 Hz a 1024-sample frame
+// averages ~372 bytes, and an AAC-LC mono frame can reach 6144 bits (768
+// bytes) + 7-byte ADTS header.  vo-aacenc only checks for >= 192 bytes, so
+// an undersized buffer silently overflows rather than failing -- 2048
+// matches the library's own example and leaves ample headroom.
+#define AAC_OUT_BUF_BYTES        2048
+
+// Bytes per recorded sample in the WAV (int32 I2S slots).
+#define WAV_BYTES_PER_SAMPLE     4
 
 
 // =============================================================================
@@ -58,7 +63,15 @@ static bool wavFindDataOffset(File &wav, uint32_t *outOffset, uint32_t *outSize)
                          ((uint32_t)ch[7] << 24);
     if (memcmp(ch, "data", 4) == 0) {
       *outOffset = pos + 8;
-      *outSize   = chunkSize;
+      // The recorder only patches the size fields when a chunk is closed,
+      // so a chunk cut off by power loss still says 0 here.  Trust the
+      // file length instead whenever the header is 0 or claims more than
+      // the file holds; round down to whole samples.
+      uint32_t avail = (uint32_t)wav.size() - *outOffset;
+      if (chunkSize == 0 || chunkSize > avail) {
+        chunkSize = avail - (avail % WAV_BYTES_PER_SAMPLE);
+      }
+      *outSize = chunkSize;
       return true;
     }
     uint32_t advance = chunkSize + (chunkSize & 1);
@@ -166,7 +179,11 @@ bool aacEncodeFile(const char *wavPath, const char *aacPath) {
 
   while (bytesLeft >= (uint32_t)frameBytes) {
     size_t n = in.readBytes((char*)raw32, frameBytes);
-    if (n < frameBytes) break;        // truncated WAV: drop to tail handler
+    if (n < frameBytes) {             // short read: hand what we got to the tail
+      in.seek(in.position() - n);
+      bytesLeft = n;
+      break;
+    }
     bytesLeft -= n;
 
     // int32 -> int16.  >> 16 with saturation.  The encoder requires 16-bit
@@ -196,12 +213,13 @@ bool aacEncodeFile(const char *wavPath, const char *aacPath) {
     }
   }
 
-  // ---- tail frame: zero-pad remaining samples and emit one silence-padded
-  //                  frame so the output stays ADTS-self-delimiting. ----
-  if (bytesLeft > 0 || dataSize > 0) {
-    (void)in.readBytes((char*)pcm16, bytesLeft);  // anything that fits; rest is zero
-    for (size_t i = bytesLeft / sizeof(int16_t); i < frameInts; i++) {
-      pcm16[i] = 0;
+  // ---- tail frame: the remaining (< 1 frame) int32 samples go through the
+  //                  same >> 16 conversion, zero-padded to a full frame. ----
+  if (bytesLeft >= WAV_BYTES_PER_SAMPLE) {
+    size_t n = in.readBytes((char*)raw32, bytesLeft);  // < frameBytes, fits raw32
+    size_t got = n / WAV_BYTES_PER_SAMPLE;
+    for (size_t i = 0; i < frameInts; i++) {
+      pcm16[i] = (i < got) ? i32_to_i16(raw32[i] >> 16) : 0;
     }
 
     size_t outBytes = 0;
