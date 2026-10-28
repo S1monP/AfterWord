@@ -1,5 +1,9 @@
 // =============================================================================
-//  AI_NoteTaker_V0.5  -  MVP Firmware for ESP32-S3-DevKitC (N16R8)
+//  AI_NoteTaker  -  lecture recorder firmware for ESP32-S3-DevKitC (N16R8)
+//
+//  Version: FW_VERSION in config.h.  History lives in git (tags fw-v0.4 =
+//  last hardware-tested build, fw-v0.6-untested = V0.6 as first written).
+//  Build settings and test plan: Hardware/README.md.
 //
 //  Board  : ESP32-S3-DevKitC with N16R8 module (16MB flash, 8MB octal PSRAM)
 //  Mic    : INMP441 (I2S, mono, 32-bit slots, 22.05 kHz)
@@ -7,70 +11,39 @@
 //  LED    : 1x WS2812 NeoPixel on GPIO 48
 //  Button : GPIO 1, internal pull-up, active LOW
 //
-//  WiFi provisioning (V0.4 -- custom captive portal, no WiFiManager):
-//    - Up to 5 SSID/password pairs stored in NVS, LIFO order (most recent first)
-//    - On boot, try each saved network in order; on first success, continue
-//    - If all saved networks fail, start a WPA2 AP ("AI_NoteTaker-Setup")
-//      with a 3-page captive portal:
-//        /         -- landing page with "Add" and "Manage" buttons
-//        /add      -- scan + dropdown + manual SSID + password + save
-//        /manage   -- list of saved networks with per-row delete
+//  Pipeline:
+//    record WAV chunks (5 min each) -> on session end, encode each to AAC-LC
+//    (aac_encoder.*) -> upload to the server (sync_client.*) -> delete local
+//    files only after the server confirms the stitch.
 //
-//  Behaviour:
-//    - Boot         -> blue slow blink while trying saved networks
-//    - AP mode      -> SOLID blue (waiting for user to configure WiFi)
-//    - WiFi up      -> fast green blink for 2 s, then solid green (IDLE)
-//    - IDLE         -> solid green (waiting for session start)
-//    - long press   -> start a new session: create folder /rec_YYYY-MM-DDTHHMM/
-//                       open 1.wav, begin RECORDING
-//    - RECORDING    -> red 250ms on / 750ms off; chunk rotates every 5 minutes
-//    - short press  -> PAUSE: close current chunk, orange slow blink
-//    - short press  -> RESUME: open next chunk, back to RECORDING
-//    - long press   -> END session: close chunk, RUN TRANSCODING, then IDLE
-//                       (V0.5: WAV chunks are transcoded to AAC on-device
-//                        before the device returns to IDLE)
-//    - TRANSCODING  -> cyan fast blink (NEW in V0.5); non-fatal, returns to IDLE
-//    - Any fault    -> ERROR: solid magenta, long press to recover to IDLE
+//  WiFi:
+//    - Up to 5 networks saved in NVS.  Boot tries each once; if none is in
+//      range the device carries on OFFLINE (it can still record) and keeps
+//      retrying in the background.
+//    - Setup portal (AP "AI_NoteTaker-Setup"): opens when no networks are
+//      saved, or when the button is HELD WHILE POWERING ON.
+//    - Recording never needs WiFi.  Without NTP time a session is named
+//      rec_nt<boot>_<n> instead of rec_YYYY-MM-DDTHHMM.
 //
-//  Button gestures:
-//    - short press : button released within 1 s of being pressed
-//    - long press  : button held >= 1 s, then released
-//    - pre-IDLE presses are ignored
+//  LED:
+//    - Boot           -> blue slow blink while trying networks
+//    - Setup portal   -> solid blue
+//    - Boot done      -> fast green blink for 2 s
+//    - Boot sweep     -> cyan fast blink (encoding leftover WAVs)
+//    - IDLE           -> solid green
+//    - RECORDING      -> red 250 ms on / 750 ms off
+//    - PAUSED         -> orange slow blink
+//    - TRANSCODING    -> cyan fast blink
+//    - SYNCING        -> blue slow blink; green flash per uploaded session
+//    - ERROR          -> solid magenta (SD or mic failure, write error)
 //
-//  V0.5 changelog (vs V0.4):
-//    - NEW: aac_encoder.h/.cpp module exposing aacEncodeFile(wavPath, aacPath).
-//           Encodes 22050 Hz mono 16-bit PCM (WAV) -> AAC-LC 64 kbps CBR with
-//           a 7-byte ADTS header per frame, exactly matching the server's
-//           canonical format and its binary-concat stitcher.
-//    - NEW: STATE_TRANSCODING with cyan fast-blink LED.
-//    - NEW: endSession() now triggers a transcoding pass on the just-finished
-//           session folder before returning to IDLE.
-//    - NEW: boot sweep -- after SD/WiFi/NTP/I2S init, scan /rec_* and
-//           transcode any leftover .wav with no matching .aac (crash recovery).
-//    - NEW: per-chunk safety rule -- encode to <name>.aac.tmp, verify it
-//           (size > 0 and starts 0xFF Fx for ADTS sync), rename to <name>.aac,
-//           THEN delete <name>.wav.  A WAV is never removed without a verified
-//           AAC replacement.
-//    - NEW: failed chunks are retried, then left as WAV for next boot's
-//           sweep.  Transcode failures never push the device into STATE_ERROR.
-//    - CHANGED: initSdCard() now tries 20 MHz SPI clock, falls back to 4 MHz
-//           if that fails (1 MHz was the bottleneck in V0.4: a 26 MB WAV
-//           read took ~3.5 min).
-//    - See aac_encoder.h for encoder integration notes (vo-aacenc).
-//
-//  V0.6 changelog (vs V0.5):
-//    - NEW: sync_client.h/.cpp -- pushes finished sessions to the server:
-//             announce -> PUT chunks (streamed) -> finish -> delete on confirm.
-//    - NEW: STATE_SYNCING (blue LED) plus a green flash per synced session.
-//    - NEW: runSyncSweep() scans /rec_* for folders holding .aac chunks and
-//           uploads them.  Triggers: after boot, after each endSession()
-//           transcode, and every SYNC_RETRY_INTERVAL_MS while IDLE.
-//    - NEW: local files are deleted ONLY after the server replies 200
-//           stitched / already_ready.  Any other outcome keeps the files
-//           and the periodic retry is the recovery.
-//    - NEW: long-press during SYNCING aborts the attempt cleanly; partial
-//           uploads are safe because re-PUT is idempotent server-side.
-//    - Sync never runs during RECORDING or PAUSED.
+//  Button:
+//    - IDLE:      long press (>= 1 s) starts a session
+//    - RECORDING: short press pauses; long press ends the session
+//    - PAUSED:    short press resumes; long press ends the session
+//    - SYNCING:   long press aborts the upload (files kept, retried later)
+//    - ERROR:     long press recovers to IDLE
+//    - At power-on: hold to open the WiFi setup portal
 // =============================================================================
 
 #include <Arduino.h>
