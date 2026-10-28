@@ -1615,6 +1615,9 @@ static void loadSavedNetworks() {
   prefs.end();
 }
 
+// Add a new (ssid, password) to the front of the list, evicting the
+// most recently added of the older entries (LIFO) if the list is full.
+// Alternative if the SSID already exists: move it to front, update password.
 static void addOrPromoteNetwork(const char* ssid, const char* pass) {
   int existing = -1;
   for (int i = 0; i < savedNetworkCount; i++) {
@@ -1655,65 +1658,203 @@ static void addOrPromoteNetwork(const char* ssid, const char* pass) {
   prefs.end();
 }
 
+static void clearAllNetworks() {
+  Preferences prefs;
+  prefs.begin("ai_notetaker", false);
+  prefs.clear();
+  prefs.end();
+  savedNetworkCount = 0;
+}
+
+// Remove the network at the given index (0 = most recent), shifting later
+// entries down and persisting the updated list to NVS.
 static void removeNetworkByIndex(int idx) {
+  if (idx < 0 || idx >= savedNetworkCount) return;
   for (int i = idx; i < savedNetworkCount - 1; i++) {
     savedNetworks[i] = savedNetworks[i + 1];
   }
   savedNetworkCount--;
+
   Preferences prefs;
   prefs.begin("ai_notetaker", false);
   prefs.putInt("count", savedNetworkCount);
-  char ssidKey[16], passKey[16];
-  snprintf(ssidKey, sizeof(ssidKey), "ssid_%d", savedNetworkCount);
-  snprintf(passKey, sizeof(passKey), "pass_%d", savedNetworkCount);
-  prefs.remove(ssidKey);
-  prefs.remove(passKey);
+  for (int i = 0; i < savedNetworkCount; i++) {
+    char ssidKey[16], passKey[16];
+    snprintf(ssidKey, sizeof(ssidKey), "ssid_%d", i);
+    snprintf(passKey, sizeof(passKey), "pass_%d", i);
+    prefs.putString(ssidKey, savedNetworks[i].ssid);
+    prefs.putString(passKey, savedNetworks[i].pass);
+  }
   prefs.end();
 }
 
-static bool tryAllSavedNetworks() {
-  if (savedNetworkCount == 0) return false;
+// Try to connect to a single saved network.  Returns true on success.
+static bool tryOneNetwork(int idx, uint32_t timeoutMs) {
+  if (idx < 0 || idx >= savedNetworkCount) return false;
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect(true);
+  delay(50);
+  Serial.printf("[WIP ] Trying network %d/%d: %s\n",
+                idx + 1, savedNetworkCount, savedNetworks[idx].ssid);
+  WiFi.begin(savedNetworks[idx].ssid, savedNetworks[idx].pass);
   unsigned long start = millis();
-  while ((unsigned long)(millis() - start) < WIFI_TIMEOUT_MS) {
-    for (int i = 0; i < savedNetworkCount; i++) {
-      Serial.printf("[WIP ] trying saved network %d/%d: %s\n",
-                    i + 1, savedNetworkCount, savedNetworks[i].ssid);
-      WiFi.mode(WIFI_STA);
-      WiFi.begin(savedNetworks[i].ssid, savedNetworks[i].pass);
-      unsigned long connectStart = millis();
-      while (WiFi.status() != WL_CONNECTED &&
-             (unsigned long)(millis() - connectStart) < 10000) {
-        updateLeds();
-        delay(200);
-      }
-      if (WiFi.status() == WL_CONNECTED) {
-        Serial.printf("[OK  ] Connected to %s\n", savedNetworks[i].ssid);
-        return true;
-      }
-      Serial.printf("[WIP ] %s failed, trying next\n", savedNetworks[i].ssid);
-      WiFi.disconnect(true);
+  while (WiFi.status() != WL_CONNECTED) {
+    if ((uint32_t)(millis() - start) >= timeoutMs) {
+      Serial.println("[WIP ]   timed out");
+      return false;
     }
-    Serial.println("[WIP ] all saved networks failed, retrying after a pause");
-    delay(2000);
+    updateLeds();
+    delay(50);
+  }
+  Serial.println("[WIP ]   connected!");
+  return true;
+}
+
+static bool tryAllSavedNetworks() {
+  const uint32_t perNetworkTimeout = 10000;
+  for (int i = 0; i < savedNetworkCount; i++) {
+    if (tryOneNetwork(i, perNetworkTimeout)) return true;
   }
   return false;
 }
 
-// Minimal captive portal handlers -- V0.4 had full 3-page HTML; V0.5 keeps
-// the routing but uses tiny payloads so the .ino stays a manageable size.
-// To restore the rich portal, copy handleRoot/handleAdd/handleManage/
-// handleSave/handleDelete verbatim from AI_NoteTaker_V0.4.ino.
-static void handleRoot()    { webServer.send(200, "text/html", "<html><body><h1>AI NoteTaker Setup V0.5</h1><p><a href='/add'>Add</a></p></body></html>"); }
-static void handleAdd()     { webServer.send(200, "text/html", "<html><body><h1>Add (V0.5 stub; restore from V0.4)</h1></body></html>"); }
-static void handleManage()  { webServer.send(200, "text/html", "<html><body><h1>Manage (V0.5 stub; restore from V0.4)</h1></body></html>"); }
-static void handleSave()    { webServer.send(200, "text/html", "<html><body><h1>Save (V0.5 stub)</h1></body></html>"); }
-static void handleDelete()  { webServer.send(200, "text/html", "<html><body><h1>Delete (V0.5 stub)</h1></body></html>"); }
+// -----------------------------------------------------------------------------
+//  Captive portal page builders  (V0.4)
+// -----------------------------------------------------------------------------
+static String buildRootPage() {
+  return
+    "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<title>AI NoteTaker</title>"
+    "<style>"
+    "body{font-family:sans-serif;margin:1em auto;max-width:480px;padding:0 1em;color:#222}"
+    "h1{font-size:1.4em;margin-bottom:0.2em}"
+    "a.btn{display:block;text-align:center;background:#0a7;color:#fff;border-radius:0.3em;padding:0.7em;margin:0.5em 0;text-decoration:none}"
+    "</style></head><body>"
+    "<h1>AI NoteTaker WiFi Setup</h1>"
+    "<p>What do you want to do?</p>"
+    "<a class='btn' href='/add'>Add network</a>"
+    "<a class='btn' href='/manage'>Manage networks</a>"
+    "</body></html>";
+}
 
+static String buildAddPage() {
+  String page =
+    "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<title>Add network</title>"
+    "<style>"
+    "body{font-family:sans-serif;margin:1em auto;max-width:480px;padding:0 1em;color:#222}"
+    "h1{font-size:1.4em}"
+    "button,input,select{font-size:1em;padding:0.5em;margin:0.3em 0;width:100%;box-sizing:border-box}"
+    "button{background:#0a7;color:#fff;border:none;border-radius:0.3em;cursor:pointer}"
+    "a.btn{display:block;text-align:center;background:#aaa;color:#fff;border-radius:0.3em;padding:0.5em;margin:0.5em 0;text-decoration:none}"
+    "</style></head><body>"
+    "<h1>Add a network</h1>"
+    "<form method='POST' action='/save'>"
+    "<select name='s' id='ssid_select' "
+    "onchange=\"document.getElementById('ssid').value=this.value\">"
+    "<option value=''>-- choose a visible network --</option>";
+  int n = WiFi.scanNetworks();
+  for (int i = 0; i < n; i++) {
+    String ssid = WiFi.SSID(i);
+    if (ssid.length() == 0) continue;
+    page += "<option value='" + ssid + "'>" + ssid + "</option>";
+  }
+  WiFi.scanDelete();
+  page +=
+    "</select>"
+    "<input id='ssid' name='s_manual' placeholder='...or type SSID manually' maxlength='32'>"
+    "<input name='p' type='password' placeholder='Wi-Fi password' maxlength='63'>"
+    "<button type='submit'>Save &amp; reboot</button>"
+    "</form>"
+    "<a class='btn' href='/'>Back</a>"
+    "</body></html>";
+  return page;
+}
+
+static String buildManagePage() {
+  String page =
+    "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<title>Manage networks</title>"
+    "<style>"
+    "body{font-family:sans-serif;margin:1em auto;max-width:480px;padding:0 1em;color:#222}"
+    "h1{font-size:1.4em}"
+    ".net{border:1px solid #ddd;border-radius:0.3em;padding:0.5em;margin:0.5em 0;background:#f9f9f9}"
+    ".net form{display:inline;float:right}"
+    ".net button{background:#c33;color:#fff;border:none;border-radius:0.3em;padding:0.3em 0.8em;cursor:pointer}"
+    ".empty{color:#888;font-style:italic;margin:1em 0}"
+    "a.btn{display:block;text-align:center;background:#aaa;color:#fff;border-radius:0.3em;padding:0.5em;margin:0.5em 0;text-decoration:none}"
+    "</style></head><body>"
+    "<h1>Saved networks (" + String(savedNetworkCount) + "/" + String(MAX_SAVED_NETWORKS) + ")</h1>";
+  if (savedNetworkCount == 0) {
+    page += "<p class='empty'>No networks saved yet.</p>";
+  } else {
+    page += "<ol style='padding-left:1.2em'>";
+    for (int i = 0; i < savedNetworkCount; i++) {
+      page += "<li class='net'>" + String(savedNetworks[i].ssid);
+      page += "<form method='POST' action='/delete'>";
+      page += "<input type='hidden' name='idx' value='" + String(i) + "'>";
+      page += "<button type='submit'>Delete</button></form></li>";
+    }
+    page += "</ol>";
+  }
+  page += "<a class='btn' href='/'>Back to home</a>"
+          "</body></html>";
+  return page;
+}
+
+// -----------------------------------------------------------------------------
+//  Captive portal handlers  (V0.4)
+// -----------------------------------------------------------------------------
+static void handleRoot()    { webServer.send(200, "text/html", buildRootPage()); }
+static void handleAdd()     { webServer.send(200, "text/html", buildAddPage()); }
+static void handleManage()  { webServer.send(200, "text/html", buildManagePage()); }
+
+static void handleSave() {
+  String s        = webServer.arg("s");
+  String s_manual = webServer.arg("s_manual");
+  String p        = webServer.arg("p");
+  String ssid = s_manual.length() > 0 ? s_manual : s;
+  if (ssid.length() == 0) {
+    webServer.send(400, "text/html",
+      "<html><body><h1>Missing SSID</h1>"
+      "<p>Pick a network from the dropdown or type one manually.</p>"
+      "<a href='/add'>Back</a></body></html>");
+    return;
+  }
+  Serial.printf("[AP  ] Saving network: %s\n", ssid.c_str());
+  addOrPromoteNetwork(ssid.c_str(), p.c_str());
+  webServer.send(200, "text/html",
+    "<html><body><h1>Saved!</h1>"
+    "<p>Rebooting in 3 seconds...</p>"
+    "<script>setTimeout(function(){location='/';},3000);</script></body></html>");
+  delay(500);
+  ESP.restart();
+}
+
+static void handleDelete() {
+  int idx = webServer.arg("idx").toInt();
+  if (idx >= 0 && idx < savedNetworkCount) {
+    Serial.printf("[AP  ] Deleting network %d: %s\n", idx, savedNetworks[idx].ssid);
+    removeNetworkByIndex(idx);
+  } else {
+    Serial.printf("[AP  ] Delete: invalid index %d\n", idx);
+  }
+  webServer.sendHeader("Location", "/manage", true);
+  webServer.send(302);
+}
+
+// Top-level: try saved networks; if all fail, start AP + custom portal.
 bool connectOrProvisionWifi() {
   loadSavedNetworks();
   Serial.printf("[WIP ] %d saved network(s)\n", savedNetworkCount);
 
-  if (tryAllSavedNetworks()) return true;
+  if (tryAllSavedNetworks()) {
+    bootPhase = BOOT_PHASE_TRYING;
+    return true;
+  }
 
   Serial.println("[WIP ] No saved network worked -- starting AP mode");
   bootPhase = BOOT_PHASE_AP_MODE;
@@ -1723,6 +1864,8 @@ bool connectOrProvisionWifi() {
   Serial.printf("[AP  ] AP up: SSID=%s  IP=%s\n",
                 AP_SSID, WiFi.softAPIP().toString().c_str());
 
+  // Captive portal: redirect every DNS query to our AP IP so any URL the
+  // phone opens lands on our web server.
   dnsServer.start(53, "*", WiFi.softAPIP());
 
   webServer.on("/",       HTTP_GET,  handleRoot);
