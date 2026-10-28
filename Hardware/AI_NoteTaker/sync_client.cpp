@@ -19,14 +19,16 @@
 // payload must advertise exactly what the encoder produced.
 #include "aac_encoder.h"
 
-// Server coordinates.  The brief specifies a fixed LAN address; making it
-// portal-configurable is explicitly out of scope for V0.6.
-#ifndef SERVER_HOST
-  #define SERVER_HOST  "192.168.1.10"
-#endif
-#ifndef SERVER_PORT
-  #define SERVER_PORT  8000
-#endif
+// SERVER_HOST / SERVER_PORT / DEVICE_TOKEN.  Must come from the shared
+// header: a #define in the .ino is invisible to this translation unit.
+#include "config.h"
+
+// Adds the bearer token when one is configured (see secrets.example.h).
+static void addAuthHeader(HTTPClient &http) {
+  if (DEVICE_TOKEN[0] != '\0') {
+    http.addHeader("Authorization", String("Bearer ") + DEVICE_TOKEN);
+  }
+}
 
 // Chunk uploads of ~2.4 MB over WiFi need a generous timeout; the default
 // HTTPClient timeout is far too short and aborts mid-PUT, which would look
@@ -168,6 +170,7 @@ bool syncAnnounce(const char *sessionId, const char *title,
     return false;
   }
   http.addHeader("Content-Type", "application/json");
+  addAuthHeader(http);
 
   // The audio format we actually produced: AAC-LC mono 22050 Hz.  The
   // server stores these as provenance metadata; bits_per_sample is 16
@@ -238,6 +241,7 @@ bool syncPutChunk(const char *sessionId, int chunkIndex, const char *filePath) {
     return false;
   }
   http.addHeader("Content-Type", "audio/aac");
+  addAuthHeader(http);
 
   // Stream the file straight off the SD card -- sendRequest with a File*
   // reads and writes in bounded chunks internally, so a 2.4 MB chunk never
@@ -279,6 +283,7 @@ SyncFinishResult syncFinish(const char *sessionId,
     Serial.printf("[SYNC] finish: begin() failed\n");
     return SYNC_FINISH_TRANSPORT_ERROR;
   }
+  addAuthHeader(http);
 
   int code = http.POST("");           // empty body, per the contract
   String resp = (code > 0) ? http.getString() : String("");

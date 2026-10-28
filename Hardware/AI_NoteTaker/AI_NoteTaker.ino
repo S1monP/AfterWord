@@ -83,6 +83,7 @@
 #include <SD.h>
 #include <Adafruit_NeoPixel.h>
 #include "ESP_I2S.h"
+#include "config.h"
 #include "aac_encoder.h"
 #include "sync_client.h"
 
@@ -207,13 +208,8 @@
 #define WAV_HEADER_BYTES    44
 
 // -----------------------------------------------------------------------------
-//  SERVER / SYNC CONFIG  (V0.6)
+//  SYNC CONFIG  (V0.6)  --  server address / token live in config.h
 // -----------------------------------------------------------------------------
-// Fixed LAN address for V0.6.  Making this portal-configurable (or mDNS
-// based) is explicitly out of scope for this version -- edit and reflash.
-#define SERVER_HOST                 "192.168.1.10"
-#define SERVER_PORT                 8000
-
 // How often the IDLE state retries a failed sync.  The periodic retry --
 // not the user -- is the recovery path, so this can be generous.
 #define SYNC_RETRY_INTERVAL_MS      (5UL * 60 * 1000)
@@ -399,7 +395,9 @@ void setup() {
   Serial.begin(115200);
   delay(200);
   Serial.println();
-  Serial.println("[BOOT] AI_NoteTaker V0.5 starting...");
+  Serial.println("[BOOT] AI_NoteTaker " FW_VERSION " starting...");
+  Serial.printf("[CFG ] server=http://%s:%d  token=%s\n",
+                SERVER_HOST, SERVER_PORT, DEVICE_TOKEN[0] ? "set" : "none");
   Serial.printf("[CHIP] model=%s rev=%d  IDF=%s\n",
                 ESP.getChipModel(),
                 (int)ESP.getChipRevision(),
