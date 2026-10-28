@@ -97,8 +97,9 @@ void syncSetUiHook(void (*fn)());
 // folder name, e.g. "a1b2_rec_2026-10-15T1430".  Returns bytes written.
 size_t syncBuildSessionId(const char *folderName, char *out, size_t outLen);
 
-// Convert a session folder name ("rec_2026-10-15T1430") into an ISO-8601
-// local timestamp ("2026-10-15T14:30:00").  Returns bytes written.
+// Convert a session folder name ("rec_2026-10-15T1430", optionally with a
+// "_2" suffix) into an ISO-8601 local timestamp ("2026-10-15T14:30:00").
+// Returns bytes written; 0 (and "") for names without a timestamp.
 size_t syncFolderToIso(const char *folderName, char *out, size_t outLen);
 
 #endif  // AI_NOTETAKER_SYNC_CLIENT_H

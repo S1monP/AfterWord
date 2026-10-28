@@ -166,16 +166,13 @@ size_t syncFolderToIso(const char *folderName, char *out, size_t outLen) {
   // as UTC with a Z would shift every session by an hour across the DST
   // boundary.  The server stores started_at as text and does not re-parse
   // it, so a naive local ISO string round-trips unchanged.
+  //
+  // Untimed folders ("rec_nt12_1", recorded before the clock was set) and
+  // anything else that doesn't parse yield "" -- the caller then tries
+  // start.txt, and an empty started_at makes the server use upload time.
   int Y, Mo, D, H, Mi;
   if (sscanf(name, "rec_%4d-%2d-%2dT%2d%2d", &Y, &Mo, &D, &H, &Mi) != 5) {
-    // Fall back to "now" rather than sending garbage.
-    time_t now = time(nullptr);
-    struct tm tmv;
-    localtime_r(&now, &tmv);
-    int n = snprintf(out, outLen, "%04d-%02d-%02dT%02d:%02d:%02d",
-                     tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday,
-                     tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
-    return (n < 0) ? 0 : strlen(out);
+    return 0;
   }
   int n = snprintf(out, outLen, "%04d-%02d-%02dT%02d:%02d:00", Y, Mo, D, H, Mi);
   return (n < 0) ? 0 : strlen(out);

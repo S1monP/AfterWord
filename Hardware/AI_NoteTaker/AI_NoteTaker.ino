@@ -173,7 +173,26 @@
 //  WIFI / NTP TIMING (ms)
 // -----------------------------------------------------------------------------
 #define WIFI_TIMEOUT_MS     30000
-#define NTP_SYNC_TIMEOUT_MS 20000   // safety cap while we wait for sane time
+#define NTP_SYNC_TIMEOUT_MS 20000   // boot waits at most this long for NTP
+
+// Background reconnect (wifiMaintain): each saved network gets
+// WIFI_TRY_MS to associate; after a full unsuccessful round, or after the
+// link drops (giving the core's own auto-reconnect a head start), wait
+// WIFI_RETRY_INTERVAL_MS before the next round.
+#define WIFI_TRY_MS              10000
+#define WIFI_RETRY_INTERVAL_MS   60000
+
+// Once WiFi comes (back) up, run the sync sweep after this delay instead of
+// waiting out SYNC_RETRY_INTERVAL_MS -- long enough for NTP to answer.
+#define WIFI_UP_SYNC_DELAY_MS    15000
+
+// Any time() below this is "clock never set" (the RTC starts at 1970).
+#define TIME_VALID_AFTER    1700000000UL
+
+// Per-session file recording the boot id and millis() at session start, so
+// a session recorded before NTP was available can still get a real start
+// time if the clock is set later in the same boot.
+#define SESSION_START_FILE  "start.txt"
 // -----------------------------------------------------------------------------
 //  LED TIMING (ms)
 // -----------------------------------------------------------------------------
@@ -348,6 +367,11 @@ unsigned long lastSyncMs = 0;
 unsigned long syncOkFlashUntilMs = 0;
 bool          syncOkFlashActive  = false;
 
+// Persistent boot counter (NVS), used to name sessions recorded before the
+// clock is set and to tell whether their start.txt came from this boot.
+static uint32_t bootId = 0;
+static uint16_t untimedSessionSeq = 0;   // per-boot counter for those names
+
 // The chunks of one session as found on the SD card.  Local chunk numbers
 // can have gaps (the transcoder drops header-only WAVs), but the server
 // wants 1..N, so server index k is the k-th smallest local number.  Every
@@ -369,8 +393,13 @@ void   updateLeds();
 void   setLedColor(uint32_t color, bool on);
 
 bool   initSdCard();
-bool   connectOrProvisionWifi();
-void   syncTimeBlocking();
+bool   connectOrProvisionWifi(bool forcePortal);
+void   wifiMaintain();
+void   startTimeSync();
+bool   timeIsValid();
+bool   waitForTime(uint32_t timeoutMs);
+uint32_t nextBootId();
+void   resetButtonState();
 bool   initI2sMic();
 
 void   writeWavHeader(File &f);
@@ -453,35 +482,47 @@ void setup() {
   }
   Serial.println("[OK  ] SD card ready");
 
-  // ---- WiFi (try saved, fall back to AP/captive portal) ----
-  if (!connectOrProvisionWifi()) {
-    Serial.println("[ERR ] WiFi config portal timed out");
-    setState(STATE_ERROR);
-    return;
-  }
-  Serial.printf("[OK  ] WiFi connected, IP=%s\n", WiFi.localIP().toString().c_str());
+  bootId = nextBootId();
+  Serial.printf("[BOOT] boot #%lu\n", (unsigned long)bootId);
 
-  // WiFiManager's autoConnect() can leave the radio in AP+STA mode, which
-  // keeps broadcasting the chip's default fallback AP ("ESP_XXXXXX") even
-  // though we no longer want it.  Force STA-only mode to shut it down.
-  WiFi.mode(WIFI_STA);
-  WiFi.softAPdisconnect(true);
-
-  bootPhase = BOOT_PHASE_DONE_BLINK;
-  bootDoneBlinkUntilMs = millis() + BOOT_DONE_BLINK_MS;
-
-  // ---- NTP / timezone ----
-  Serial.println("[....] Syncing NTP time...");
-  syncTimeBlocking();
-  Serial.println("[OK  ] Time synchronised");
-
-  // ---- I2S mic ----
+  // ---- I2S mic (before WiFi: recording must not depend on the network) ----
   if (!initI2sMic()) {
     Serial.println("[ERR ] I2S mic init failed");
     setState(STATE_ERROR);
     return;
   }
   Serial.println("[OK  ] I2S mic ready");
+
+  // ---- WiFi: saved networks, or the setup portal when there are none or
+  // the button is held at power-on.  Never fatal -- without WiFi the device
+  // records offline and wifiMaintain() keeps retrying from loop().
+  bool forcePortal = !btnRawStable;
+  if (forcePortal) Serial.println("[WIP ] button held at boot -> setup portal");
+  if (connectOrProvisionWifi(forcePortal)) {
+    Serial.printf("[OK  ] WiFi connected, IP=%s\n", WiFi.localIP().toString().c_str());
+  } else {
+    Serial.println("[WARN] no WiFi -- recording offline, will keep retrying");
+  }
+
+  // Leave the portal's AP (if any) and stay in plain STA mode so the
+  // background reconnect can work.
+  WiFi.mode(WIFI_STA);
+  WiFi.softAPdisconnect(true);
+
+  bootPhase = BOOT_PHASE_DONE_BLINK;
+  bootDoneBlinkUntilMs = millis() + BOOT_DONE_BLINK_MS;
+
+  // ---- NTP / timezone.  SNTP keeps retrying in the background, so if we
+  // are offline now the clock still gets set once WiFi comes up. ----
+  startTimeSync();
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("[....] Syncing NTP time...");
+    if (waitForTime(NTP_SYNC_TIMEOUT_MS)) {
+      Serial.println("[OK  ] Time synchronised");
+    } else {
+      Serial.println("[WARN] NTP not answering (no internet?) -- continuing");
+    }
+  }
 
   // ---- V0.5: boot sweep -- transcode any leftover WAVs from a prior
   // crashed/reset mid-encode (or from any power-loss during a session).
@@ -505,7 +546,12 @@ void setup() {
   } else {
     Serial.println("[SYNC] skipped post-boot sync (no WiFi)");
   }
+  wifiMaintain();          // seed its link-state tracking: no extra sweep
   lastSyncMs = millis();
+
+  // A button still held from the boot-time portal gesture must not turn into
+  // a long press that starts a session the moment we reach IDLE.
+  resetButtonState();
 
   // ---- IDLE: ready for the first long press to start a session ----
   setState(STATE_IDLE);
@@ -518,6 +564,7 @@ void setup() {
 // =============================================================================
 void loop() {
   updateLeds();
+  wifiMaintain();
 
   // Long-press is a global "recover / finish" gesture.  Handled before
   // the state switch so it works from IDLE (start session), RECORDING /
@@ -935,25 +982,46 @@ void updateWavSizes(File &f, uint32_t dataSize) {
 //  SESSION AND CHUNK MANAGEMENT  (V0.2 + V0.5 endSession-on-transcode)
 // =============================================================================
 bool openSession() {
-  time_t now = time(nullptr);
-  if (now < 1700000000UL) {
-    Serial.println("[ERR ] Time not synced, cannot start session");
-    return false;
+  // Folder name: local wall-clock time when the clock is set, otherwise a
+  // boot-unique "untimed" name (the server then falls back to the start
+  // time recovered from start.txt, or to the upload time).
+  char base[24];
+  if (timeIsValid()) {
+    time_t now = time(nullptr);
+    struct tm tm_local;
+    localtime_r(&now, &tm_local);
+    snprintf(base, sizeof(base), "/rec_%04d-%02d-%02dT%02d%02d",
+             tm_local.tm_year + 1900,
+             tm_local.tm_mon + 1,
+             tm_local.tm_mday,
+             tm_local.tm_hour,
+             tm_local.tm_min);
+  } else {
+    snprintf(base, sizeof(base), "/rec_nt%lu_%u",
+             (unsigned long)bootId, (unsigned)++untimedSessionSeq);
+    Serial.println("[WARN] clock not set (no NTP yet) -- untimed session");
   }
-  struct tm tm_local;
-  localtime_r(&now, &tm_local);
-  snprintf(sessionFolder, sizeof(sessionFolder), "/rec_%04d-%02d-%02dT%02d%02d",
-          tm_local.tm_year + 1900,
-          tm_local.tm_mon + 1,
-          tm_local.tm_mday,
-          tm_local.tm_hour,
-          tm_local.tm_min);
 
-  if (!SD.mkdir(sessionFolder)) {
+  // A second session started within the same minute gets _2, _3, ...
+  snprintf(sessionFolder, sizeof(sessionFolder), "%s", base);
+  for (int n = 2; SD.exists(sessionFolder) && n <= 9; n++) {
+    snprintf(sessionFolder, sizeof(sessionFolder), "%s_%d", base, n);
+  }
+  if (SD.exists(sessionFolder) || !SD.mkdir(sessionFolder)) {
     Serial.printf("[ERR ] Could not create session folder %s\n", sessionFolder);
     return false;
   }
   Serial.printf("[OK  ] Session folder: %s\n", sessionFolder);
+
+  {
+    char p[48];
+    snprintf(p, sizeof(p), "%s/" SESSION_START_FILE, sessionFolder);
+    File sf = SD.open(p, FILE_WRITE);
+    if (sf) {
+      sf.printf("%lu %lu\n", (unsigned long)bootId, (unsigned long)millis());
+      sf.close();
+    }
+  }
 
   currentChunk    = 1;
   sessionStartMs  = millis();
@@ -1467,6 +1535,8 @@ static void purgeSessionFolder(const char *folderPath, const SessionChunks &sc) 
     chunkAacPath(folderPath, sc.local[i], p, sizeof(p));
     SD.remove(p);
   }
+  snprintf(p, sizeof(p), "%s/" SESSION_START_FILE, folderPath);
+  if (SD.exists(p)) SD.remove(p);
   if (!SD.rmdir(folderPath)) {
     Serial.printf("[SYNC] could not rmdir %s (not empty?)\n", folderPath);
   } else {
@@ -1484,6 +1554,30 @@ static void serviceUiDuringSync() {
     syncAbort();
   }
   (void)pollShortPressEvent();
+}
+
+// started_at for an untimed session: if its start.txt was written during
+// this boot and the clock has been set since, the real start is "now" minus
+// the millis() elapsed.  Otherwise out[] stays "" and the server falls back
+// to the upload time.
+static void startTimeFromFile(const char *folderPath, char *out, size_t len) {
+  out[0] = '\0';
+  if (!timeIsValid()) return;
+  char p[64];
+  snprintf(p, sizeof(p), "%s/" SESSION_START_FILE, folderPath);
+  File f = SD.open(p, FILE_READ);
+  if (!f) return;
+  String line = f.readStringUntil('\n');
+  f.close();
+  unsigned long fileBoot = 0, startMs = 0;
+  if (sscanf(line.c_str(), "%lu %lu", &fileBoot, &startMs) != 2) return;
+  if (fileBoot != bootId) return;   // rebooted since: millis() restarted
+  time_t start = time(nullptr) - (time_t)((uint32_t)(millis() - startMs) / 1000);
+  struct tm t;
+  localtime_r(&start, &t);
+  snprintf(out, len, "%04d-%02d-%02dT%02d:%02d:%02d",
+           t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
+           t.tm_hour, t.tm_min, t.tm_sec);
 }
 
 bool syncOneSession(const char *folderPath) {
@@ -1505,6 +1599,9 @@ bool syncOneSession(const char *folderPath) {
   }
   if (sc.count == 0) {
     // Every chunk was empty and dropped: nothing to send, remove the folder.
+    char p[64];
+    snprintf(p, sizeof(p), "%s/" SESSION_START_FILE, folderPath);
+    if (SD.exists(p)) SD.remove(p);
     if (SD.rmdir(folderPath)) {
       Serial.printf("[SYNC] %s held no audio, removed\n", folderPath);
     }
@@ -1513,7 +1610,9 @@ bool syncOneSession(const char *folderPath) {
 
   char sessionId[80], iso[32], title[40];
   syncBuildSessionId(folderPath, sessionId, sizeof(sessionId));
-  syncFolderToIso(folderPath, iso, sizeof(iso));
+  if (syncFolderToIso(folderPath, iso, sizeof(iso)) == 0) {
+    startTimeFromFile(folderPath, iso, sizeof(iso));
+  }
   snprintf(title, sizeof(title), "%s", folderPath);
   for (char *p = title; *p; p++) if (*p == '/') { memmove(title, p + 1, strlen(p)); break; }
   const int expected = sc.count;
@@ -1922,17 +2021,23 @@ static void handleDelete() {
   webServer.send(302);
 }
 
-// Top-level: try saved networks; if all fail, start AP + custom portal.
-bool connectOrProvisionWifi() {
+// Top-level: try saved networks once.  The setup portal only opens when
+// there are no saved networks at all, or when forcePortal is set (button
+// held at power-on) -- a known network that is merely out of range (e.g. at
+// university) must not stall the device in AP mode; wifiMaintain() keeps
+// retrying in the background instead.  Returns true when connected.
+bool connectOrProvisionWifi(bool forcePortal) {
   loadSavedNetworks();
   Serial.printf("[WIP ] %d saved network(s)\n", savedNetworkCount);
 
-  if (tryAllSavedNetworks()) {
+  if (!forcePortal && savedNetworkCount > 0) {
+    bool ok = tryAllSavedNetworks();
     bootPhase = BOOT_PHASE_TRYING;
-    return true;
+    return ok;
   }
 
-  Serial.println("[WIP ] No saved network worked -- starting AP mode");
+  Serial.println(forcePortal ? "[WIP ] starting setup portal (forced)"
+                             : "[WIP ] no saved networks -- starting setup portal");
   bootPhase = BOOT_PHASE_AP_MODE;
 
   WiFi.mode(WIFI_AP);
@@ -1964,29 +2069,117 @@ bool connectOrProvisionWifi() {
     delay(5);
   }
 
-  Serial.println("[ERR ] AP config portal timed out");
+  Serial.println("[WARN] setup portal timed out -- continuing offline");
   dnsServer.stop();
   webServer.stop();
   WiFi.softAPdisconnect(true);
   return false;
 }
 
+// Non-blocking background reconnect, called every loop().  Walks the saved
+// networks one at a time (WIFI_TRY_MS each) and pauses
+// WIFI_RETRY_INTERVAL_MS between rounds.  On the transition to connected it
+// schedules a sync sweep WIFI_UP_SYNC_DELAY_MS later, so recordings made
+// offline are uploaded soon after you get home.
+void wifiMaintain() {
+  static int8_t        tryIdx      = -1;   // network being attempted, -1 = none
+  static unsigned long tryStartMs  = 0;
+  static unsigned long nextRoundMs = 0;
+  static bool          wasUp       = false;
+
+  unsigned long now = millis();
+  if (WiFi.status() == WL_CONNECTED) {
+    if (!wasUp) {
+      wasUp = true;
+      tryIdx = -1;
+      Serial.printf("[WIFI] connected to %s, IP=%s\n",
+                    WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
+      lastSyncMs = now - SYNC_RETRY_INTERVAL_MS + WIFI_UP_SYNC_DELAY_MS;
+    }
+    // While up, keep pushing the next round out: after a drop the core's
+    // own auto-reconnect gets a full interval before we start cycling.
+    nextRoundMs = now + WIFI_RETRY_INTERVAL_MS;
+    return;
+  }
+  if (wasUp) {
+    wasUp = false;
+    Serial.println("[WIFI] link lost");
+  }
+  if (savedNetworkCount == 0) return;
+
+  if (tryIdx >= 0) {
+    if ((uint32_t)(now - tryStartMs) < WIFI_TRY_MS) return;   // still trying
+    tryIdx++;
+    if (tryIdx >= savedNetworkCount) {
+      tryIdx = -1;
+      nextRoundMs = now + WIFI_RETRY_INTERVAL_MS;
+      return;
+    }
+  } else {
+    if ((int32_t)(now - nextRoundMs) < 0) return;
+    tryIdx = 0;
+  }
+  Serial.printf("[WIFI] trying %s\n", savedNetworks[tryIdx].ssid);
+  WiFi.disconnect();
+  WiFi.begin(savedNetworks[tryIdx].ssid, savedNetworks[tryIdx].pass);
+  tryStartMs = now;
+}
+
 
 // =============================================================================
 //  NTP / TIMEZONE
 // =============================================================================
-void syncTimeBlocking() {
+// Starts SNTP and sets the UK timezone.  Non-blocking: lwIP's SNTP client
+// keeps polling in the background, so the clock gets set whenever the
+// network comes up -- now or hours later.
+void startTimeSync() {
   configTime(0, 0, "pool.ntp.org", "time.nist.gov");
   setenv("TZ", "GMT0BST,M3.5.0/1,M10.5.0/2", 1);
   tzset();
+}
 
+bool timeIsValid() {
+  return time(nullptr) >= (time_t)TIME_VALID_AFTER;
+}
+
+// Bounded wait for the first NTP answer (WiFi without internet, e.g. a
+// sign-in page network, would otherwise hang boot forever).
+bool waitForTime(uint32_t timeoutMs) {
   unsigned long start = millis();
-  while (time(nullptr) < 1700000000UL) {
-    if ((uint32_t)(millis() - start) >= NTP_SYNC_TIMEOUT_MS) {
-      Serial.println("[WARN] NTP sync slow - still waiting for sane time");
-      start = millis();
-    }
+  while (!timeIsValid()) {
+    if ((uint32_t)(millis() - start) >= timeoutMs) return false;
     updateLeds();
     delay(200);
   }
+  return true;
+}
+
+
+// =============================================================================
+//  BOOT ID / BUTTON RESET
+// =============================================================================
+// Persistent boot counter, in its own NVS namespace so it survives the
+// WiFi list being edited.
+uint32_t nextBootId() {
+  Preferences prefs;
+  prefs.begin("ai_nt_sys", false);
+  uint32_t id = prefs.getUInt("boots", 0) + 1;
+  prefs.putUInt("boots", id);
+  prefs.end();
+  return id;
+}
+
+// Wait for the button to be released, then reset the debouncer so a press
+// that began before or during setup() cannot fire a stale event.
+void resetButtonState() {
+  while (digitalRead(PIN_BUTTON) == LOW) {
+    updateLeds();
+    delay(10);
+  }
+  btnRawStable       = true;
+  btnRawLast         = true;
+  btnLastChangeMs    = millis();
+  btnPressStartMs    = 0;
+  btnShortPressEvent = false;
+  btnLongPressEvent  = false;
 }
