@@ -1,0 +1,7 @@
+dependencies:
+  idf:
+    version: ">=5.5"
+  # Espressif's audio codecs (AAC-LC encoder, optimised for ESP32-S3).
+  espressif/esp_audio_codec: "^2.6.2"
+  # WS2812 status LED over RMT.
+  espressif/led_strip: "^3.0.0"

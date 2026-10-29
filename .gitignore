@@ -17,3 +17,12 @@ Hardware/AI_NoteTaker/secrets.h
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Hardware: ESP-IDF firmware build output.  sdkconfig is generated from
+# sdkconfig.defaults; managed_components/ is re-downloaded from
+# dependencies.lock (which is committed).
+Hardware/firmware/build/
+Hardware/firmware/sdkconfig
+Hardware/firmware/sdkconfig.old
+Hardware/firmware/managed_components/
+Hardware/firmware/main/secrets.h

@@ -1,12 +1,11 @@
 # AI NoteTaker — firmware
 
-ESP32-S3 lecture recorder. Records 5-minute WAV chunks to the SD card,
-encodes them to AAC when a session ends, and uploads them to the server
-in `../Server` once on Wi-Fi.
+ESP32-S3 lecture recorder (ESP32-S3-DevKitC-1 N16R8). Records from an
+INMP441 microphone, encodes AAC live, writes 5-minute chunks to the SD card,
+and uploads them to the server in `../Server` once on Wi-Fi. Local files are
+deleted only after the server confirms.
 
-The sketch is the folder [`AI_NoteTaker/`](AI_NoteTaker/). Open
-`AI_NoteTaker/AI_NoteTaker.ino` in the Arduino IDE. Arduino builds every
-`.ino` in that folder, so don't put other sketches there.
+The firmware is the ESP-IDF project in [`firmware/`](firmware/).
 
 ## Versions
 
@@ -14,62 +13,108 @@ Versions are git history, not file copies:
 
 | Tag | What |
 |---|---|
-| `fw-v0.4` | Last version flashed and tested on the device |
-| `fw-v0.6-untested` | V0.5 + V0.6 exactly as first written (never flashed) |
+| `fw-v0.4` | Arduino. Last version flashed and tested on the device (WAV only) |
+| `fw-v0.6-untested` | Arduino V0.5 + V0.6 as first written (WAV → AAC after recording, upload) |
+| `fw-v0.7-arduino` | Arduino with all review fixes. Never flashed; superseded by the ESP-IDF firmware |
 
-`git log -- Hardware` shows every change since. `old_versions/` holds the
-pre-git `V0.x.ino` files locally and is gitignored.
+`old_versions/` holds the pre-git `V0.x.ino` files locally (gitignored).
 
-## Build
+## How it works
 
-Arduino IDE 2 or `arduino-cli`, ESP32 core 3.3.x.
+Tasks, two cores:
 
-Board: **ESP32S3 Dev Module** with:
+| Task | Core | Job |
+|---|---|---|
+| capture | 1 (top priority) | I2S mic → gain → 16-bit → ring buffer (~11 s, PSRAM) |
+| writer | 1 | ring buffer → Espressif AAC-LC encoder → `rec_…/N.aac` |
+| ui | 0 | LED + button (display and battery go here later) |
+| wifi_mgr | 0 | saved networks, background reconnect, setup portal |
+| sync | 0 | upload finished sessions, then delete them |
 
-- Flash Size: 16MB
-- PSRAM: OPI PSRAM
-- Partition Scheme: 16M Flash (3MB APP/9.9MB FATFS)
+- One encoder runs across chunk rotations, so chunks join without gaps.
+- The open chunk is flushed every 10 s, so a power cut loses at most ~10 s.
+  On the next boot the cut-off last frame is trimmed.
+- The ring buffer absorbs SD card stalls.
+- While recording, the device logs every 60 s: encoder time per frame (and
+  as % of one core), buffer peak and dropped frames.
 
-Libraries:
+Settings: [`firmware/main/config.h`](firmware/main/config.h). The upload
+token and server URL override go in `firmware/main/secrets.h` (gitignored;
+copy `secrets.example.h`).
 
-- Adafruit NeoPixel (Library Manager)
-- VOAACEncoder: `git clone https://github.com/pschatzmann/codec-vo-aacenc`
-  into `Documents/Arduino/libraries/`
+## Using the device
 
-Command line:
+| When | Button | LED |
+|---|---|---|
+| Power-on | hold → Wi-Fi setup portal | blue blink = booting, solid blue = portal |
+| Idle | long press → start session | solid green, blue blink = uploading, green flash = uploaded |
+| Recording | short = pause, long = end | red blink |
+| Paused | short = resume, long = end | orange blink |
+| Error | long press → restart | magenta |
 
+- **Wi-Fi setup:** hold the button while powering on (or boot with no
+  saved networks). Join `AI_NoteTaker-Setup` (password `afterword-setup`), and the
+  setup page opens. Networks saved by the Arduino firmware carry over.
+- **Offline:** recording never needs Wi-Fi. Without NTP time, sessions are
+  named `rec_nt<boot>_<n>`.
+
+## Build and flash
+
+Toolchain: **ESP-IDF v5.5.6**, installed at `C:\esp\v5.5.6\esp-idf` with
+tools in `C:\Espressif`.
+
+**VS Code (ESP-IDF extension):** install the "ESP-IDF" extension
+(Espressif) and run *ESP-IDF: Configure ESP-IDF Extension* → *Use existing
+setup* → pick `C:\esp\v5.5.6\esp-idf` with tools path `C:\Espressif`. Open
+the `Hardware/firmware` folder, set the target to `esp32s3`, select the COM
+port, then *Build, Flash and Monitor* (the flame icon in the status bar).
+
+**Command line (PowerShell):**
+
+```powershell
+$env:IDF_TOOLS_PATH = 'C:\Espressif'
+$env:PATH = 'C:\Espressif\tools\python;' + $env:PATH
+. C:\esp\v5.5.6\esp-idf\export.ps1
+cd Hardware\firmware
+idf.py build
+idf.py -p COM5 flash monitor     # your port; Ctrl+] quits the monitor
 ```
-arduino-cli compile -b "esp32:esp32:esp32s3:PSRAM=opi,FlashSize=16M,PartitionScheme=app3M_fat9M_16MB" Hardware/AI_NoteTaker
+
+Logs are printed at 115200 baud on both USB ports.
+
+**Norton Antivirus:** Norton inspects HTTPS and re-signs it with its own
+certificate, which ESP-IDF's Python tools reject. The first build downloads
+components, so if you see `CERTIFICATE_VERIFY_FAILED`, set
+
+```powershell
+$env:REQUESTS_CA_BUNDLE = 'C:\Espressif\tools\ca-bundle-norton.pem'
 ```
 
-## Configuration
+(the standard CA list plus Norton's certificate), or turn off Norton's
+"encrypted connection scanning".
 
-- [`config.h`](AI_NoteTaker/config.h): server address and port. The
-  default is the dev PC on the LAN (`192.168.0.50:8000`).
-- `secrets.h` (gitignored): copy
-  [`secrets.example.h`](AI_NoteTaker/secrets.example.h) to set the upload
-  token or override the server address. Optional for local testing.
-- Wi-Fi networks are entered in the setup portal, not in code. Hold the
-  button while powering on, join `AI_NoteTaker-Setup` (password in the
-  sketch, `AP_PASSWORD`), and open any page.
+## Test plan
 
-## Test plan (V0.7 on hardware)
+Watch the monitor output for each step.
 
-Test in this order. Each step only depends on the ones before it.
-
-1. **Boot + portal.** Flash, open Serial Monitor at 115200. Hold the
-   button at power-on, add your Wi-Fi, check it reboots and connects.
-2. **Record + encode, no server.** Unplug or stop the server. Record a
-   short session with one pause/resume. After the long press, check the log
-   for `[ENC ] OK` per chunk. Pull the SD card and on the PC run
-   `ffprobe 1.aac` (expect `aac (LC), 22050 Hz, mono`), then listen,
-   especially to the volume and the end of each chunk.
-3. **Crash recovery.** Start recording, pull power after ~1 minute, power
-   back on. The boot sweep should encode that chunk (not refuse it).
-4. **Upload to the local server.** Start `python app.py` in `Server/`,
-   check `config.h` matches the PC's IP (`ipconfig`). Record a session;
-   after it ends it should upload, flash green, and appear in the web UI.
-5. **Offline.** Boot away from any saved network: it should reach solid
-   green and record. Back in range, it should upload within a few minutes.
-6. **Abort.** Long-press while it's uploading: blue blinking stops, files
-   are kept, and the next retry uploads them.
+1. **Boot.** Expect `SD mounted`, `audio ready`, and either `connected,
+   IP …` or the setup portal. Hold the button at power-on: the portal should
+   open, a network can be added, and the device connects without a reboot.
+2. **Record, server off.** Record ~2 minutes with a pause/resume.
+   - Check the 60 s `encode avg … us … (% of one core)` lines (this is the
+     performance benchmark), plus `dropped frames 0`.
+   - Pull the SD card. On the PC, `ffprobe 1.aac` should show
+     `aac (LC), 22050 Hz, mono`.
+   - Listen: volume (`MIC_GAIN` in `config.h`), and no gap where one chunk
+     ends and the next begins. For a quick chunk test, temporarily set
+     `CHUNK_SECONDS` to 30.
+3. **Power cut.** Record ~1 minute, pull power, power on again. The log
+   should trim the last chunk, and the audio up to ~10 s before the cut
+   should be there.
+4. **Upload.** Start `python app.py` in `Server/`. `SERVER_URL` in
+   `config.h` must match the PC's IP (`ipconfig`). End a session: it should
+   upload, flash green, and appear in the web UI.
+5. **Offline.** Boot away from saved networks: green within ~20 s, and
+   recording works. Back in range, it uploads within a minute or so.
+6. **Abort.** Long-press during an upload: recording starts at once, and
+   the interrupted session uploads after this one ends.

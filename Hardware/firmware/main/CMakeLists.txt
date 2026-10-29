@@ -1,0 +1,31 @@
+idf_component_register(
+    SRCS
+        "main.c"
+        "ui.c"
+        "storage.c"
+        "audio.c"
+        "wifi_mgr.c"
+        "portal.c"
+        "dns_server.c"
+        "timesync.c"
+        "sync.c"
+    INCLUDE_DIRS "."
+    REQUIRES
+        esp_driver_gpio
+        esp_driver_i2s
+        esp_driver_sdspi
+        esp_driver_spi
+        esp_event
+        esp_http_client
+        esp_http_server
+        esp_netif
+        esp_ringbuf
+        esp_timer
+        esp_wifi
+        fatfs
+        json
+        mbedtls
+        nvs_flash
+        sdmmc
+        vfs
+)

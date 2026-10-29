@@ -1,0 +1,41 @@
+# Defaults for ESP32-S3-DevKitC-1 N16R8 (16 MB quad flash, 8 MB octal PSRAM).
+# `sdkconfig` is generated from this on first build and is not committed;
+# change settings here (or via menuconfig and then `idf.py save-defconfig`).
+
+CONFIG_IDF_TARGET="esp32s3"
+
+# --- Flash / partitions ---
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# --- CPU / PSRAM ---
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+# Let WiFi/lwIP buffers live in PSRAM to keep internal RAM for the encoder.
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+
+# --- FreeRTOS / tasks ---
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# --- FAT on SD: long file names (rec_2026-10-28T1430 is not 8.3) ---
+CONFIG_FATFS_LFN_HEAP=y
+CONFIG_FATFS_MAX_LFN=255
+CONFIG_FATFS_API_ENCODING_UTF_8=y
+
+# --- HTTP client: HTTPS to the VPS later uses the built-in CA bundle ---
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_ESP_HTTP_CLIENT_ENABLE_HTTPS=y
+
+# --- NTP: two servers (pool.ntp.org, time.google.com) ---
+CONFIG_LWIP_SNTP_MAX_SERVERS=2
+
+# --- Captive portal pages are a few KB ---
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
+
+# --- Logging ---
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
