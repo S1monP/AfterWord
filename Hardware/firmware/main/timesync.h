@@ -8,5 +8,6 @@
 #include <stdint.h>
 
 void timesync_start(void);              // after esp_netif_init()
+void timesync_on_connected(void);       // on every new IP: request time now
 bool time_valid(void);
 bool timesync_wait(uint32_t timeout_ms);

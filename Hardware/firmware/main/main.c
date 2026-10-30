@@ -171,6 +171,7 @@ static void handle_button(btn_event_t ev) {
 }
 
 static void on_wifi_connected(void) {
+    timesync_on_connected();
     sync_kick(WIFI_UP_SYNC_DELAY_MS);           // give NTP a moment first
 }
 

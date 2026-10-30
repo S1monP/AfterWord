@@ -33,6 +33,9 @@ CONFIG_ESP_HTTP_CLIENT_ENABLE_HTTPS=y
 
 # --- NTP: two servers (pool.ntp.org, time.google.com) ---
 CONFIG_LWIP_SNTP_MAX_SERVERS=2
+# Ask as soon as WiFi is up; the random start delay (up to 5 s) only matters
+# for fleets of devices booting at once.
+# CONFIG_LWIP_SNTP_STARTUP_DELAY is not set
 
 # --- Captive portal pages are a few KB ---
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
