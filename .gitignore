@@ -1,22 +1,17 @@
 # Repo root: AI_NoteTaker monorepo (Server/ + Hardware/).
 # Server/ has its own .gitignore for Python/data rules.
 
-# Hardware: pre-git firmware copies (V0.1..V0.6). History lives in git
-# from fw-v0.4 onward; these are kept locally only for reference.
-Hardware/old_versions/
-
-# Hardware: stray local data, build output.
-Hardware/data/
-Hardware/**/build/
-
-# Hardware: per-device secrets (copy secrets.example.h -> secrets.h).
-Hardware/AI_NoteTaker/secrets.h
-
 # Editor / OS
 *.code-workspace
 .vscode/
+.idea/
 .DS_Store
 Thumbs.db
+*.swp
+*~
+
+# Python caches (Hardware/tools scripts)
+__pycache__/
 
 # Hardware: ESP-IDF firmware build output.  sdkconfig is generated from
 # sdkconfig.defaults; managed_components/ is re-downloaded from
@@ -25,4 +20,6 @@ Hardware/firmware/build/
 Hardware/firmware/sdkconfig
 Hardware/firmware/sdkconfig.old
 Hardware/firmware/managed_components/
+
+# Hardware: per-device secrets (copy secrets.example.h -> secrets.h).
 Hardware/firmware/main/secrets.h

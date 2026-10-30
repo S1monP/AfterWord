@@ -17,7 +17,8 @@ Versions are git history, not file copies:
 | `fw-v0.6-untested` | Arduino V0.5 + V0.6 as first written (WAV → AAC after recording, upload) |
 | `fw-v0.7-arduino` | Arduino with all review fixes. Never flashed; superseded by the ESP-IDF firmware |
 
-`old_versions/` holds the pre-git `V0.x.ino` files locally (gitignored).
+The pre-git `V0.1`–`V0.6` sketches are archived outside the repo
+(`..\AI_NoteTaker_archive\Hardware\old_versions`).
 
 ## How it works
 
