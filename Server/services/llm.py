@@ -912,12 +912,15 @@ _CLASSIFY_SYSTEM_PROMPT = (
     '"kind" must be one of: "lecture" (a class or seminar — '
     "long, structured, audience-facing), "
     '"voice_memo" (a personal note, sometimes one-sided, often short), '
-    '"meeting" (multiple participants discussing a shared topic), '
+    '"meeting" (multiple participants discussing a shared topic, '
+    "live; not a video), "
     '"command" (the whole recording is only a request to add a '
     "to-do, deadline or calendar entry, or to be reminded of something, "
     'e.g. \"remind me to call the dentist on Friday\"; if it also has '
     'other notes or thoughts, it is a voice_memo), '
-    '"other" (none of the above).\n\n'
+    '"other" (none of the above, including a video, podcast, stream or '
+    "broadcast playing in the background: a channel intro or asking to "
+    'like or subscribe gives it away).\n\n'
     '"confidence" is your own 0..1 estimate; use 0.0 when you are '
     "guessing and 1.0 when you are certain."
 )
@@ -1052,7 +1055,11 @@ _KIND_ITEMS = (
 
 _FILING_RULES = (
     "Three types are copied into the user's to-do list, deadlines and "
-    "calendar, so use them precisely:\n"
+    "calendar, so use them precisely and sparingly. Only concrete "
+    "commitments: something a listener is asked or agrees to do, or a "
+    "date they have to keep. Never general advice or tips (\"always "
+    "check the contract\"), opinions, or requests to like, subscribe or "
+    "comment.\n"
     "- 'deadline': something to hand in, finish or sit by a date "
     "(assignment due, application closes, an exam with a date but no "
     "time). Give 'due'.\n"
@@ -1064,7 +1071,7 @@ _FILING_RULES = (
     "is said. If it is clearly one named person's job, start the text "
     "with their name and a colon (\"Anna: get three shelf quotes\").\n"
     "'due', 'start' and 'end' are local time: 'YYYY-MM-DD', or "
-    "'YYYY-MM-DDTHH:MM' when a time is said. Work out relative dates "
+    "'YYYY-MM-DDTHH:MM' only when a clock time is said. Work out relative dates "
     "(\"next Friday\", \"in two weeks\") from the recording date given "
     "with the transcript. Leave a field out when no date is said or it "
     "is unclear; never guess one.\n"
@@ -1208,7 +1215,7 @@ def _extract_one_chunk(
         message = provider._chat(
             _EXTRACT_SECTION_PROMPT + "\n\n" + _language_rule(language),
             user_prompt,
-            max_chars=_CHUNK_SIZE,
+            timeout=_SUMMARY_TIMEOUT, max_chars=_CHUNK_SIZE,
         )
         return _parse_extract_response(message.encode("utf-8"))
     except LLMError:
@@ -1388,7 +1395,8 @@ _DETECT_LANGUAGE_PROMPT = (
 _DETECT_LANGUAGE_CHARS = 3_000
 
 
-# Requests that write long summaries need more than the default 60 s.
+# Summaries and extraction need more than the default 60 s: M3 thinks
+# first, and a long summary or a full item list takes a while to write.
 _SUMMARY_TIMEOUT = 180.0
 # The synthesis prompt carries the notes on every part (~1 KB each).
 _SYNTHESIS_MAX_CHARS = 60_000
@@ -1857,7 +1865,7 @@ class TextProvider(LLMProvider):
                     + _recorded_line(recorded_at)
                     + f"\nTranscript:\n\n{transcript}"
                 ),
-                max_chars=_CHUNK_SIZE,
+                timeout=_SUMMARY_TIMEOUT, max_chars=_CHUNK_SIZE,
             )
             if not isinstance(message, str):
                 raise LLMError(
