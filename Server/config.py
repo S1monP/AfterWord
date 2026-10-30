@@ -70,6 +70,15 @@ def _env_int(key: str, default: int) -> int:
         return default
 
 
+def _resolve_dir(raw: str, base: Path) -> Path:
+    """``raw`` as an absolute path; relative paths are taken from
+    ``base`` (the Server folder), not the current directory, so
+    starting ``app.py`` from elsewhere cannot create a second,
+    empty data dir."""
+    p = Path(raw).expanduser()
+    return (p if p.is_absolute() else base / p).resolve()
+
+
 @dataclass(frozen=True)
 class Config:
     """Immutable configuration snapshot.
@@ -109,7 +118,7 @@ def load() -> Config:
     for candidate in (Path.cwd() / ".env", here / ".env"):
         _load_dotenv(candidate)
     return Config(
-        data_dir=Path(_env("LR_DATA_DIR", default="./data")).resolve(),
+        data_dir=_resolve_dir(_env("LR_DATA_DIR", default="data"), here),
         host=_env("LR_HOST", default="0.0.0.0"),
         port=_env_int("LR_PORT", 8000),
         # Both providers go through OpenRouter; the same key works

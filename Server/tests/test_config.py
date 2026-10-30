@@ -89,5 +89,25 @@ class LoadDotenvTests(unittest.TestCase):
         self.assertEqual(os.environ["LR_TEST_A"], "ok")
 
 
+class ResolveDirTests(unittest.TestCase):
+    """LR_DATA_DIR: relative paths belong to the Server folder."""
+
+    def test_relative_path_is_taken_from_base_not_cwd(self) -> None:
+        with tempfile.TemporaryDirectory() as base, \
+                tempfile.TemporaryDirectory() as elsewhere:
+            old = os.getcwd()
+            os.chdir(elsewhere)
+            try:
+                got = config_mod._resolve_dir("./data", Path(base))
+            finally:
+                os.chdir(old)
+            self.assertEqual(got, (Path(base) / "data").resolve())
+
+    def test_absolute_path_is_kept(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            got = config_mod._resolve_dir(d, Path("/unused"))
+            self.assertEqual(got, Path(d).resolve())
+
+
 if __name__ == "__main__":
     unittest.main()
