@@ -13,3 +13,6 @@ icalendar>=5.0
 # Time zone database for zoneinfo (Windows has none built in; see
 # timeutil.py).
 tzdata>=2024.1
+
+# Production web server for serve.py (python app.py is for development).
+waitress>=3.0
