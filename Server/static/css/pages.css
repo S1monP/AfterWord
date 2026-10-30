@@ -496,3 +496,33 @@
   padding: 0;
   margin: 0;
 }
+
+/* Login (only when LR_WEB_PASSWORD is set). */
+.lr-login {
+  display: flex;
+  justify-content: center;
+  padding: 12vh 16px 0;
+}
+.lr-login__card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 340px;
+}
+.lr-login__title {
+  font-size: var(--lr-fs-2xl);
+  margin: 0 0 4px;
+}
+.lr-login__label {
+  color: var(--lr-text-muted);
+  font-size: var(--lr-fs-sm);
+}
+.lr-login__error {
+  color: var(--lr-danger);
+  font-size: var(--lr-fs-sm);
+  margin: 0;
+}
+.lr-topbar__logout {
+  margin: 0;
+}

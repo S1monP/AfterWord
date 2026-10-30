@@ -25,6 +25,7 @@
         <span class="lr-num">—</span>
       </div>
 
+      {% if request.endpoint != 'auth.login' %}
       <nav class="lr-topbar__nav" aria-label="Primary">
         <a href="{{ url_for('ui_lectures') }}"
            class="{% if request.endpoint == 'ui_lectures' %}is-active{% endif %}">Lectures</a>
@@ -43,7 +44,13 @@
             <span class="lr-num">{{ unsorted_count }}</span>
           </a>
         {% endif %}
+        {% if auth_enabled %}
+          <form class="lr-topbar__logout" method="post" action="{{ url_for('auth.logout') }}">
+            <button class="lr-btn lr-btn--ghost" type="submit">Log out</button>
+          </form>
+        {% endif %}
       </nav>
+      {% endif %}
     </div>
   </header>
 

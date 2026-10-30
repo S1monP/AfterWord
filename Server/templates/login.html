@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Log in · Lecture Recorder{% endblock %}
+{% block content %}
+<section class="lr-login">
+  <form class="lr-card lr-login__card" method="post" action="{{ url_for('auth.login') }}">
+    <h1 class="lr-login__title">Log in</h1>
+    <input type="hidden" name="next" value="{{ next_url }}">
+    <label class="lr-login__label" for="lr-password">Password</label>
+    <input class="lr-input" id="lr-password" type="password" name="password"
+           autocomplete="current-password" required autofocus>
+    {% if error %}<p class="lr-login__error" role="alert">{{ error }}</p>{% endif %}
+    <button class="lr-btn lr-btn--primary" type="submit">Log in</button>
+  </form>
+</section>
+{% endblock %}

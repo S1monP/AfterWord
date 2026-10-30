@@ -92,6 +92,11 @@ class Config:
     text_api_key: str
     ffmpeg_path: str
     max_upload_bytes: int
+    # Access control (see auth.py). Empty = off, for local development.
+    device_token: str = ""      # devices send "Authorization: Bearer <token>"
+    web_password: str = ""      # one password for the web UI
+    secret_key: str = ""        # session cookie key; empty = generated + kept
+    cookie_secure: bool = False  # True behind HTTPS (Caddy)
 
     # Convenience paths derived from data_dir.
     @property
@@ -132,4 +137,8 @@ def load() -> Config:
         ),
         ffmpeg_path=_env("LR_FFMPEG_PATH", default="ffmpeg"),
         max_upload_bytes=_env_int("LR_MAX_UPLOAD_BYTES", 500 * 1024 * 1024),
+        device_token=_env("LR_DEVICE_TOKEN"),
+        web_password=_env("LR_WEB_PASSWORD"),
+        secret_key=_env("LR_SECRET"),
+        cookie_secure=_env("LR_COOKIE_SECURE").lower() in ("1", "true", "yes", "on"),
     )

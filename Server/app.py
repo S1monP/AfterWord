@@ -27,6 +27,7 @@ from flask import (
     send_file, url_for,
 )
 
+import auth
 import config as config_mod
 import search
 import services
@@ -101,7 +102,18 @@ def create_app(config: Optional[config_mod.Config] = None) -> Flask:
         ),
         flush=True,
     )
-    app.secret_key = os.environ.get("LR_SECRET", "lr-dev-secret-not-for-prod")
+    auth.init_app(app)
+    # Refuse oversized bodies before reading them (the upload handlers
+    # used to buffer the whole body, then check). The margin covers
+    # multipart overhead on top of the file itself.
+    app.config["MAX_CONTENT_LENGTH"] = cfg.max_upload_bytes + 1024 * 1024
+
+    @app.errorhandler(413)
+    def _too_large(_exc: Exception) -> Any:
+        return jsonify({
+            "error": "file_too_large",
+            "detail": f"request is over {app.config['MAX_CONTENT_LENGTH']} bytes",
+        }), 413
 
     if not transcode.ffmpeg_available(cfg.ffmpeg_path):
         print(
