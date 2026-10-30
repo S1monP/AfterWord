@@ -1398,6 +1398,10 @@ class TextProvider(LLMProvider):
                 {"role": "user", "content": user_prompt[:max_chars]},
             ],
             "temperature": 0.0,
+            # Every caller wants one JSON object back. Without this,
+            # MiniMax M3 sometimes writes lists as ["a"] ["b"] instead
+            # of ["a", "b"]. Providers that lack the option ignore it.
+            "response_format": {"type": "json_object"},
         }
         body = json.dumps(payload).encode("utf-8")
         headers = {

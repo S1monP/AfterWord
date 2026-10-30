@@ -589,6 +589,8 @@ class TextProviderTests(unittest.TestCase):
         sent = json.loads(capture["data"].decode("utf-8"))
         self.assertIn("messages", sent)
         self.assertEqual(sent["model"], llm.TEXT_MODEL)
+        # JSON mode: MiniMax M3 wrote invalid lists without it.
+        self.assertEqual(sent["response_format"], {"type": "json_object"})
         # The user content includes the transcript.
         user_msg = sent["messages"][-1]["content"]
         self.assertIn("transcript", user_msg)
