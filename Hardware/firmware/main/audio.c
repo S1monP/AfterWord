@@ -29,6 +29,8 @@ static const char *TAG = "audio";
 // out, so the last words before a pause/stop are not lost.
 #define FLUSH_SILENT_FRAMES 2
 #define WRITE_BUF_BYTES     (16 * 1024)
+// Frames the ring holds: each item carries an 8-byte ring buffer header.
+#define RING_FRAMES         (PCM_RING_BYTES / (sizeof(pcm_item_t) + 8))
 
 // --- ring buffer items (all produced by the capture task, in order) ---------
 typedef enum { IT_PCM = 1, IT_START, IT_PAUSE, IT_RESUME, IT_STOP } item_type_t;
@@ -51,9 +53,10 @@ static QueueHandle_t      s_cmd_q;      // ctl_item_t, app -> capture
 static EventGroupHandle_t s_ev;
 static volatile bool      s_error;
 
-// Stats (capture side).
+// Stats (capture side).  The backlog is counted in items: the ring's free
+// size is capped at half the buffer, so it cannot show how full it got.
 static volatile uint32_t  s_overruns;
-static volatile size_t    s_ring_min_free;
+static volatile UBaseType_t s_ring_peak_items;
 
 // =============================================================================
 //  Capture task
@@ -92,8 +95,9 @@ static void capture_task(void *arg) {
         if (xRingbufferSend(s_ring, &item, sizeof(item), 0) != pdTRUE) {
             s_overruns++;               // writer fell > ~11 s behind: frame lost
         }
-        size_t free_now = xRingbufferGetCurFreeSize(s_ring);
-        if (free_now < s_ring_min_free) s_ring_min_free = free_now;
+        UBaseType_t waiting = 0;
+        vRingbufferGetInfo(s_ring, NULL, NULL, NULL, NULL, &waiting);
+        if (waiting > s_ring_peak_items) s_ring_peak_items = waiting;
     }
 }
 
@@ -188,16 +192,15 @@ static void fail(const char *what) {
 static void log_stats(void) {
     if (w.stat_frames == 0) return;
     int64_t avg = w.stat_us_sum / w.stat_frames;
-    size_t ring_used_max = PCM_RING_BYTES - s_ring_min_free;
     ESP_LOGI(TAG, "encode avg %lld us, max %lld us per %lld us frame "
-             "(%.1f%% of one core); buffer peak %u KB of %u KB; dropped frames %lu",
+             "(%.1f%% of one core); buffer peak %.1f s of %.1f s; dropped frames %lu",
              avg, w.stat_us_max, FRAME_US, 100.0 * avg / FRAME_US,
-             (unsigned)(ring_used_max / 1024), (unsigned)(PCM_RING_BYTES / 1024),
+             s_ring_peak_items * FRAME_US / 1e6, RING_FRAMES * FRAME_US / 1e6,
              (unsigned long)s_overruns);
     w.stat_frames = 0;
     w.stat_us_sum = 0;
     w.stat_us_max = 0;
-    s_ring_min_free = PCM_RING_BYTES;
+    s_ring_peak_items = 0;
 }
 
 static void encode_and_write(const int16_t *pcm) {
@@ -338,7 +341,6 @@ esp_err_t audio_init(void) {
     s_ring = xRingbufferCreateStatic(PCM_RING_BYTES, RINGBUF_TYPE_NOSPLIT, storage, ctrl);
     s_cmd_q = xQueueCreate(4, sizeof(ctl_item_t));
     s_ev = xEventGroupCreate();
-    s_ring_min_free = PCM_RING_BYTES;
 
     // Prove the encoder works before anyone tries to record.
     if (!enc_open()) return ESP_FAIL;

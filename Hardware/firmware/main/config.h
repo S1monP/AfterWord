@@ -47,7 +47,7 @@
 #define FLUSH_SECONDS           10
 
 // Buffer between microphone and encoder/SD writer, in PSRAM.  Absorbs SD
-// card stalls; 512 KB of 16-bit mono is ~11.6 s of audio.
+// card stalls; 512 KB of 16-bit mono is ~11.8 s of audio.
 #define PCM_RING_BYTES          (512 * 1024)
 
 // Auto-stop after this much continuous recording (pauses reset it).
