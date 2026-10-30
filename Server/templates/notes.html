@@ -105,7 +105,7 @@
           <section class="lr-detail__summary">
             <h3>Transcript</h3>
             {% if transcript and transcript.content %}
-              <div class="lr-prose lr-memo__transcript">{{ transcript.content }}</div>
+              {{ ui.transcript_view(transcript.content) }}
             {% elif selected_session.status in ('done', 'failed') %}
               <div class="lr-detail__placeholder">
                 {{ (selected_session.status_detail or 'no transcript')|capitalize }}.

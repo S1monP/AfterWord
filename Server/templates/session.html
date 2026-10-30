@@ -45,10 +45,8 @@
 
   {% if session.status in ('ready', 'done', 'transcribing', 'transcribed', 'classifying', 'summarising', 'extracting') and session.full_audio_size > 0 %}
     <section class="lr-card" style="margin-top: var(--lr-gap-card);">
-      <h2>Playback</h2>
-      <div class="lr-player" style="margin-top: var(--lr-s-3);">
-        <audio controls preload="metadata"
-               src="{{ url_for('sessions_api.api_get_audio', session_id=session.id) }}"></audio>
+      {% include "_session_detail.html" %}
+      <div class="lr-player" style="margin-top: var(--lr-s-4);">
         <a class="lr-btn"
            href="{{ url_for('sessions_api.api_get_audio', session_id=session.id) }}"
            download="{{ (session.title or session.id) ~ '.aac' }}">Download</a>
@@ -88,32 +86,6 @@
     </section>
   {% endif %}
 </div>
-
-<script>
-  // Deep-link support: when the URL has ``?t=<ms>`` (e.g. clicked from a
-  // deadline row), seek the audio player to that offset once the metadata
-  // is loaded. We do this in a tiny inline script rather than extending
-  // app.js, because the seek is page-scoped.
-  (function () {
-    var audio = document.querySelector(".lr-player audio");
-    if (!audio) return;
-    var params = new URLSearchParams(window.location.search);
-    var raw = params.get("t");
-    if (raw === null) return;
-    var ms = parseInt(raw, 10);
-    if (!isFinite(ms) || ms < 0) return;
-    var seconds = ms / 1000;
-    function seek() {
-      try { audio.currentTime = seconds; } catch (e) { /* ignore */ }
-    }
-    // Some browsers won't allow seeking before metadata is loaded.
-    if (audio.readyState >= 1) {
-      seek();
-    } else {
-      audio.addEventListener("loadedmetadata", seek, { once: true });
-    }
-  })();
-</script>
 
 <script>
   // Re-run AI processing: POST /api/v1/sessions/<id>/transcribe and

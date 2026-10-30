@@ -22,6 +22,23 @@
   </details>
 {%- endmacro %}
 
+{# A transcript whose [12:34] markers jump the page's audio there
+   (static/js/app.js). #}
+{% macro transcript_view(text) -%}
+  <div class="lr-transcript">
+    {% for line in text|transcript_lines %}
+      <p class="lr-tline"{% if line.t is not none %} data-t="{{ line.t }}"{% endif %}>
+        {%- if line.t is not none -%}
+          <button class="lr-ts" type="button" data-t="{{ line.t }}"
+                  title="Play from {{ line.stamp }}">{{ line.stamp }}</button>
+        {%- endif -%}
+        {%- if line.speaker %} <span class="lr-tline__who">{{ line.speaker }}</span>{% endif %}
+        {{ line.text }}
+      </p>
+    {% endfor %}
+  </div>
+{%- endmacro %}
+
 {% macro priority_dot(priority) -%}
   <span class="lr-priority lr-priority--{{ priority or 'low' }}"></span>
 {%- endmacro %}

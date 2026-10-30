@@ -393,6 +393,29 @@
 }
 .lr-memo__transcript { white-space: pre-line; }
 .lr-detail__filed { margin-top: var(--lr-s-4); }
+.lr-transcript { margin-top: var(--lr-s-2); }
+.lr-tline {
+  margin: 0;
+  padding: var(--lr-s-1) var(--lr-s-2);
+  border-radius: 4px;
+  line-height: 1.5;
+}
+.lr-tline.is-playing { background: var(--lr-surface); }
+.lr-ts {
+  font-family: var(--lr-font-mono);
+  font-size: var(--lr-fs-xs);
+  color: var(--lr-info);
+  background: none;
+  border: 0;
+  padding: 0 var(--lr-s-2) 0 0;
+  cursor: pointer;
+}
+.lr-ts:hover { text-decoration: underline; }
+.lr-tline__who {
+  font-size: var(--lr-fs-xs);
+  color: var(--lr-text-faint);
+  margin-right: var(--lr-s-1);
+}
 .lr-filed { list-style: none; padding: 0; margin: var(--lr-s-2) 0 0; }
 .lr-filed li {
   display: flex;

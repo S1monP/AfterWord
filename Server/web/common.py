@@ -199,6 +199,29 @@ def register_filters(app: Flask) -> None:
             return sess.title
         return _KIND_LABEL.get(sess.kind or "", "Recording")
 
+    # Transcript lines for display: "[12:34] Speaker 2: text" becomes
+    # {"t": 754, "stamp": "12:34", "speaker": "Speaker 2", "text": ...};
+    # lines without a marker (plain transcripts) have t None.
+    @app.template_filter("transcript_lines")
+    def _transcript_lines(text: Optional[str]) -> list[dict]:
+        out = []
+        for line in (text or "").splitlines():
+            if not line.strip():
+                continue
+            m = _TRANSCRIPT_LINE.match(line)
+            if not m:
+                out.append({"t": None, "stamp": None, "speaker": None,
+                            "text": line.strip()})
+                continue
+            parts = [int(p) for p in m.group("stamp").split(":")]
+            seconds = 0
+            for p in parts:
+                seconds = seconds * 60 + p
+            out.append({"t": seconds, "stamp": m.group("stamp"),
+                        "speaker": m.group("speaker"),
+                        "text": m.group("text").strip()})
+        return out
+
     # The line under a recording's name: "Thu 30 Oct 2026, 13:10 · 11 min".
     @app.template_filter("rec_when")
     def _rec_when(sess: storage.Session) -> str:
@@ -213,6 +236,11 @@ def register_filters(app: Flask) -> None:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+_TRANSCRIPT_LINE = re.compile(
+    r"^\[(?P<stamp>(?:\d+:)?\d{1,2}:\d{2})\]\s*"
+    r"(?:(?P<speaker>Speaker \d+):\s*)?(?P<text>.*)$"
+)
 
 # Name shown for a recording that has no real title yet.
 _KIND_LABEL = {

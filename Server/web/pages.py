@@ -660,6 +660,7 @@ def ui_session(session_id: str) -> Any:
         session=sess,
         status_label=_STATUS_LABEL,
         duration_for=_estimate_duration_seconds,
+        **_selected_session_context(session_id),
     )
 
 

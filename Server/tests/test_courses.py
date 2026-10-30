@@ -693,3 +693,30 @@ class RecordingNameTests(LRTestCase):
         self.assertTrue(resp.location.endswith("/"))
         self.assertEqual(self.client.post(f"/sessions/{sid}/title",
                                           data={"title": " "}).status_code, 400)
+
+
+class ClickableTranscriptTests(LRTestCase):
+    TRANSCRIPT = ("[00:05] Speaker 1: Welcome back.\n"
+                  "[1:02:03] Speaker 2: Any questions?\n"
+                  "a line without a marker")
+
+    def test_markers_become_play_buttons(self):
+        store = self.app.config["LR_STORAGE"]
+        sid = _seed_session(self, status="done", kind="meeting")
+        store.add_artifact(sid, "transcript", self.TRANSCRIPT)
+        body = self.client.get(f"/meetings?session={sid}",
+                               headers={"X-Soft-Nav": "1"}).get_data(as_text=True)
+        self.assertIn('<button class="lr-ts" type="button" data-t="5"', body)
+        self.assertIn('data-t="3723"', body)                    # 1:02:03
+        self.assertIn('<span class="lr-tline__who">Speaker 2</span>', body)
+        self.assertIn("a line without a marker", body)
+
+    def test_session_page_has_the_transcript_and_player(self):
+        store = self.app.config["LR_STORAGE"]
+        sid = _seed_session(self, status="done", kind="meeting")
+        store.full_audio_path(sid).write_bytes(self.make_wav(b"\x00" * 256))
+        store.add_artifact(sid, "transcript", self.TRANSCRIPT)
+        body = self.client.get(f"/sessions/{sid}?t=5000").get_data(as_text=True)
+        self.assertEqual(body.count("<audio"), 1)
+        self.assertIn('data-t="5"', body)
+        self.assertIn("Re-run AI processing", body)
