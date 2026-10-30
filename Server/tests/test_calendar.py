@@ -116,6 +116,8 @@ class EventOverflowTests(LRTestCase):
         resp = self.client.get("/calendar?year=2027&month=3")
         body = resp.get_data(as_text=True)
         self.assertIn("+ 1 more", body)
+        # The fourth event is listed under it (it used to be empty).
+        self.assertIn("Event 3", body)
 
     def test_no_overflow_when_three_or_fewer(self):
         for i in range(3):

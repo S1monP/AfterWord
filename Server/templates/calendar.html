@@ -170,7 +170,7 @@
                 + {{ cell.overflow }} more
               </summary>
               <ul class="lr-cal__overflow-list">
-                {% for ev in cell.events[3:] %}
+                {% for ev in cell.more %}
                   <li>
                     <a class="lr-cal__chip lr-cal__chip--{{ ev.kind }}"
                        href="{{ url_for('pages.ui_event_edit', event_id=ev.id) }}"

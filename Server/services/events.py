@@ -274,7 +274,7 @@ def compute_month_grid(
     Each cell is a dict with::
 
         {"date": date, "in_month": bool, "weekday": int,
-         "events": list[Event], "overflow": int}
+         "events": list[Event], "more": list[Event], "overflow": int}
 
     - ``date`` is a :class:`datetime.date`.
     - ``in_month`` is True for cells belonging to ``(year, month)``;
@@ -282,9 +282,8 @@ def compute_month_grid(
       and next month.
     - ``weekday`` is 0 (Mon) … 6 (Sun), matching ``date.weekday()``.
     - ``events`` is sorted by ``starts_at`` and capped at
-      ``max_per_cell``; the rest of the events for that day are
-      reflected in ``overflow`` (an int count) so the template can
-      render a "+N more" affordance.
+      ``max_per_cell``; the rest of the day's events are in ``more``
+      and counted in ``overflow``, for the template's "+N more" list.
 
     The grid always has 6 rows (42 cells) so the layout doesn't jump
     around as the user navigates months.
@@ -326,6 +325,7 @@ def compute_month_grid(
                 "in_month": cell_date.month == month,
                 "weekday": cell_date.weekday(),
                 "events": day_events_sorted[:max_per_cell],
+                "more": day_events_sorted[max_per_cell:],
                 "overflow": overflow,
             })
         rows.append(row)

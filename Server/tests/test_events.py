@@ -475,6 +475,7 @@ class MonthGridTests(unittest.TestCase):
         cell = grid[2][3]
         self.assertEqual(len(cell["events"]), 3)
         self.assertEqual(cell["overflow"], 2)
+        self.assertEqual([e.id for e in cell["more"]], ["e3", "e4"])
 
 
 class RecurringEventTests(LRTestCase):
