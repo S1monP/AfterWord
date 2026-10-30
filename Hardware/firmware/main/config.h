@@ -3,10 +3,11 @@
 //
 //  Per-device secrets go in secrets.h (gitignored); copy secrets.example.h to
 //  create it.  It is included first so it can override anything below.
+//  main/CMakeLists.txt defines HAVE_SECRETS_H when the file exists.
 // =============================================================================
 #pragma once
 
-#if __has_include("secrets.h")
+#ifdef HAVE_SECRETS_H
 #include "secrets.h"
 #endif
 
