@@ -97,7 +97,9 @@ $env:REQUESTS_CA_BUNDLE = 'C:\Espressif\tools\ca-bundle-norton.pem'
 
 ## Test plan
 
-Watch the monitor output for each step.
+Watch the monitor output for each step. [`tools/`](tools/) has a serial
+logger that survives power cuts and scripts that check chunk seams,
+clipping and noise in recordings.
 
 1. **Boot.** Expect `SD mounted`, `audio ready`, and either `connected,
    IP …` or the setup portal. Hold the button at power-on: the portal should
