@@ -50,7 +50,13 @@
                 <input class="lr-todo__check" type="checkbox"
                        {% if t.status == 'done' %}checked{% endif %}
                        aria-label="Mark as done">
-                <span class="lr-todo__title" tabindex="0">{{ t.title }}</span>
+                {% if t.source_ref %}
+                  <a class="lr-todo__title lr-todo__title--linked"
+                     href="{{ url_for('pages.ui_session', session_id=t.source_ref) }}?t={{ t.source_offset_ms or 0 }}"
+                     title="Jump to this moment in the recording">{{ t.title }}</a>
+                {% else %}
+                  <span class="lr-todo__title" tabindex="0">{{ t.title }}</span>
+                {% endif %}
                 {% if t.due_at %}
                   <span class="lr-todo__due lr-badge {% if overdue %}lr-badge--danger{% elif due_today %}lr-badge--warning{% else %}lr-badge--info{% endif %}"
                         title="{{ t.due_at|iso_local }}">

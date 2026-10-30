@@ -392,6 +392,21 @@
   font-size: var(--lr-fs-sm);
 }
 .lr-memo__transcript { white-space: pre-line; }
+.lr-detail__filed { margin-top: var(--lr-s-4); }
+.lr-filed { list-style: none; padding: 0; margin: var(--lr-s-2) 0 0; }
+.lr-filed li {
+  display: flex;
+  gap: var(--lr-s-2);
+  align-items: baseline;
+  padding: var(--lr-s-1) 0;
+}
+.lr-filed__kind {
+  min-width: 5.5em;
+  font-size: var(--lr-fs-xs);
+  color: var(--lr-text-faint);
+  text-transform: uppercase;
+}
+.lr-filed__when { font-size: var(--lr-fs-xs); color: var(--lr-text-faint); }
 .lr-rec__when {
   display: block;
   font-size: var(--lr-fs-xs);

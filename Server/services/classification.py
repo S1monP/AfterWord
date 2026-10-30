@@ -35,8 +35,12 @@ from storage import Session, Storage
 # --- Constants --------------------------------------------------------------
 
 VALID_KINDS: frozenset[str] = frozenset(
-    {"lecture", "voice_memo", "meeting", "other"}
+    {"lecture", "voice_memo", "meeting", "command", "other"}
 )
+#: Kinds offered in the "Classify as" menus. A ``command`` recording
+#: (only a request to add a to-do, deadline or calendar entry) is
+#: carried out and then kept out of sight, so it is not offered.
+SELECTABLE_KINDS: frozenset[str] = VALID_KINDS - {"command"}
 
 
 # Reason returned by the LLM classify endpoint when the AI path

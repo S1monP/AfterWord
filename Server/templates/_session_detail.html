@@ -82,6 +82,29 @@
       {% endif %}
     </section>
 
+    {% if filed_tasks or filed_events %}
+      <section class="lr-detail__filed">
+        <h3>Added to your lists</h3>
+        <ul class="lr-filed">
+          {% for t in filed_tasks %}
+            <li>
+              <span class="lr-filed__kind">{{ 'Deadline' if t.kind == 'deadline' else 'To-do' }}</span>
+              <a href="{{ url_for('pages.ui_todos') }}">{{ t.title }}</a>
+              {% if t.due_at %}<span class="lr-filed__when">{{ t.due_at|local_date }}</span>{% endif %}
+              {% if t.status == 'done' %}<span class="lr-filed__when">done</span>{% endif %}
+            </li>
+          {% endfor %}
+          {% for e in filed_events %}
+            <li>
+              <span class="lr-filed__kind">Calendar</span>
+              <a href="{{ url_for('pages.ui_calendar') }}">{{ e.title }}</a>
+              <span class="lr-filed__when">{{ e.starts_at|iso_local }}</span>
+            </li>
+          {% endfor %}
+        </ul>
+      </section>
+    {% endif %}
+
     <section class="lr-detail__transcript">
       <details>
         <summary>Show full transcript</summary>

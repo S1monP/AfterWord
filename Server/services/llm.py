@@ -156,7 +156,9 @@ class LLMProvider:
     ) -> Summary:
         raise NotImplementedError
 
-    def extract(self, transcript: str, kind: str) -> list[dict]:
+    def extract(
+        self, transcript: str, kind: str, recorded_at: Optional[str] = None,
+    ) -> list[dict]:
         raise NotImplementedError
 
     def suggest_title(self, transcript: str) -> str:
@@ -207,7 +209,9 @@ class _NoOpProvider(LLMProvider):
             key_points=[],
         )
 
-    def extract(self, transcript: str, kind: str) -> list[dict]:
+    def extract(
+        self, transcript: str, kind: str, recorded_at: Optional[str] = None,
+    ) -> list[dict]:
         # Empty list so the pipeline persists an empty
         # extraction artifact. The UI can render "no
         # structured items" without special-casing.
@@ -274,7 +278,7 @@ MAX_TRANSCRIBE_BODY_BYTES = 24 * 1024 * 1024
 #: ``services.classification.VALID_KINDS``; kept here to avoid an
 #: import cycle.
 VALID_KINDS: frozenset[str] = frozenset(
-    {"lecture", "voice_memo", "meeting", "other"}
+    {"lecture", "voice_memo", "meeting", "command", "other"}
 )
 
 
@@ -866,7 +870,9 @@ class TranscriptionProvider(LLMProvider):
             "TextProvider for summarisation"
         )
 
-    def extract(self, transcript: str, kind: str) -> list[dict]:
+    def extract(
+        self, transcript: str, kind: str, recorded_at: Optional[str] = None,
+    ) -> list[dict]:
         raise LLMConfigError(
             "TranscriptionProvider only transcribes; use "
             "TextProvider for extraction"
@@ -900,13 +906,17 @@ _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 # four valid kinds and ask for a JSON object back. The confidence
 # is the model's own 0..1 estimate.
 _CLASSIFY_SYSTEM_PROMPT = (
-    "You classify audio transcripts into one of four kinds. "
+    "You classify audio transcripts into one of five kinds. "
     "Reply with ONLY a JSON object, no prose, no markdown fences. "
     'The object must have exactly two keys: "kind" and "confidence".\n\n'
     '"kind" must be one of: "lecture" (a class or seminar — '
     "long, structured, audience-facing), "
     '"voice_memo" (a personal note, sometimes one-sided, often short), '
     '"meeting" (multiple participants discussing a shared topic), '
+    '"command" (the whole recording is only a request to add a '
+    "to-do, deadline or calendar entry, or to be reminded of something, "
+    'e.g. \"remind me to call the dentist on Friday\"; if it also has '
+    'other notes or thoughts, it is a voice_memo), '
     '"other" (none of the above).\n\n'
     '"confidence" is your own 0..1 estimate; use 0.0 when you are '
     "guessing and 1.0 when you are certain."
@@ -1024,6 +1034,68 @@ def _synthesis_prompt(
     )
 
 
+# What to extract per recording kind, and the fields of the three types
+# that are filed into the to-do list, deadlines and calendar (see
+# services/filing.py). Shared by the single-call and per-section prompts.
+_KIND_ITEMS = (
+    "Type guidance by recording kind:\n"
+    "- 'meeting': focus on 'action_item', 'deadline' and 'event'.\n"
+    "- 'lecture': 'topic', 'key_term', 'study_question', 'fact', plus every "
+    "'deadline' and 'event' the lecturer announces (assignments, exams, "
+    "moved classes). 'action_item' only for what the students must do, "
+    "never the lecturer's own plans.\n"
+    "- 'command': one 'action_item', 'deadline' or 'event' per thing the "
+    "speaker asks to be reminded of or added; nothing else.\n"
+    "- 'voice_memo': focus on 'fact' and 'topic'.\n"
+    "- 'other': include a mix of 'topic' and 'fact'.\n\n"
+)
+
+_FILING_RULES = (
+    "Three types are copied into the user's to-do list, deadlines and "
+    "calendar, so use them precisely:\n"
+    "- 'deadline': something to hand in, finish or sit by a date "
+    "(assignment due, application closes, an exam with a date but no "
+    "time). Give 'due'.\n"
+    "- 'event': something to attend at a set date AND time (exam at "
+    "9:00, meeting moved to Tuesday 14:00). Give 'start', 'end' and "
+    "'location' if said, and 'event_kind': 'lecture', 'meeting' or "
+    "'other'.\n"
+    "- 'action_item': something someone has to do. Give 'due' if a date "
+    "is said. If it is clearly one named person's job, start the text "
+    "with their name and a colon (\"Anna: get three shelf quotes\").\n"
+    "'due', 'start' and 'end' are local time: 'YYYY-MM-DD', or "
+    "'YYYY-MM-DDTHH:MM' when a time is said. Work out relative dates "
+    "(\"next Friday\", \"in two weeks\") from the recording date given "
+    "with the transcript. Leave a field out when no date is said or it "
+    "is unclear; never guess one.\n"
+    "Each thing appears once: never as both a 'deadline' and an "
+    "'action_item'. Look dates up in the calendar given with the "
+    "transcript rather than counting weekdays.\n"
+    "Give every item 'at': the nearest [MM:SS] or [H:MM:SS] marker before "
+    "it in the transcript, if there are markers.\n"
+    "Write each 'text' as a short line that makes sense on its own in a "
+    "to-do list (\"Submit lab report 3\", \"Thermodynamics exam\")."
+)
+
+
+def _recorded_line(recorded_at: Optional[str]) -> str:
+    """The recording date plus the next two weeks with their weekdays:
+    models work out "next Tuesday" far more reliably from a list than
+    by counting."""
+    if not recorded_at:
+        return ""
+    import datetime as _dt
+    try:
+        day = _dt.datetime.strptime(recorded_at, "%A %d %B %Y, %H:%M").date()
+    except ValueError:
+        return f"Recorded: {recorded_at}\n"
+    days = ", ".join(
+        f"{d:%a} {d:%Y-%m-%d}"
+        for d in (day + _dt.timedelta(days=i) for i in range(1, 15))
+    )
+    return f"Recorded: {recorded_at}\nThe next 14 days: {days}\n"
+
+
 # Per-section system prompt for extraction. Same shape as the
 # single-shot one but explicit that the model is looking at a
 # fragment.
@@ -1032,17 +1104,14 @@ _EXTRACT_SECTION_PROMPT = (
     "transcript. Reply with ONLY a JSON object (no prose, no markdown "
     "fences) with one key: 'items'.\n\n"
     "'items' is a list of objects. Each object has at minimum two keys: "
-    "'type' (short snake_case identifier like 'deadline', 'action_item', "
-    "'topic', 'key_term', 'study_question', or 'fact') and 'text' "
-    "(the item's content, plain English).\n\n"
-    "Type guidance by recording kind:\n"
-    "- 'meeting': focus on 'action_item' and 'deadline'.\n"
-    "- 'lecture': focus on 'topic', 'key_term', 'study_question', 'fact'.\n"
-    "- 'voice_memo': focus on 'fact' and 'topic'.\n"
-    "- 'other': include a mix of 'topic' and 'fact'.\n\n"
-    "Aim for 3-10 items. Only include items that are clearly supported "
+    "'type' (short snake_case identifier like 'deadline', 'event', "
+    "'action_item', 'topic', 'key_term', 'study_question', or 'fact') and "
+    "'text' (the item's content).\n\n"
+    + _KIND_ITEMS
+    + "Aim for 3-10 items. Only include items that are clearly supported "
     "by THIS SECTION; do not invent. If the section has no relevant "
-    "items, return {\"items\": []}."
+    "items, return {\"items\": []}.\n\n"
+    + _FILING_RULES
 )
 
 
@@ -1122,14 +1191,16 @@ def _extract_one_chunk(
     section_index: int,
     total_sections: int,
     language: Optional[str] = None,
+    recorded_at: Optional[str] = None,
 ) -> list[dict]:
     """Run the per-chunk extract LLM call. Returns an empty list
     on a parse error so the dedupe step is robust to a single
     chunk failing.
     """
     user_prompt = (
-        f"Recording kind: {kind}\n\n"
-        f"This is section {section_index + 1} of {total_sections} of a "
+        f"Recording kind: {kind}\n"
+        + _recorded_line(recorded_at)
+        + f"\nThis is section {section_index + 1} of {total_sections} of a "
         f"longer transcript. Extract structured items from this section:\n\n"
         f"{chunk}"
     )
@@ -1473,16 +1544,13 @@ _EXTRACT_SYSTEM_PROMPT = (
     "You extract structured items from transcripts. Reply with ONLY a JSON "
     "object (no prose, no markdown fences) with one key: 'items'.\n\n"
     "'items' is a list of objects. Each object has at minimum two keys: "
-    "'type' (short snake_case identifier like 'deadline', 'action_item', "
-    "'topic', 'key_term', 'study_question', or 'fact') and 'text' "
-    "(the item's content, plain English).\n\n"
-    "Type guidance by recording kind:\n"
-    "- 'meeting': focus on 'action_item' and 'deadline'.\n"
-    "- 'lecture': focus on 'topic', 'key_term', 'study_question', 'fact'.\n"
-    "- 'voice_memo': focus on 'fact' and 'topic'.\n"
-    "- 'other': include a mix of 'topic' and 'fact'.\n\n"
-    "Aim for 3-10 items. Only include items that are clearly supported by "
-    "the transcript; do not invent."
+    "'type' (short snake_case identifier like 'deadline', 'event', "
+    "'action_item', 'topic', 'key_term', 'study_question', or 'fact') and "
+    "'text' (the item's content).\n\n"
+    + _KIND_ITEMS
+    + "Aim for 3-10 items. Only include items that are clearly supported "
+    "by the transcript; do not invent.\n\n"
+    + _FILING_RULES
 )
 
 
@@ -1751,8 +1819,14 @@ class TextProvider(LLMProvider):
             language=language,
         )
 
-    def extract(self, transcript: str, kind: str) -> list[dict]:
+    def extract(
+        self, transcript: str, kind: str, recorded_at: Optional[str] = None,
+    ) -> list[dict]:
         """Pull structured items out of a transcript.
+
+        ``recorded_at`` ("Thursday 30 October 2026, 13:10", local) lets
+        the model turn "next Friday" into a date; see
+        :data:`_FILING_RULES` for the fields of the filed types.
 
         For short transcripts this is a single LLM call. For long
         transcripts the work is split per-chunk and the partial
@@ -1779,8 +1853,9 @@ class TextProvider(LLMProvider):
             message = self._chat(
                 _EXTRACT_SYSTEM_PROMPT + "\n\n" + _language_rule(language),
                 (
-                    f"Recording kind: {kind}\n\n"
-                    f"Transcript:\n\n{transcript}"
+                    f"Recording kind: {kind}\n"
+                    + _recorded_line(recorded_at)
+                    + f"\nTranscript:\n\n{transcript}"
                 ),
                 max_chars=_CHUNK_SIZE,
             )
@@ -1797,7 +1872,7 @@ class TextProvider(LLMProvider):
                 _extract_one_chunk(
                     self, chunk, kind=kind,
                     section_index=i, total_sections=len(chunks),
-                    language=language,
+                    language=language, recorded_at=recorded_at,
                 )
             )
         return _dedupe_items(all_items)

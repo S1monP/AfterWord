@@ -70,7 +70,7 @@ class _StubClassifier(LLMProvider):
         # through summarising/extracting to ``done``.
         return Summary(text="", key_points=[])
 
-    def extract(self, transcript, kind):
+    def extract(self, transcript, kind, recorded_at=None):
         # M9: no structured items by default.
         return []
 
@@ -282,7 +282,7 @@ class PipelineFailureTests(LRTestCase):
             def summarize(self, transcript, kind=None):
                 raise RuntimeError("memos are not summarised")
 
-            def extract(self, transcript, kind):
+            def extract(self, transcript, kind, recorded_at=None):
                 raise RuntimeError("memos are not extracted")
 
         store = self.app.config["LR_STORAGE"]
@@ -426,7 +426,7 @@ class PipelineSummariseExtractTests(LRTestCase):
             def summarize(self, transcript, kind=None):
                 raise RuntimeError("not used")
 
-            def extract(self, transcript, kind):
+            def extract(self, transcript, kind, recorded_at=None):
                 raise RuntimeError("not used")
 
         class StubLLM(LLMProvider):
@@ -441,7 +441,7 @@ class PipelineSummariseExtractTests(LRTestCase):
                     key_points=["tests are good", "coverage matters"],
                 )
 
-            def extract(self, transcript, kind):
+            def extract(self, transcript, kind, recorded_at=None):
                 return [
                     {"type": "topic", "text": "Test coverage"},
                     {"type": "key_term", "text": "Unit test"},
@@ -506,7 +506,7 @@ class PipelineSummariseExtractTests(LRTestCase):
                     sections=[{"heading": "Entropy", "text": "Notes."}],
                 )
 
-            def extract(self, transcript, kind):
+            def extract(self, transcript, kind, recorded_at=None):
                 if self.extract_fails:
                     raise LLMError("extraction broke")
                 return []
@@ -549,7 +549,7 @@ class PipelineSummariseExtractTests(LRTestCase):
             def summarize(self, transcript, kind=None):
                 raise LLMError("upstream timed out")
 
-            def extract(self, transcript, kind):
+            def extract(self, transcript, kind, recorded_at=None):
                 return []
 
         sid = _make_ready_session(self)
@@ -588,7 +588,7 @@ class PipelineSummariseExtractTests(LRTestCase):
             def summarize(self, transcript, kind=None):
                 return Summary(text="meeting summary", key_points=[])
 
-            def extract(self, transcript, kind):
+            def extract(self, transcript, kind, recorded_at=None):
                 raise LLMError("extraction broke")
 
         sid = _make_ready_session(self)

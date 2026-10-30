@@ -207,7 +207,7 @@ class KindOverrideTests(LRTestCase):
         from storage import Storage
         self.assertEqual(
             Storage.RECORDING_KINDS,
-            frozenset({"lecture", "voice_memo", "meeting", "other"}),
+            frozenset({"lecture", "voice_memo", "meeting", "command", "other"}),
         )
 
 

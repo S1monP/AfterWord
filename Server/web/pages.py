@@ -228,7 +228,7 @@ def ui_other() -> Any:
                  })
     right_ctx.update(
         show_classify=True,
-        kinds=sorted(services.classification.VALID_KINDS),
+        kinds=sorted(services.classification.SELECTABLE_KINDS),
         kind_label="Recording",
     )
     if request.headers.get("X-Soft-Nav") == "1":
@@ -320,7 +320,7 @@ def ui_notes() -> Any:
         if memo_ctx["selected_session"] is None:
             abort(404)
         mode = "memo"
-        memo_ctx["kinds"] = sorted(services.classification.VALID_KINDS)
+        memo_ctx["kinds"] = sorted(services.classification.SELECTABLE_KINDS)
     elif request.args.get("new"):
         mode = "new"
     else:

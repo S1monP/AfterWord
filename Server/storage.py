@@ -1051,7 +1051,7 @@ class Storage:
 
     # Allowed values for sessions.kind. ``None`` means "unclassified".
     RECORDING_KINDS: frozenset[str] = frozenset(
-        {"lecture", "voice_memo", "meeting", "other"}
+        {"lecture", "voice_memo", "meeting", "command", "other"}
     )
 
     # Allowed values for events.kind. Events are user-owned calendar
@@ -2240,6 +2240,54 @@ class Storage:
                 (now_iso(), session_id),
             )
             return cur.rowcount
+
+    # --- items filed from recordings (services/filing.py) -------------
+
+    def delete_untouched_filed(self, session_id: str) -> None:
+        """Remove what a recording filed that the user never touched
+        (still open, never edited), before it is filed again."""
+        with self._tx() as conn:
+            conn.execute(
+                "DELETE FROM tasks WHERE source = 'extracted' "
+                "AND source_ref = ? AND status = 'open' "
+                "AND updated_at = created_at",
+                (session_id,),
+            )
+            conn.execute(
+                "DELETE FROM events WHERE source = 'extracted' "
+                "AND source_ref = ? AND updated_at = created_at",
+                (session_id,),
+            )
+
+    def unlink_filed(self, session_id: str) -> None:
+        """Keep a deleted recording's filed items, minus their link."""
+        with self._tx() as conn:
+            conn.execute(
+                "UPDATE tasks SET source_ref = NULL, source_offset_ms = NULL "
+                "WHERE source_ref = ?",
+                (session_id,),
+            )
+            conn.execute(
+                "UPDATE events SET source_ref = NULL WHERE source_ref = ? "
+                "AND source = 'extracted'",
+                (session_id,),
+            )
+
+    def filed_from(self, session_id: str) -> tuple[list[Task], list[Event]]:
+        """The tasks/deadlines and events a recording filed."""
+        with self._tx() as conn:
+            task_rows = conn.execute(
+                "SELECT * FROM tasks WHERE source_ref = ? "
+                "ORDER BY COALESCE(source_offset_ms, 0), created_at",
+                (session_id,),
+            ).fetchall()
+            event_rows = conn.execute(
+                "SELECT * FROM events WHERE source_ref = ? "
+                "AND source = 'extracted' ORDER BY starts_at",
+                (session_id,),
+            ).fetchall()
+        return ([self._row_to_task(r) for r in task_rows],
+                [self._row_to_event(r) for r in event_rows])
 
     def event_for_session(self, session_id: str) -> Optional[Event]:
         """The calendar event a recording was matched to, if any."""

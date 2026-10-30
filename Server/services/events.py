@@ -45,7 +45,8 @@ MAX_SOURCE_REF_LEN = 256
 MAX_REPEAT_OCCURRENCES = 52
 
 KINDS: frozenset[str] = frozenset({"lecture", "meeting", "other"})
-SOURCES: frozenset[str] = frozenset({"manual", "ical_import"})
+# 'extracted': filed from a recording (services/filing.py).
+SOURCES: frozenset[str] = frozenset({"manual", "ical_import", "extracted"})
 
 # Match window for session→event matching. A session that started up
 # to 10 minutes before ``event_starts_at`` is still considered a

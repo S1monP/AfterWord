@@ -136,10 +136,13 @@ def _selected_session_context(session_id: str) -> dict[str, Any]:
         store.get_artifact(session_id, "summary"),
     )
     transcript = store.get_artifact(session_id, "transcript")
+    filed_tasks, filed_events = store.filed_from(session_id)
     return {
         "selected_session": sess,
         "summary": summary,
         "transcript": transcript,
+        "filed_tasks": filed_tasks,
+        "filed_events": filed_events,
     }
 
 
@@ -216,7 +219,7 @@ _KIND_LABEL = {
     "lecture": "Lecture",
     "meeting": "Meeting",
     "voice_memo": "Voice memo",
-    "reminder": "Reminder",
+    "command": "Request",
     "other": "Recording",
 }
 

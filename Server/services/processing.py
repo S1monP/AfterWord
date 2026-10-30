@@ -49,6 +49,7 @@ from storage import (
 )
 
 import timeutil
+from services import filing
 from services.events import EventsService
 from services.llm import LLMError, LLMProvider, Summary
 
@@ -68,6 +69,9 @@ REASON_NOT_READY = "not_ready"
 NO_SPEECH_DETAIL = "no speech detected"
 #: Kinds that keep only their transcript: no summary, no extraction.
 TRANSCRIPT_ONLY_KINDS = frozenset({"voice_memo"})
+#: Kinds that get no summary. A command recording ("add X to my
+#: calendar") still goes through extraction, so its request is filed.
+NO_SUMMARY_KINDS = TRANSCRIPT_ONLY_KINDS | {"command"}
 
 
 def _set_status(
@@ -363,6 +367,7 @@ def run_post_finish_pipeline(
         except Exception:  # pragma: no cover  (a title is optional)
             topic = ""
         _apply_title(storage, session_id, topic)
+        _file_items(storage, session_id, kind, [])  # drop earlier filings
         try:
             storage.delete_artifacts(session_id, "summary", "extraction")
             _set_status(storage, session_id, STATUS_DONE)
@@ -403,7 +408,14 @@ def run_post_finish_pipeline(
         return _mark_failed(
             storage, session_id, "bad_transition", str(exc),
         )
-    if resume_summary is not None:
+    if kind in NO_SUMMARY_KINDS:
+        try:
+            topic = llm_provider.suggest_title(transcript)
+        except Exception:  # pragma: no cover  (a title is optional)
+            topic = ""
+        summary = Summary(text="", key_points=[], title=topic)
+        storage.delete_artifacts(session_id, "summary")
+    elif resume_summary is not None:
         summary = resume_summary
         summary_payload = _summary_payload(summary)
     else:
@@ -445,7 +457,10 @@ def run_post_finish_pipeline(
             storage, session_id, "bad_transition", str(exc),
         )
     try:
-        items = llm_provider.extract(transcript, kind)
+        items = llm_provider.extract(
+            transcript, kind,
+            recorded_at=_recorded_at(storage.get_session(session_id)),
+        )
     except LLMError as exc:
         return _mark_failed(
             storage, session_id, REASON_EXTRACT_FAILED,
@@ -462,6 +477,7 @@ def run_post_finish_pipeline(
             json.dumps({"items": list(items)}),
             model=getattr(llm_provider, "name", None),
         )
+        _file_items(storage, session_id, kind, items)
         _set_status(storage, session_id, STATUS_DONE)
     except _PipelineError as exc:
         return _mark_failed(
@@ -494,6 +510,28 @@ def _summary_payload(summary: Summary) -> str:
         "sections": list(summary.sections),
         "key_points": list(summary.key_points),
     })
+
+
+def _recorded_at(sess) -> Optional[str]:
+    """When a recording was made, for the extraction prompt (so "next
+    Friday" can be worked out): "Thursday 30 October 2026, 13:10"."""
+    local = timeutil.to_local(sess.started_at) if sess else None
+    return local.strftime("%A %d %B %Y, %H:%M") if local else None
+
+
+def _file_items(
+    storage: Storage, session_id: str, kind: Optional[str], items: list,
+) -> None:
+    """Copy deadlines / to-dos / events into the user's lists (only for
+    :data:`filing.FILING_KINDS`; other kinds just drop what an earlier
+    run filed). Never fails the pipeline."""
+    try:
+        filing.refile(
+            storage, session_id,
+            list(items) if kind in filing.FILING_KINDS else [],
+        )
+    except Exception:  # pragma: no cover  (defensive)
+        traceback.print_exc()
 
 
 def _apply_title(storage: Storage, session_id: str, topic: str) -> None:

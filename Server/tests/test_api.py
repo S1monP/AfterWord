@@ -208,7 +208,7 @@ class TranscribeRouteTests(LRTestCase):
                 from services.llm import Summary
                 return Summary(text="", key_points=[])
 
-            def extract(self, transcript, kind):
+            def extract(self, transcript, kind, recorded_at=None):
                 # M9: stub returns an empty list.
                 return []
 
@@ -328,7 +328,7 @@ class TranscribeRouteTests(LRTestCase):
                 # it raise so the failure propagates.
                 raise LLMError("first run fails")
 
-            def extract(self, transcript, kind):
+            def extract(self, transcript, kind, recorded_at=None):
                 raise LLMError("first run fails")
 
         self.app.config["LR_LLM_PROVIDERS"] = {
@@ -359,7 +359,7 @@ class TranscribeRouteTests(LRTestCase):
                 from services.llm import Summary
                 return Summary(text="", key_points=[])
 
-            def extract(self, transcript, kind):
+            def extract(self, transcript, kind, recorded_at=None):
                 # M9: no items.
                 return []
 
@@ -894,7 +894,7 @@ class PipelineResilienceTests(LRTestCase):
             def summarize(self, t, kind=None):
                 raise AssertionError("must not re-summarise on resume")
 
-            def extract(self, t, k):
+            def extract(self, t, k, recorded_at=None):
                 raise AssertionError("must not re-extract on resume")
 
         noop_text = self.app.config["LR_LLM_PROVIDERS"]["text"]
@@ -956,7 +956,7 @@ class PipelineResilienceTests(LRTestCase):
             def summarize(self, t, kind=None):
                 return noop_text.summarize(t)
 
-            def extract(self, t, k):
+            def extract(self, t, k, recorded_at=None):
                 return noop_text.extract(t, k)
 
         rec = _Recorder()
