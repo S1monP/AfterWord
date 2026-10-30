@@ -3,8 +3,8 @@
 A small Flask server for the lecture recorder in [`../Hardware`](../Hardware).
 The device uploads each recording in AAC chunks; the server stitches them,
 then transcribes, classifies, summarises and extracts tasks in the
-background, and serves a web UI for lectures, meetings, notes, tasks and
-deadlines, and a calendar.
+background, and serves a web UI for lectures, meetings, notes (with voice
+memos), other recordings, tasks and deadlines, and a calendar.
 
 - **Storage:** SQLite plus one folder per recording under `data/`. Audio is
   AAC-LC, 22050 Hz mono, 64 kbps (ADTS), the same format the device records.
@@ -170,10 +170,22 @@ recording to a calendar event by start time.
 
 - Each piece is sent to the transcription API as 16 kHz mono MP3: the
   Azure-hosted model rejects AAC.
+- Summaries are sized to the transcript (a few sentences for a short memo,
+  headed sections for an hour-long lecture) and structured by kind. They
+  are written in the recording's language if it is in
+  `LR_SUMMARY_LANGUAGES`, otherwise in the first of those.
+- Voice memos keep only their transcript (no summary or extraction) and
+  are listed on the Notes page with their audio.
+- A recording with no speech ends done ("no speech detected"), without a
+  kind; it is listed on the Other page.
+- Changing a finished recording's kind by hand ("Classify as" on the
+  Other page or a memo) rewrites its summary for the new kind, reusing
+  the transcript.
 - After a server restart, sessions stranded mid-pipeline are requeued;
   finished steps are not repeated.
-- A failed session (API error, no speech) stays failed; **Retry** on the
-  session page (`POST /api/v1/sessions/<id>/transcribe`) runs it again.
+- A failed session (API error) stays failed and is listed on the Other
+  page; **Retry** on the session page
+  (`POST /api/v1/sessions/<id>/transcribe`) runs it again.
 
 ## Data
 

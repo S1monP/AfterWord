@@ -45,9 +45,10 @@ Details: [Hardware/README.md](Hardware/README.md) and
 
 ## Status
 
-- Firmware: first run on the breadboard prototype passed boot, Wi-Fi setup,
-  recording and power-cut tests. Uploads work, but the SD card drops out
-  during long uploads on the breadboard supply (decoupling to be added).
+- Firmware: the breadboard prototype passed the whole test plan in
+  [Hardware/README.md](Hardware/README.md) (boot, Wi-Fi setup, recording,
+  power cut, upload, offline, abort). The SD card dropped out during long
+  uploads until decoupling capacitors were added at the SD module and mic.
 - Server: runs locally; ready for a VPS behind Caddy (`serve.py`, device
   token, web login).
 

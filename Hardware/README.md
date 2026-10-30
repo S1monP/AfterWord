@@ -65,8 +65,11 @@ while it is still down, then let go.
 - **Wi-Fi setup:** hold the button while powering on (or boot with no
   saved networks). Join `AI_NoteTaker-Setup` (password `afterword-setup`), and the
   setup page opens. Networks saved by the Arduino firmware carry over.
+  The ESP32-S3 only uses **2.4 GHz** networks (for an iPhone hotspot, turn
+  on Maximise Compatibility).
 - **Offline:** recording never needs Wi-Fi. Without NTP time, sessions are
-  named `rec_nt<boot>_<n>`.
+  named `rec_nt<boot>_<n>`; their real start time is filled in once the
+  clock is set, and kept across reboots.
 
 ## Build and flash
 
