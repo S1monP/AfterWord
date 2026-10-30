@@ -899,6 +899,26 @@ class DefaultProvidersTests(unittest.TestCase):
             pass                    # empty choices; only the request matters
         self.assertEqual(json.loads(capture["data"])["model"], "some/text-model")
 
+    def test_text_base_url_env_override(self):
+        from unittest import mock
+        body = json.dumps({"choices": [{"message": {"content":
+            '<think>{"kind": "meeting"} maybe?</think>\n'
+            '{"kind": "lecture", "confidence": 0.8}'}}]}).encode("utf-8")
+        capture = {}
+        env = {llm.TEXT_BASE_URL_ENV: "https://api.minimax.io/v1/"}
+        with mock.patch.dict(os.environ, env):
+            p = TextProvider("k", http_transport=_fake(200, body, capture))
+        result = p.classify("x")
+        self.assertEqual(
+            capture["url"], "https://api.minimax.io/v1/chat/completions",
+        )
+        # The <think> block is dropped before the JSON is parsed.
+        self.assertEqual(result.kind, "lecture")
+        with mock.patch.dict(os.environ, {llm.TEXT_BASE_URL_ENV: ""}):
+            p = TextProvider("k", http_transport=_fake(200, body, capture))
+        p.classify("x")
+        self.assertEqual(capture["url"], llm.OPENROUTER_CHAT_URL)
+
     def test_get_provider_default(self):
         providers = llm.default_providers(
             transcription_key="", text_key="",

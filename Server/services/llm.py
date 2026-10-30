@@ -26,6 +26,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -871,6 +872,13 @@ OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 TEXT_MODEL = "minimax/minimax-m3"
 #: Env override for the text model (an OpenRouter slug).
 TEXT_MODEL_ENV = "LR_TEXT_MODEL"
+#: Env override for the text API's OpenAI-compatible base URL, e.g.
+#: ``https://api.minimax.io/v1`` for a MiniMax subscription key.
+TEXT_BASE_URL_ENV = "LR_TEXT_BASE_URL"
+
+# Reasoning models served directly (not through OpenRouter) may put
+# their thinking inside the message as <think>...</think>.
+_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 
 # System prompt: keeps the model on task. We give the model the
 # four valid kinds and ask for a JSON object back. The confidence
@@ -1335,7 +1343,7 @@ class TextProvider(LLMProvider):
         api_key: str,
         *,
         model: Optional[str] = None,
-        chat_url: str = OPENROUTER_CHAT_URL,
+        chat_url: Optional[str] = None,
         http_transport: Optional[HttpTransport] = None,
     ) -> None:
         if not api_key:
@@ -1347,7 +1355,10 @@ class TextProvider(LLMProvider):
             model or os.environ.get(TEXT_MODEL_ENV, "").strip() or TEXT_MODEL
         )
         self.name = self._model
-        self._chat_url = chat_url
+        base = os.environ.get(TEXT_BASE_URL_ENV, "").strip().rstrip("/")
+        self._chat_url = chat_url or (
+            f"{base}/chat/completions" if base else OPENROUTER_CHAT_URL
+        )
         self._http = http_transport or _urllib_transport
 
     def classify(self, transcript: str) -> Classification:
@@ -1424,12 +1435,15 @@ class TextProvider(LLMProvider):
                 f"Text model returned non-JSON body: {raw[:200]!r}"
             ) from exc
         try:
-            return payload_resp["choices"][0]["message"]["content"]
+            content = payload_resp["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
             raise LLMError(
                 f"Text model response missing choices[0].message.content: "
                 f"{raw[:200]!r}"
             ) from exc
+        if isinstance(content, str):
+            content = _THINK_RE.sub("", content).strip()
+        return content
 
     def summarize(self, transcript: str) -> Summary:
         """Produce a 2-3 sentence summary plus key points.
