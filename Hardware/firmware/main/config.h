@@ -89,6 +89,9 @@
 #endif
 
 #define HTTP_TIMEOUT_MS         30000
+// The announce is a small JSON answered at once, and it is the first
+// request of a sweep: a short timeout finds an absent server quickly.
+#define HTTP_ANNOUNCE_TIMEOUT_MS 10000
 #define SYNC_RETRY_INTERVAL_MS  (5UL * 60 * 1000)
 #define WIFI_UP_SYNC_DELAY_MS   15000       // sync this long after WiFi comes up
 

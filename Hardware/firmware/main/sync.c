@@ -30,6 +30,9 @@ static const char *TAG = "sync";
 #define MAX_FOLDERS     16
 #define RESP_CAP        1024
 #define IO_BLOCK        4096
+#define HTTP_NO_CONNECT (-2)            // http_request: server unreachable
+
+typedef enum { SESS_DONE, SESS_FAILED, SESS_OFFLINE } sess_result_t;
 
 static TaskHandle_t   s_task;
 static volatile bool  s_abort;
@@ -52,11 +55,12 @@ typedef struct {
 //  HTTP
 // -----------------------------------------------------------------------------
 // One request.  Body comes from `body` or is streamed from `file`.  Returns
-// the HTTP status, or -1 on transport error / abort.  The response body (up
-// to RESP_CAP-1 bytes) is left NUL-terminated in `resp`.
+// the HTTP status, HTTP_NO_CONNECT when the server cannot be reached, or
+// -1 on any other transport error / abort.  The response body (up to
+// RESP_CAP-1 bytes) is left NUL-terminated in `resp`.
 static int http_request(esp_http_client_method_t method, const char *path,
                         const char *content_type, const char *body,
-                        FILE *file, long file_size, char *resp) {
+                        FILE *file, long file_size, char *resp, int timeout_ms) {
     char url[192];
     snprintf(url, sizeof(url), "%s%s", SERVER_URL, path);
     resp[0] = '\0';
@@ -64,7 +68,7 @@ static int http_request(esp_http_client_method_t method, const char *path,
     esp_http_client_config_t cfg = {
         .url = url,
         .method = method,
-        .timeout_ms = HTTP_TIMEOUT_MS,
+        .timeout_ms = timeout_ms,
         .crt_bundle_attach = strncmp(url, "https:", 6) == 0 ? esp_crt_bundle_attach : NULL,
     };
     esp_http_client_handle_t c = esp_http_client_init(&cfg);
@@ -80,6 +84,7 @@ static int http_request(esp_http_client_method_t method, const char *path,
     long len = file ? file_size : (body ? (long)strlen(body) : 0);
     if (esp_http_client_open(c, len) != ESP_OK) {
         ESP_LOGW(TAG, "%s: cannot connect", url);
+        status = HTTP_NO_CONNECT;
         goto out;
     }
 
@@ -111,7 +116,8 @@ out:
     return status;
 }
 
-static bool announce(const char *id, const char *title, int expected, const char *started_at) {
+// Returns the HTTP status (200/201 = announced), or HTTP_NO_CONNECT / -1.
+static int announce(const char *id, const char *title, int expected, const char *started_at) {
     static char resp[RESP_CAP];
     char body[320];
     // Provenance only: the format the encoder produced (16-bit PCM in).
@@ -121,36 +127,40 @@ static bool announce(const char *id, const char *title, int expected, const char
              "\"started_at\":\"%s\"}",
              id, title, expected, SAMPLE_RATE, started_at);
     int st = http_request(HTTP_METHOD_POST, "/api/v1/sessions", "application/json",
-                          body, NULL, 0, resp);
+                          body, NULL, 0, resp, HTTP_ANNOUNCE_TIMEOUT_MS);
     if (st == 200 || st == 201) {
         ESP_LOGI(TAG, "announce %s -> %d (%d chunks)", id, st, expected);
-        return true;
+    } else if (st != HTTP_NO_CONNECT) {
+        ESP_LOGW(TAG, "announce %s failed: %d %s", id, st, resp);
     }
-    ESP_LOGW(TAG, "announce %s failed: %d %s", id, st, resp);
-    return false;
+    return st;
 }
 
-static bool put_chunk(const char *id, int index, const char *file_path) {
+static bool announced(int status) { return status == 200 || status == 201; }
+
+// Returns the HTTP status (200 = stored), or HTTP_NO_CONNECT / -1.
+static int put_chunk(const char *id, int index, const char *file_path) {
     static char resp[RESP_CAP];
     struct stat st;
     if (stat(file_path, &st) != 0 || st.st_size == 0) {
         ESP_LOGW(TAG, "chunk %d: %s missing or empty", index, file_path);
-        return false;
+        return -1;
     }
     FILE *f = fopen(file_path, "rb");
-    if (!f) return false;
+    if (!f) return -1;
     char path[128];
     snprintf(path, sizeof(path), "/api/v1/sessions/%s/chunks/%d", id, index);
     int64_t t0 = esp_timer_get_time();
-    int code = http_request(HTTP_METHOD_PUT, path, "audio/aac", NULL, f, st.st_size, resp);
+    int code = http_request(HTTP_METHOD_PUT, path, "audio/aac", NULL, f, st.st_size, resp,
+                            HTTP_TIMEOUT_MS);
     fclose(f);
     if (code == 200) {
         ESP_LOGI(TAG, "chunk %d: %ld B in %lld ms", index, (long)st.st_size,
                  (esp_timer_get_time() - t0) / 1000);
-        return true;
+    } else if (!s_abort && code != HTTP_NO_CONNECT) {
+        ESP_LOGW(TAG, "chunk %d failed: %d %s", index, code, resp);
     }
-    if (!s_abort) ESP_LOGW(TAG, "chunk %d failed: %d %s", index, code, resp);
-    return false;
+    return code;
 }
 
 typedef enum { FIN_OK, FIN_MISSING, FIN_FAIL } finish_t;
@@ -160,7 +170,7 @@ static finish_t finish(const char *id, int *missing, int max) {
     static char resp[RESP_CAP];
     char path[128];
     snprintf(path, sizeof(path), "/api/v1/sessions/%s/finish", id);
-    int st = http_request(HTTP_METHOD_POST, path, NULL, NULL, NULL, 0, resp);
+    int st = http_request(HTTP_METHOD_POST, path, NULL, NULL, NULL, 0, resp, HTTP_TIMEOUT_MS);
     cJSON *j = cJSON_Parse(resp);
 
     finish_t r = FIN_FAIL;
@@ -267,21 +277,23 @@ static void started_at_for(const char *folder, char *out, size_t cap) {
     strftime(out, cap, "%Y-%m-%dT%H:%M:%S", &t);
 }
 
-// Returns true when the session was confirmed and deleted.
-static bool sync_session(const char *folder) {
+// SESS_DONE when the session was confirmed and deleted; SESS_OFFLINE when
+// the server could not be reached (the sweep stops: the rest would fail
+// the same way).
+static sess_result_t sync_session(const char *folder) {
     static session_chunks_t sc;
-    if (!list_chunks(folder, &sc)) return false;
-    if (sc.legacy_wav) return false;                // see storage_recover()
+    if (!list_chunks(folder, &sc)) return SESS_FAILED;
+    if (sc.legacy_wav) return SESS_FAILED;          // see storage_recover()
     if (sc.overflow) {
         ESP_LOGW(TAG, "%s: more than %d chunks, skipping", folder, SYNC_MAX_CHUNKS);
-        return false;
+        return SESS_FAILED;
     }
     if (sc.count == 0) {
         char p[128];
         snprintf(p, sizeof(p), "%s/" SESSION_START_FILE, folder);
         unlink(p);
         if (rmdir(folder) == 0) ESP_LOGI(TAG, "%s held no audio, removed", folder);
-        return false;
+        return SESS_FAILED;
     }
 
     const char *name = base_name(folder);
@@ -294,18 +306,22 @@ static bool sync_session(const char *folder) {
     ESP_LOGI(TAG, "session %s: %d chunk(s), started_at=%s", id, expected,
              started_at[0] ? started_at : "(upload time)");
 
-    if (!announce(id, name, expected, started_at)) return false;
+    int st = announce(id, name, expected, started_at);
+    if (st == HTTP_NO_CONNECT) return SESS_OFFLINE;
+    if (!announced(st)) return SESS_FAILED;
 
     char path[128];
     for (int k = 1; k <= expected; k++) {
-        if (s_abort) return false;
+        if (s_abort) return SESS_FAILED;
         chunk_path(folder, sc.local[k - 1], path, sizeof(path));
-        if (!put_chunk(id, k, path)) {
-            if (s_abort) return false;
+        st = put_chunk(id, k, path);
+        if (st == HTTP_NO_CONNECT) return SESS_OFFLINE;
+        if (st != 200) {
+            if (s_abort) return SESS_FAILED;
             // 404/409: the server lost or moved on from the session (e.g. a
             // restart).  Re-announce once and retry this chunk.
-            if (!announce(id, name, expected, started_at)) return false;
-            if (!put_chunk(id, k, path)) return false;
+            if (!announced(announce(id, name, expected, started_at))) return SESS_FAILED;
+            if (put_chunk(id, k, path) != 200) return SESS_FAILED;
         }
     }
 
@@ -314,16 +330,16 @@ static bool sync_session(const char *folder) {
     if (fr == FIN_MISSING) {                        // one repair round
         for (int m = 0; missing[m] > 0; m++) {
             int idx = missing[m];
-            if (idx < 1 || idx > expected || s_abort) return false;
+            if (idx < 1 || idx > expected || s_abort) return SESS_FAILED;
             chunk_path(folder, sc.local[idx - 1], path, sizeof(path));
-            if (!put_chunk(id, idx, path)) return false;
+            if (put_chunk(id, idx, path) != 200) return SESS_FAILED;
         }
         fr = finish(id, missing, SYNC_MAX_CHUNKS + 1);
     }
-    if (fr != FIN_OK) return false;
+    if (fr != FIN_OK) return SESS_FAILED;
 
     purge(folder, &sc);
-    return true;
+    return SESS_DONE;
 }
 
 static void sweep(void) {
@@ -343,14 +359,21 @@ static void sweep(void) {
     ESP_LOGI(TAG, "sweep: %d session folder(s)", n);
     ui_set_syncing(true);
     int done = 0;
-    for (int i = 0; i < n && !s_abort; i++) {
-        if (sync_session(folders[i])) {
+    bool offline = false;
+    for (int i = 0; i < n && !s_abort && !offline; i++) {
+        sess_result_t r = sync_session(folders[i]);
+        if (r == SESS_DONE) {
             done++;
             ui_flash_sync_ok();
         }
+        offline = (r == SESS_OFFLINE);
     }
     ui_set_syncing(false);
     if (s_abort) ESP_LOGI(TAG, "sweep aborted (recording started)");
+    if (offline) {
+        ESP_LOGW(TAG, "server %s unreachable; next try in %lu min", SERVER_URL,
+                 (unsigned long)(SYNC_RETRY_INTERVAL_MS / 60000));
+    }
     ESP_LOGI(TAG, "sweep done: %d of %d uploaded", done, n);
 }
 
