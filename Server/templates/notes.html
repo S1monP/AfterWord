@@ -8,7 +8,7 @@
     <div>
       <h1 class="lr-page__title">Notes</h1>
       <div class="lr-page__sub">
-        Markdown notes, manual or auto-extracted from recordings.
+        Markdown notes, and voice memos recorded on the device.
         {% if q %}Searching for &ldquo;<span class="lr-mono">{{ q }}</span>&rdquo;.{% endif %}
       </div>
     </div>
@@ -34,6 +34,25 @@
         </div>
       {% endif %}
 
+      <h2>Voice memos</h2>
+      {% if memos %}
+        <ul class="lr-flat-list">
+          {% for m in memos %}
+            <li>
+              <a class="lr-course__lecture {% if selected_session and m.id == selected_session.id %}is-active{% endif %}"
+                 href="{{ url_for('pages.ui_notes', memo=m.id) }}">
+                {{ m.title or '(untitled)' }}
+                <span class="lr-other__tag">{{ m.started_at|local_date }}</span>
+              </a>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="lr-course__empty">
+          {% if q %}No voice memos match &ldquo;{{ q }}&rdquo;.{% else %}No voice memos yet.{% endif %}
+        </p>
+      {% endif %}
+
       <h2>All notes</h2>
       {% if notes %}
         <ul class="lr-flat-list">
@@ -56,7 +75,45 @@
     </aside>
 
     <section class="lr-twopane__main">
-      {% if mode == 'new' or note %}
+      {% if mode == 'memo' %}
+        <article class="lr-detail" data-session-id="{{ selected_session.id }}">
+          <header class="lr-detail__header">
+            <h2 class="lr-detail__title">{{ selected_session.title or '(untitled)' }}</h2>
+            <div class="lr-detail__meta lr-mono">
+              Voice memo &middot; recorded {{ selected_session.started_at|iso_local }}
+            </div>
+            <form class="lr-detail__classify" method="post"
+                  action="{{ url_for('pages.ui_set_kind', session_id=selected_session.id) }}">
+              <label for="lr-kind">Classify as</label>
+              <select class="lr-input lr-input--narrow" id="lr-kind" name="kind">
+                {% for k in kinds %}
+                  <option value="{{ k }}" {% if k == selected_session.kind %}selected{% endif %}>
+                    {{ k.replace('_', ' ') }}</option>
+                {% endfor %}
+              </select>
+              <button class="lr-btn" type="submit">Move</button>
+            </form>
+          </header>
+          {% if selected_session.full_audio_size %}
+            <section class="lr-detail__player">
+              <audio controls preload="metadata"
+                     src="{{ url_for('sessions_api.api_get_audio', session_id=selected_session.id) }}"></audio>
+            </section>
+          {% endif %}
+          <section class="lr-detail__summary">
+            <h3>Transcript</h3>
+            {% if transcript and transcript.content %}
+              <div class="lr-prose lr-memo__transcript">{{ transcript.content }}</div>
+            {% elif selected_session.status in ('done', 'failed') %}
+              <div class="lr-detail__placeholder">
+                {{ (selected_session.status_detail or 'no transcript')|capitalize }}.
+              </div>
+            {% else %}
+              <div class="lr-detail__placeholder">Transcribing&hellip; reload in a minute.</div>
+            {% endif %}
+          </section>
+        </article>
+      {% elif mode == 'new' or note %}
         <div class="lr-note-editor" id="lr-note-editor"
              data-note-id="{{ note.id if note else '' }}"
              data-initial-title="{{ note.title if note else '' }}"

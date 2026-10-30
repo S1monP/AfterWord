@@ -627,3 +627,36 @@ class OtherUiTests(LRTestCase):
         self.assertEqual(resp.status_code, 400)
         resp = self.client.post("/sessions/nope/kind", data={"kind": "other"})
         self.assertEqual(resp.status_code, 404)
+
+
+class NotesVoiceMemoTests(LRTestCase):
+    def test_memos_listed_and_shown_with_audio_and_transcript(self):
+        store = self.app.config["LR_STORAGE"]
+        memo = _seed_session(self, status="done", kind="voice_memo")
+        store.full_audio_path(memo).write_bytes(self.make_wav(b"\x00" * 256))
+        store.add_artifact(memo, "transcript", "remember to buy milk")
+        store.add_artifact(memo, "summary", '{"text": "should not show"}')
+        lecture = _seed_session(self, status="done", kind="lecture")
+        body = self.client.get("/notes").get_data(as_text=True)
+        self.assertIn("Voice memos", body)
+        self.assertIn(f"memo={memo}", body)
+        self.assertNotIn(f"memo={lecture}", body)
+        body = self.client.get(f"/notes?memo={memo}").get_data(as_text=True)
+        self.assertIn("remember to buy milk", body)
+        self.assertIn("<audio", body)
+        self.assertIn("Classify as", body)
+        self.assertNotIn("should not show", body)
+        self.assertNotIn("lr-note-editor", body)
+
+    def test_search_filters_memos_by_transcript(self):
+        store = self.app.config["LR_STORAGE"]
+        milk = _seed_session(self, status="done", kind="voice_memo")
+        store.add_artifact(milk, "transcript", "remember to buy milk")
+        bread = _seed_session(self, status="done", kind="voice_memo")
+        store.add_artifact(bread, "transcript", "bake bread")
+        body = self.client.get("/notes?q=MILK").get_data(as_text=True)
+        self.assertIn(f"memo={milk}", body)
+        self.assertNotIn(f"memo={bread}", body)
+
+    def test_unknown_memo_is_404(self):
+        self.assertEqual(self.client.get("/notes?memo=nope").status_code, 404)

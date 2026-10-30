@@ -272,17 +272,39 @@ def ui_notes() -> Any:
 
     * ``?note_id=<id>`` — editor prefilled with that note.
     * ``?new=1``        — blank editor for a new note.
+    * ``?memo=<id>``    — a voice-memo recording: audio + transcript.
     * neither           — empty right pane ("Pick a note").
 
-    ``q`` filters the sidebar list (bookmarkable).
+    ``q`` filters the sidebar lists (bookmarkable): notes, and voice
+    memos by title or transcript.
     """
     q = request.args.get("q", "").strip()
     notes, total = current_app_notes_service().list(
         limit=50, offset=0, search=q or None,
     )
+    store = current_app_storage()
+    memos = [s for s in store.list_sessions() if s.kind == "voice_memo"]
+    if q:
+        needle = q.lower()
+
+        def _matches(sess) -> bool:
+            transcript = store.get_artifact(sess.id, "transcript")
+            text = (transcript or {}).get("content") or ""
+            return (needle in (sess.title or "").lower()
+                    or needle in text.lower())
+
+        memos = [s for s in memos if _matches(s)]
     mode = "empty"
     note = None
-    if request.args.get("new"):
+    memo_ctx: dict[str, Any] = {}
+    memo_id = request.args.get("memo", "").strip()
+    if memo_id:
+        memo_ctx = _selected_session_context(memo_id)
+        if memo_ctx["selected_session"] is None:
+            abort(404)
+        mode = "memo"
+        memo_ctx["kinds"] = sorted(services.classification.VALID_KINDS)
+    elif request.args.get("new"):
         mode = "new"
     else:
         note_id = request.args.get("note_id", "").strip()
@@ -295,9 +317,11 @@ def ui_notes() -> Any:
         "notes.html",
         notes=notes,
         total=total,
+        memos=memos,
         q=q,
         mode=mode,
         note=note,
+        **memo_ctx,
     )
 
 

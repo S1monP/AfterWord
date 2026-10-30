@@ -391,6 +391,7 @@
   margin-top: var(--lr-s-2);
   font-size: var(--lr-fs-sm);
 }
+.lr-memo__transcript { white-space: pre-line; }
 .lr-other__tag {
   margin-left: var(--lr-s-1);
   font-size: var(--lr-fs-xs);
