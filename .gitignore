@@ -23,3 +23,7 @@ Hardware/firmware/managed_components/
 
 # Hardware: per-device secrets (copy secrets.example.h -> secrets.h).
 Hardware/firmware/main/secrets.h
+
+# Host test build output (Hardware/firmware/test).
+Hardware/firmware/test/*.exe
+Hardware/firmware/test/*.tmp

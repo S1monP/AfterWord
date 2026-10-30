@@ -3,6 +3,7 @@ idf_component_register(
         "main.c"
         "ui.c"
         "storage.c"
+        "adts.c"
         "audio.c"
         "wifi_mgr.c"
         "portal.c"

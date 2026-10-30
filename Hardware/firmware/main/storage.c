@@ -9,6 +9,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "adts.h"
 #include "config.h"
 #include "driver/sdspi_host.h"
 #include "driver/spi_common.h"
@@ -101,20 +102,6 @@ uint16_t storage_chunk_number(const char *name, const char *ext) {
         if (v > 0xFFFF) return 0;
     }
     return (uint16_t)v;
-}
-
-// Length of the leading run of complete ADTS frames in the file.
-static long adts_complete_length(FILE *f, long size) {
-    long pos = 0;
-    uint8_t h[7];
-    while (pos + 7 <= size) {
-        if (fseek(f, pos, SEEK_SET) != 0 || fread(h, 1, 7, f) != 7) break;
-        if (h[0] != 0xFF || (h[1] & 0xF6) != 0xF0) break;     // lost sync
-        long len = ((long)(h[3] & 0x03) << 11) | ((long)h[4] << 3) | (h[5] >> 5);
-        if (len < 7 || pos + len > size) break;               // cut-off frame
-        pos += len;
-    }
-    return pos;
 }
 
 static void recover_folder(const char *folder) {
