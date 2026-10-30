@@ -189,15 +189,8 @@ def register_filters(app: Flask) -> None:
         dt = timeutil.to_local(iso)
         return dt.strftime("%H:%M") if dt else (iso or "")[11:16]
 
-    # Recording names: the stored title, except the device's folder
-    # name, which shows as the kind ("Meeting") until the AI names it.
-    @app.template_filter("rec_title")
-    def _rec_title(sess: storage.Session) -> str:
-        if sess.title and not (
-            sess.title_source is None and storage.title_is_placeholder(sess)
-        ):
-            return sess.title
-        return _KIND_LABEL.get(sess.kind or "", "Recording")
+    app.template_filter("rec_title")(rec_title)
+    app.template_filter("rec_when")(rec_when)
 
     # Transcript lines for display: "[12:34] Speaker 2: text" becomes
     # {"t": 754, "stamp": "12:34", "speaker": "Speaker 2", "text": ...};
@@ -222,16 +215,6 @@ def register_filters(app: Flask) -> None:
                         "text": m.group("text").strip()})
         return out
 
-    # The line under a recording's name: "Thu 30 Oct 2026, 13:10 · 11 min".
-    @app.template_filter("rec_when")
-    def _rec_when(sess: storage.Session) -> str:
-        dt = timeutil.to_local(sess.started_at)
-        when = dt.strftime("%a %d %b %Y, %H:%M") if dt else ""
-        seconds = _estimate_duration_seconds(sess)
-        if seconds >= 1:
-            when += " \u00b7 " + _short_duration(seconds)
-        return when
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -250,6 +233,26 @@ _KIND_LABEL = {
     "command": "Request",
     "other": "Recording",
 }
+
+
+def rec_title(sess: storage.Session) -> str:
+    """A recording's name: the stored title, except the device's folder
+    name, which shows as the kind ("Meeting") until the AI names it."""
+    if sess.title and not (
+        sess.title_source is None and storage.title_is_placeholder(sess)
+    ):
+        return sess.title
+    return _KIND_LABEL.get(sess.kind or "", "Recording")
+
+
+def rec_when(sess: storage.Session) -> str:
+    """The line under a recording's name: "Fri 30 Oct 2026, 13:10 · 11 min"."""
+    dt = timeutil.to_local(sess.started_at)
+    when = dt.strftime("%a %d %b %Y, %H:%M") if dt else ""
+    seconds = _estimate_duration_seconds(sess)
+    if seconds >= 1:
+        when += " · " + _short_duration(seconds)
+    return when
 
 
 def _short_duration(seconds: float) -> str:

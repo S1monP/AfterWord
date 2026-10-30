@@ -47,9 +47,6 @@
     <section class="lr-card" style="margin-top: var(--lr-gap-card);">
       {% include "_session_detail.html" %}
       <div class="lr-player" style="margin-top: var(--lr-s-4);">
-        <a class="lr-btn"
-           href="{{ url_for('sessions_api.api_get_audio', session_id=session.id) }}"
-           download="{{ (session.title or session.id) ~ '.aac' }}">Download</a>
         <button class="lr-btn" id="lr-rerun-ai" type="button"
                 data-session-id="{{ session.id }}">
           Re-run AI processing

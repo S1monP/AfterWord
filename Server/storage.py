@@ -2273,6 +2273,22 @@ class Storage:
                 (session_id,),
             )
 
+    def delete_session(self, session_id: str) -> bool:
+        """Delete a recording: its row, artifacts, chunks and search
+        rows, and its folder (audio). Items it filed into the to-do
+        list, deadlines and calendar are kept, without their link.
+        Returns False if there was no such session."""
+        if self.get_session(session_id) is None:
+            return False
+        self.unlink_filed(session_id)
+        with self._tx() as conn:
+            conn.execute("DELETE FROM artifacts_fts WHERE session_id = ?",
+                         (session_id,))
+            # artifacts and chunks cascade; matched events are unset.
+            conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+        shutil.rmtree(self.session_dir(session_id), ignore_errors=True)
+        return True
+
     def filed_from(self, session_id: str) -> tuple[list[Task], list[Event]]:
         """The tasks/deadlines and events a recording filed."""
         with self._tx() as conn:

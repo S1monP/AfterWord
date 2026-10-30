@@ -57,6 +57,37 @@
     }
   }, true);
 
+  // --- Delete a recording ----------------------------------------------
+  document.addEventListener("click", function (e) {
+    var btn = e.target.closest && e.target.closest(".lr-delete-rec");
+    if (!btn) return;
+    var ok = window.confirm(
+      "Delete this recording? Its audio, transcript and summary are " +
+      "removed for good. To-dos, deadlines and calendar entries filed " +
+      "from it stay."
+    );
+    if (!ok) return;
+    btn.disabled = true;
+    fetch("/api/v1/sessions/" + encodeURIComponent(btn.getAttribute("data-session-id")),
+          { method: "DELETE", credentials: "same-origin" })
+      .then(function (r) {
+        if (r.ok) {
+          // Back to the list this recording was opened from.
+          var path = window.location.pathname;
+          window.location.href = path.indexOf("/sessions/") === 0 ? "/recordings" : path;
+          return;
+        }
+        btn.disabled = false;
+        window.alert(r.status === 409
+          ? "It is being processed right now; try again in a minute."
+          : "Delete failed (" + r.status + ").");
+      })
+      .catch(function () {
+        btn.disabled = false;
+        window.alert("Network error; nothing was deleted.");
+      });
+  });
+
   // ?t=<ms> (from a to-do or deadline): open the transcript at that line
   // and cue the audio there (not autoplay: browsers block it on load).
   document.addEventListener("DOMContentLoaded", function () {

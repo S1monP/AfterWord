@@ -2,9 +2,10 @@
 """
 from __future__ import annotations
 
+import io
 from typing import Any
 
-from flask import abort, Blueprint, current_app, redirect, render_template, request, url_for
+from flask import abort, Blueprint, current_app, redirect, render_template, request, send_file, url_for
 
 import services
 import services.events  # noqa: F401
@@ -248,6 +249,21 @@ _KIND_PAGES = {
     "voice_memo": ("pages.ui_notes", "memo"),
     "other": ("pages.ui_other", "session"),
 }
+
+
+@bp.get("/sessions/<session_id>/export.md")
+def ui_export_session(session_id: str) -> Any:
+    """Download a recording's name, summary, items and transcript as
+    one Markdown file."""
+    from web.export import session_markdown
+    try:
+        name, text = session_markdown(current_app_storage(), session_id)
+    except KeyError:
+        abort(404)
+    return send_file(
+        io.BytesIO(text.encode("utf-8")), as_attachment=True,
+        download_name=name, mimetype="text/markdown",
+    )
 
 
 @bp.post("/sessions/<session_id>/title")

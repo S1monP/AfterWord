@@ -39,6 +39,21 @@
   </div>
 {%- endmacro %}
 
+{# Export / download / delete for a recording (delete: static/js/app.js). #}
+{% macro session_actions(sess) -%}
+  <div class="lr-rec-actions">
+    <a class="lr-btn lr-btn--ghost"
+       href="{{ url_for('pages.ui_export_session', session_id=sess.id) }}">Export (.md)</a>
+    {% if sess.full_audio_size %}
+      <a class="lr-btn lr-btn--ghost"
+         href="{{ url_for('sessions_api.api_get_audio', session_id=sess.id) }}"
+         download="{{ sess|rec_title }}.aac">Download audio</a>
+    {% endif %}
+    <button class="lr-btn lr-btn--danger lr-delete-rec" type="button"
+            data-session-id="{{ sess.id }}">Delete</button>
+  </div>
+{%- endmacro %}
+
 {% macro priority_dot(priority) -%}
   <span class="lr-priority lr-priority--{{ priority or 'low' }}"></span>
 {%- endmacro %}

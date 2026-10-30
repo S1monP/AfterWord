@@ -720,3 +720,74 @@ class ClickableTranscriptTests(LRTestCase):
         self.assertEqual(body.count("<audio"), 1)
         self.assertIn('data-t="5"', body)
         self.assertIn("Re-run AI processing", body)
+
+
+class DeleteExportTests(LRTestCase):
+    def _recording(self):
+        store = self.app.config["LR_STORAGE"]
+        sid = _seed_session(self, status="done", kind="lecture")
+        store.full_audio_path(sid).write_bytes(self.make_wav(b"\x00" * 256))
+        store.set_session_title(sid, "Entropy and the second law", source="ai")
+        store.add_artifact(sid, "summary", json.dumps({
+            "title": "Entropy and the second law", "text": "Overview.",
+            "sections": [{"heading": "Entropy", "text": "Notes."}],
+            "key_points": ["Point one"],
+        }))
+        store.add_artifact(sid, "transcript", "[00:05] Speaker 1: Hello.")
+        from services.tasks import TasksService
+        task = TasksService(store).create(
+            title="Submit essay", kind="deadline", due_at="2026-01-23",
+            source="extracted", source_ref=sid, source_offset_ms=5000,
+        )
+        return store, sid, task
+
+    def test_export_markdown(self):
+        store, sid, _ = self._recording()
+        resp = self.client.get(f"/sessions/{sid}/export.md")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("2026-01-15 Entropy and the second law.md",
+                      resp.headers["Content-Disposition"])
+        md = resp.get_data(as_text=True)
+        for part in ("# Entropy and the second law", "## Summary", "Overview.",
+                     "### Entropy", "## Key points", "- Point one",
+                     "- Deadline: Submit essay (due 2026-01-2",
+                     "## Transcript", "[00:05] Speaker 1: Hello."):
+            self.assertIn(part, md)
+        self.assertEqual(self.client.get("/sessions/nope/export.md").status_code, 404)
+
+    def test_detail_pane_has_the_actions(self):
+        _, sid, _ = self._recording()
+        body = self.client.get(f"/lectures?session={sid}",
+                               headers={"X-Soft-Nav": "1"}).get_data(as_text=True)
+        self.assertIn(f"/sessions/{sid}/export.md", body)
+        self.assertIn("Download audio", body)
+        self.assertIn(f'class="lr-btn lr-btn--danger lr-delete-rec" type="button"\n            data-session-id="{sid}"', body)
+
+    def test_delete_keeps_filed_items_unlinked(self):
+        store, sid, task = self._recording()
+        folder = store.session_dir(sid)
+        self.assertTrue(folder.exists())
+        resp = self.client.delete(f"/api/v1/sessions/{sid}")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIsNone(store.get_session(sid))
+        self.assertFalse(folder.exists())
+        with store._tx() as conn:
+            left = conn.execute(
+                "SELECT COUNT(*) FROM artifacts_fts WHERE session_id = ?",
+                (sid,)).fetchone()[0]
+        self.assertEqual(left, 0)
+        from services.tasks import TasksService
+        kept = TasksService(store).get(task.id)
+        self.assertEqual(kept.title, "Submit essay")
+        self.assertIsNone(kept.source_ref)
+        self.assertEqual(self.client.delete(f"/api/v1/sessions/{sid}").status_code, 404)
+
+    def test_delete_refused_while_processing(self):
+        from web.pipeline import _PIPELINES_IN_FLIGHT
+        _, sid, _ = self._recording()
+        _PIPELINES_IN_FLIGHT.add(sid)
+        try:
+            self.assertEqual(self.client.delete(f"/api/v1/sessions/{sid}").status_code, 409)
+        finally:
+            _PIPELINES_IN_FLIGHT.discard(sid)
+        self.assertIsNotNone(self.app.config["LR_STORAGE"].get_session(sid))

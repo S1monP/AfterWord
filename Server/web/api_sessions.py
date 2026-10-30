@@ -310,6 +310,24 @@ def api_get_audio(session_id: str) -> Any:
     )
 
 
+@bp.delete("/api/v1/sessions/<session_id>")
+def api_delete_session(session_id: str) -> Any:
+    """Delete a recording (audio, transcript, summary). Items it filed
+    into the to-do list, deadlines and calendar stay, unlinked.
+    ``409`` while the AI pipeline is working on it."""
+    with _PIPELINE_LOCK:
+        if session_id in _PIPELINES_IN_FLIGHT:
+            return jsonify({
+                "error": "pipeline_running",
+                "detail": "the recording is being processed; try again "
+                          "in a minute",
+            }), 409
+        deleted = current_app_storage().delete_session(session_id)
+    if not deleted:
+        return jsonify({"error": "not_found"}), 404
+    return jsonify({"ok": True})
+
+
 # --- API: recording-kind classification (manual override) ----------
 @bp.post("/api/v1/sessions/<session_id>/kind")
 def api_set_kind(session_id: str) -> Any:

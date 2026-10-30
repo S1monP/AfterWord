@@ -14,6 +14,7 @@
         {{ ui.rename_form(selected_session, selected_session|rec_title) }}
       </div>
       <div class="lr-detail__meta">{{ selected_session|rec_when }}</div>
+      {{ ui.session_actions(selected_session) }}
       {% if show_classify %}
         <form class="lr-detail__classify" method="post"
               action="{{ url_for('pages.ui_set_kind', session_id=selected_session.id) }}">

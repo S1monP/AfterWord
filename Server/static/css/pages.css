@@ -393,6 +393,12 @@
 }
 .lr-memo__transcript { white-space: pre-line; }
 .lr-detail__filed { margin-top: var(--lr-s-4); }
+.lr-rec-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--lr-s-2);
+  margin-top: var(--lr-s-2);
+}
 .lr-transcript { margin-top: var(--lr-s-2); }
 .lr-tline {
   margin: 0;
