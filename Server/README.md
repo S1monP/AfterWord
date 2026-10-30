@@ -77,6 +77,7 @@ Relative paths are taken from the `Server` folder.
 | `LR_TEXT_API_KEY` | — | OpenRouter key for the text model |
 | `LR_TRANSCRIPTION_MODEL` | `microsoft/mai-transcribe-2` | Speaker labels need `verbose_json` support |
 | `LR_TEXT_MODEL` | `minimax/minimax-m3` | Classification, summaries, extraction |
+| `LR_SUMMARY_LANGUAGES` | `English, Russian` | Summaries keep these languages; others are written in the first |
 | `LR_TEXT_BASE_URL` | OpenRouter | Text model API, e.g. `https://api.minimax.io/v1` (then `LR_TEXT_MODEL=MiniMax-M3`) |
 | `LR_TRANSCRIBE_SPEAKERS` | `1` | `0` = plain transcript without speaker lines |
 | `LR_TRANSCRIBE_CHUNK_SECONDS` | `1500` | Long recordings are sent in pieces this long |

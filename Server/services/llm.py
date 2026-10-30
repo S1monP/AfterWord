@@ -974,7 +974,9 @@ def _chunk_text(
 
 # Map step for long recordings: notes on one part of the transcript,
 # with a heading. The synthesis step merges them into sections.
-def _section_notes_prompt(kind: Optional[str]) -> str:
+def _section_notes_prompt(
+    kind: Optional[str], language: Optional[str] = None,
+) -> str:
     return (
         "You write notes on ONE part of a longer audio transcript. "
         "Reply with ONLY a JSON object (no prose, no markdown fences) "
@@ -987,6 +989,7 @@ def _section_notes_prompt(kind: Optional[str]) -> str:
         "- 'key_points' is a list of 0-5 short bullet points (each "
         "under 20 words) FROM THIS PART.\n\n"
         + _KIND_GUIDE.get(kind or "other", _KIND_GUIDE["other"])
+        + "\n\n" + _language_rule(language)
         + "\n\nIf the part is empty, repetitive, or has no useful "
         "content, return {\"heading\": \"\", \"text\": \"\", "
         "\"key_points\": []}."
@@ -995,12 +998,15 @@ def _section_notes_prompt(kind: Optional[str]) -> str:
 
 # Synthesis step: merges the notes on each part into one summary
 # without shortening them back down to a few sentences.
-def _synthesis_prompt(kind: Optional[str], transcript_chars: int) -> str:
+def _synthesis_prompt(
+    kind: Optional[str], transcript_chars: int,
+    language: Optional[str] = None,
+) -> str:
     return (
         "You are given notes on consecutive parts of one audio "
         "recording, in order. Combine them into ONE summary of the "
         "whole recording.\n\n"
-        + _summary_shape(kind, transcript_chars)
+        + _summary_shape(kind, transcript_chars, language)
         + "\n\nMerge neighbouring parts on the same subject into one "
         "section, and split a part that covers two subjects. Keep the "
         "specifics from the notes; do not reduce them to one-line "
@@ -1040,6 +1046,7 @@ def _summarise_one_chunk(
     section_index: int,
     total_sections: int,
     kind: Optional[str] = None,
+    language: Optional[str] = None,
 ) -> Summary:
     """Run the per-chunk notes LLM call. Returns an empty
     :class:`Summary` on a parse error so the map step degrades
@@ -1052,7 +1059,7 @@ def _summarise_one_chunk(
     )
     try:
         message = provider._chat(
-            _section_notes_prompt(kind), user_prompt,
+            _section_notes_prompt(kind, language), user_prompt,
             timeout=_SUMMARY_TIMEOUT, max_chars=_CHUNK_SIZE,
         )
         raw = message.encode("utf-8")
@@ -1074,6 +1081,7 @@ def _synthesise_summaries(
     *,
     kind: Optional[str] = None,
     transcript_chars: int = 0,
+    language: Optional[str] = None,
 ) -> Summary:
     """Run the synthesis LLM call that merges the notes on each
     part into the final summary.
@@ -1093,7 +1101,7 @@ def _synthesise_summaries(
         f"{formatted}"
     )
     message = provider._chat(
-        _synthesis_prompt(kind, transcript_chars), user_prompt,
+        _synthesis_prompt(kind, transcript_chars, language), user_prompt,
         timeout=_SUMMARY_TIMEOUT, max_chars=_SYNTHESIS_MAX_CHARS,
     )
     return _parse_summarise_response(message.encode("utf-8"))
@@ -1106,6 +1114,7 @@ def _extract_one_chunk(
     kind: str,
     section_index: int,
     total_sections: int,
+    language: Optional[str] = None,
 ) -> list[dict]:
     """Run the per-chunk extract LLM call. Returns an empty list
     on a parse error so the dedupe step is robust to a single
@@ -1119,7 +1128,8 @@ def _extract_one_chunk(
     )
     try:
         message = provider._chat(
-            _EXTRACT_SECTION_PROMPT, user_prompt,
+            _EXTRACT_SECTION_PROMPT + "\n\n" + _language_rule(language),
+            user_prompt,
             max_chars=_CHUNK_SIZE,
         )
         return _parse_extract_response(message.encode("utf-8"))
@@ -1253,13 +1263,63 @@ _KIND_GUIDE: dict[str, str] = {
     ),
 }
 
+#: Env: languages a summary is written in when the recording is in
+#: one of them (comma-separated). Recordings in any other language
+#: get the first one.
+SUMMARY_LANGUAGES_ENV = "LR_SUMMARY_LANGUAGES"
+SUMMARY_LANGUAGES = "English, Russian"
+
+
+def _summary_languages() -> list[str]:
+    raw = os.environ.get(SUMMARY_LANGUAGES_ENV, "").strip()
+    langs = [x.strip() for x in (raw or SUMMARY_LANGUAGES).split(",")]
+    return [x for x in langs if x] or ["English"]
+
+
+def _pick_language(detected: object) -> str:
+    """The detected language if it is one of the kept ones, else the
+    first kept one."""
+    langs = _summary_languages()
+    if isinstance(detected, str):
+        for lang in langs:
+            if lang.lower() == detected.strip().lower():
+                return lang
+    return langs[0]
+
+
+def _language_rule(language: Optional[str] = None) -> str:
+    """Prompt line fixing the output language. Asking the model to
+    choose the language itself proved unreliable (a German meeting
+    came back in German, English or even Russian), so the language
+    is decided first (see :meth:`TextProvider._output_language`)."""
+    language = language or _summary_languages()[0]
+    return (
+        f"Write everything (overview, headings, notes, key points, "
+        f"items) in {language}, translating if the transcript is in "
+        f"another language. Keep names as spoken."
+    )
+
+
+_DETECT_LANGUAGE_PROMPT = (
+    "Identify the main language spoken in this transcript. Reply with "
+    "ONLY a JSON object (no prose, no markdown fences) with one key, "
+    "'language': the language's English name, e.g. \"English\", "
+    "\"Russian\", \"German\"."
+)
+# Enough of the transcript to tell its language.
+_DETECT_LANGUAGE_CHARS = 3_000
+
+
 # Requests that write long summaries need more than the default 60 s.
 _SUMMARY_TIMEOUT = 180.0
 # The synthesis prompt carries the notes on every part (~1 KB each).
 _SYNTHESIS_MAX_CHARS = 60_000
 
 
-def _summary_shape(kind: Optional[str], transcript_chars: int) -> str:
+def _summary_shape(
+    kind: Optional[str], transcript_chars: int,
+    language: Optional[str] = None,
+) -> str:
     """The JSON shape, length and structure rules for a summary."""
     overview, sections, points = next(
         (o, sec, kp) for limit, o, sec, kp in _SUMMARY_BANDS
@@ -1285,13 +1345,18 @@ def _summary_shape(kind: Optional[str], transcript_chars: int) -> str:
         "These lengths are upper limits: if the recording has little "
         "content, write less. Never pad.\n\n"
         + _KIND_GUIDE.get(kind or "other", _KIND_GUIDE["other"])
+        + "\n\n" + _language_rule(language)
     )
 
 
-def _summarise_prompt(kind: Optional[str], transcript_chars: int) -> str:
+def _summarise_prompt(
+    kind: Optional[str], transcript_chars: int,
+    language: Optional[str] = None,
+) -> str:
     return (
         "You are a personal-note summariser. Given an audio transcript, "
-        "produce a summary.\n\n" + _summary_shape(kind, transcript_chars)
+        "produce a summary.\n\n"
+        + _summary_shape(kind, transcript_chars, language)
     )
 
 
@@ -1483,6 +1548,9 @@ class TextProvider(LLMProvider):
         self._chat_url = chat_url or (
             f"{base}/chat/completions" if base else OPENROUTER_CHAT_URL
         )
+        # Output language per transcript, so summarise and extract
+        # detect it once between them.
+        self._languages: dict[int, str] = {}
         self._http = http_transport or _urllib_transport
 
     def classify(self, transcript: str) -> Classification:
@@ -1569,12 +1637,38 @@ class TextProvider(LLMProvider):
             content = _THINK_RE.sub("", content).strip()
         return content
 
+    def _output_language(self, transcript: str) -> str:
+        """The language to write in: the transcript's own language if
+        it is one of ``LR_SUMMARY_LANGUAGES``, else the first of those.
+        Costs one short model call per transcript (cached); if that
+        call fails, the first language is used."""
+        langs = _summary_languages()
+        if len(langs) == 1:
+            return langs[0]
+        key = hash(transcript)
+        if key not in self._languages:
+            try:
+                reply = self._chat(
+                    _DETECT_LANGUAGE_PROMPT, transcript,
+                    max_chars=_DETECT_LANGUAGE_CHARS,
+                )
+                detected = _load_json_object(
+                    str(reply).encode("utf-8"), "language",
+                ).get("language")
+            except LLMError:
+                detected = None
+            if len(self._languages) > 32:
+                self._languages.clear()
+            self._languages[key] = _pick_language(detected)
+        return self._languages[key]
+
     def summarize(
         self, transcript: str, kind: Optional[str] = None,
     ) -> Summary:
         """Produce an overview, sections and key points, sized to the
         transcript and structured by ``kind`` (see
-        :func:`_summary_shape`).
+        :func:`_summary_shape`), in the language picked by
+        :meth:`_output_language`.
 
         For short transcripts (one chunk or less) this is a single
         LLM call. For long transcripts the work is split into a
@@ -1584,11 +1678,12 @@ class TextProvider(LLMProvider):
         """
         if not isinstance(transcript, str):
             raise LLMError("transcript must be a string")
+        language = self._output_language(transcript)
         chunks = _chunk_text(transcript)
         if len(chunks) == 1:
             # Short path: one call, same shape as before.
             message = self._chat(
-                _summarise_prompt(kind, len(transcript)),
+                _summarise_prompt(kind, len(transcript), language),
                 f"Summarise this transcript:\n\n{transcript}",
                 timeout=_SUMMARY_TIMEOUT, max_chars=_CHUNK_SIZE,
             )
@@ -1602,12 +1697,13 @@ class TextProvider(LLMProvider):
         partials = [
             _summarise_one_chunk(
                 self, chunk, section_index=i, total_sections=len(chunks),
-                kind=kind,
+                kind=kind, language=language,
             )
             for i, chunk in enumerate(chunks)
         ]
         return _synthesise_summaries(
             self, partials, kind=kind, transcript_chars=len(transcript),
+            language=language,
         )
 
     def extract(self, transcript: str, kind: str) -> list[dict]:
@@ -1631,11 +1727,12 @@ class TextProvider(LLMProvider):
                 f"extract: kind must be one of {sorted(VALID_KINDS)}, "
                 f"got {kind!r}"
             )
+        language = self._output_language(transcript)
         chunks = _chunk_text(transcript)
         if len(chunks) == 1:
             # Short path: one call, same shape as before.
             message = self._chat(
-                _EXTRACT_SYSTEM_PROMPT,
+                _EXTRACT_SYSTEM_PROMPT + "\n\n" + _language_rule(language),
                 (
                     f"Recording kind: {kind}\n\n"
                     f"Transcript:\n\n{transcript}"
@@ -1655,6 +1752,7 @@ class TextProvider(LLMProvider):
                 _extract_one_chunk(
                     self, chunk, kind=kind,
                     section_index=i, total_sections=len(chunks),
+                    language=language,
                 )
             )
         return _dedupe_items(all_items)

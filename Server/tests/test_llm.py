@@ -744,6 +744,43 @@ class TextProviderTests(unittest.TestCase):
         self.assertIn("Exam and assignment notes", medium)
         self.assertIn("Never pad", medium)
 
+    def test_output_language_kept_or_english(self):
+        from unittest import mock
+
+        def run(detected_reply):
+            # Reply to the language question, then to summary/extract.
+            calls = []
+
+            def transport(url, *, data=None, headers=None, timeout=60.0):
+                sent = json.loads(data)
+                calls.append(sent["messages"][0]["content"])
+                content = (detected_reply if "main language" in calls[-1]
+                           else '{"text": "t", "key_points": [], "items": []}')
+                return 200, json.dumps({"choices": [{"message": {
+                    "content": content}}]}).encode("utf-8")
+
+            p = TextProvider("k", http_transport=transport)
+            p.summarize("some transcript", kind="meeting")
+            p.extract("some transcript", "meeting")
+            return calls
+
+        with mock.patch.dict(os.environ, {llm.SUMMARY_LANGUAGES_ENV: ""}):
+            calls = run('{"language": "russian"}')
+            # Asked once, then both prompts say Russian.
+            self.assertEqual(len(calls), 3)
+            self.assertIn("in Russian, translating", calls[1])
+            self.assertIn("in Russian, translating", calls[2])
+            calls = run('{"language": "German"}')
+            self.assertIn("in English, translating", calls[1])
+            calls = run("not json")                # detection failed
+            self.assertIn("in English, translating", calls[1])
+        env = {llm.SUMMARY_LANGUAGES_ENV: "German"}
+        with mock.patch.dict(os.environ, env):
+            calls = run('{"language": "Russian"}')
+            # One language configured: no question asked.
+            self.assertEqual(len(calls), 2)
+            self.assertIn("in German, translating", calls[0])
+
     def test_long_transcript_notes_then_merges_sections(self):
         calls = []
 
@@ -754,7 +791,7 @@ class TextProviderTests(unittest.TestCase):
                 content = {"text": "Whole lecture.", "key_points": ["k"],
                            "sections": [{"heading": "A", "text": "B"}]}
             else:
-                content = {"heading": f"Part {len(calls)}",
+                content = {"heading": f"H{len(calls) - 1}",
                            "text": "Detailed notes.", "key_points": []}
             return 200, json.dumps({"choices": [{"message": {
                 "content": json.dumps(content)}}]}).encode("utf-8")
@@ -763,12 +800,13 @@ class TextProviderTests(unittest.TestCase):
         out = p.summarize("word " * 12_000, kind="lecture")   # 60k chars
         self.assertEqual(out.text, "Whole lecture.")
         self.assertEqual(out.sections, [{"heading": "A", "text": "B"}])
-        *notes, synthesis = calls
+        detect, *notes, synthesis = calls
+        self.assertIn("main language", detect["messages"][0]["content"])
         self.assertGreater(len(notes), 4)
         self.assertIn("80-150 words", notes[0]["messages"][0]["content"])
         # The longest band, and each part's heading reaches the merge.
         self.assertIn("5-10 sections", synthesis["messages"][0]["content"])
-        self.assertIn("[Part 1: Part 1]", synthesis["messages"][1]["content"])
+        self.assertIn("[Part 1: H1]", synthesis["messages"][1]["content"])
 
     def test_summarize_handles_fenced_json(self):
         body = json.dumps({
