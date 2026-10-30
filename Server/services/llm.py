@@ -385,6 +385,35 @@ def _segments_to_transcript(
     return "\n".join(lines).strip()
 
 
+_TRANSCRIPT_LINE = re.compile(
+    r"^\[(?P<stamp>(?:\d+:)?\d{1,2}:\d{2})\]\s*"
+    r"(?:(?P<speaker>Speaker \d+):\s*)?(?P<text>.*)$"
+)
+
+
+def parse_transcript_lines(text: Optional[str]) -> list[dict]:
+    """Split a transcript back into lines: "[12:34] Speaker 2: text"
+    becomes ``{"t": 754, "stamp": "12:34", "speaker": "Speaker 2",
+    "text": ...}``; lines without a marker (plain transcripts) have
+    ``t`` None. Blank lines are dropped."""
+    out = []
+    for line in (text or "").splitlines():
+        if not line.strip():
+            continue
+        m = _TRANSCRIPT_LINE.match(line)
+        if not m:
+            out.append({"t": None, "stamp": None, "speaker": None,
+                        "text": line.strip()})
+            continue
+        seconds = 0
+        for part in m.group("stamp").split(":"):
+            seconds = seconds * 60 + int(part)
+        out.append({"t": seconds, "stamp": m.group("stamp"),
+                    "speaker": m.group("speaker"),
+                    "text": m.group("text").strip()})
+    return out
+
+
 def _speakers_enabled() -> bool:
     """Resolve the speaker-annotation flag from the environment.
 

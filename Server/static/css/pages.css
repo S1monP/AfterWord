@@ -53,6 +53,9 @@
 .lr-dashboard .lr-card__header {
   margin-bottom: var(--lr-s-3);
 }
+/* Cards clip their content; the search results drop down over the
+   cards below. */
+.lr-dashboard .lr-dashboard__search { overflow: visible; }
 /* Fixed bento: card contents are capped and clip cleanly — an inner
    scrollbar never appears ("View all (N)" footers lead to the pages). */
 .lr-dashboard .lr-card__body {
@@ -187,6 +190,11 @@
   transition: background 100ms ease;
 }
 .lr-todo:last-child { border-bottom: 0; }
+/* Opened from a search result (/todos#todo-<id>). */
+.lr-todo:target {
+  background: color-mix(in srgb, var(--lr-accent) 14%, transparent);
+  scroll-margin: calc(var(--lr-topbar-h) + var(--lr-s-4));
+}
 .lr-todo:hover { background: var(--lr-surface-hover, transparent); }
 .lr-todo__check {
   /* Round, theme-native checkbox: subtle circle that fills with a

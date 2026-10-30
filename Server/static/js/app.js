@@ -88,12 +88,22 @@
       });
   });
 
-  // ?t=<ms> (from a to-do or deadline): open the transcript at that line
-  // and cue the audio there (not autoplay: browsers block it on load).
+  // ?t=<ms> (from a to-do, deadline or search result): open the
+  // transcript at that line and cue the audio there (not autoplay:
+  // browsers block it on load). From a search without a moment (?hl=),
+  // show the first marked word instead.
   document.addEventListener("DOMContentLoaded", function () {
     var raw = new URLSearchParams(window.location.search).get("t");
     var ms = raw === null ? NaN : parseInt(raw, 10);
-    if (!isFinite(ms) || ms < 0) return;
+    if (!isFinite(ms) || ms < 0) {
+      var mark = document.querySelector(".lr-detail mark");
+      if (mark) {
+        var closed = mark.closest("details");
+        if (closed) closed.open = true;
+        mark.scrollIntoView({ block: "center" });
+      }
+      return;
+    }
     var seconds = ms / 1000;
     var audio = audioFor(document.querySelector(".lr-detail"));
     if (!audio) return;

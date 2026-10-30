@@ -4,6 +4,7 @@
 
 {% block extrascripts %}
 <script src="{{ url_for('static', filename='js/todos.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/search.js') }}" defer></script>
 {% endblock %}
 
 {% block content %}
@@ -64,11 +65,16 @@
     {# --- Middle column: Search + Notes/Lectures/Meetings --- #}
     <div class="lr-dashboard__middle">
       <section class="lr-card lr-dashboard__search" aria-label="Search">
-        <form class="lr-search" method="get" action="{{ url_for('pages.ui_dashboard') }}" role="search">
-          <input class="lr-input" type="search" name="q" value="{{ request.args.get('') or '' }}"
-                 placeholder="Search recordings, transcripts, notes&hellip;" aria-label="Search recordings, transcripts, notes">
+        {# Results drop down as you type (static/js/search.js). #}
+        <form class="lr-search" id="lr-search" method="get"
+              action="{{ url_for('pages.ui_dashboard') }}" role="search">
+          <input class="lr-input" type="search" name="q" value="{{ request.args.get('q', '') }}"
+                 placeholder="Search recordings, transcripts, notes&hellip;" aria-label="Search recordings, transcripts, notes"
+                 autocomplete="off" role="combobox" aria-autocomplete="list"
+                 aria-expanded="false" aria-controls="lr-search-results">
           <span class="lr-search__shortcut" aria-hidden="true">/</span>
-          <button class="lr-btn" type="submit">Search</button>
+          <div class="lr-search__results" id="lr-search-results" role="listbox"
+               aria-label="Search results" hidden></div>
         </form>
       </section>
 

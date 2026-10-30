@@ -1,5 +1,5 @@
 """Recordings API: device upload protocol, session list/detail/audio,
-pipeline retry, classification, search and web audio upload.
+pipeline retry, classification and web audio upload.
 """
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ from typing import Any, Optional
 
 from flask import abort, Blueprint, current_app, jsonify, request, send_file
 
-import search
 import services
 import services.classification  # noqa: F401
 import storage
@@ -453,30 +452,6 @@ def api_bulk_classify() -> Any:
                 "reason": "classified",
             }
     return jsonify({"results": results})
-
-
-# --- API: search (Phase A stub returns []) -------------------------
-@bp.get("/api/v1/search")
-def api_search() -> Any:
-    q = request.args.get("q", "").strip()
-    if not q:
-        return jsonify({"hits": []})
-    hits = search.search(
-        q,
-        course_id=request.args.get("course_id") or None,
-        kind=request.args.get("kind") or None,
-    )
-    return jsonify({
-        "hits": [
-            {
-                "session_id": h.session_id,
-                "artifact_id": h.artifact_id,
-                "kind": h.kind,
-                "snippet": h.snippet,
-            }
-            for h in hits
-        ],
-    })
 
 
 @bp.post("/api/v1/sessions/<session_id>/course")

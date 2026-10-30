@@ -213,6 +213,8 @@
   border-color: var(--lr-accent);
   box-shadow: var(--lr-shadow-glow);
 }
+.lr-search input:focus ~ .lr-search__shortcut,
+.lr-search input:not(:placeholder-shown) ~ .lr-search__shortcut { display: none; }
 .lr-search__shortcut {
   position: absolute;
   right: 14px;
@@ -224,6 +226,92 @@
   border-radius: var(--lr-r-sm);
   padding: 2px 6px;
   pointer-events: none;
+}
+
+/* The search box's dropdown (static/js/search.js). */
+.lr-search__results {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  max-height: min(70vh, 560px);
+  overflow-y: auto;
+  padding: var(--lr-s-1) 0;
+  background: var(--lr-bg-elevated);
+  border: 1px solid var(--lr-border-hi);
+  border-radius: var(--lr-r-md);
+  box-shadow: var(--lr-shadow-md);
+}
+.lr-sr__group + .lr-sr__group {
+  border-top: 1px solid var(--lr-border);
+  margin-top: var(--lr-s-1);
+  padding-top: var(--lr-s-1);
+}
+.lr-sr__label {
+  padding: var(--lr-s-2) var(--lr-s-4) 2px;
+  font-size: var(--lr-fs-xs);
+  color: var(--lr-text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.lr-sr__item { padding: 6px var(--lr-s-4); }
+.lr-sr__item:hover,
+.lr-sr__item.is-active { background: var(--lr-surface-hover); }
+.lr-sr__main {
+  display: block;
+  color: var(--lr-text);
+  text-decoration: none;
+}
+.lr-sr__title { font-size: var(--lr-fs-sm); font-weight: var(--lr-fw-medium); }
+.lr-sr__meta { font-size: var(--lr-fs-xs); color: var(--lr-text-faint); }
+.lr-sr__snippet {
+  margin-top: 2px;
+  font-size: var(--lr-fs-sm);
+  color: var(--lr-text-muted);
+}
+.lr-sr__at {
+  margin-right: 6px;
+  font-family: var(--lr-font-mono);
+  font-size: var(--lr-fs-xs);
+  color: var(--lr-accent);
+}
+.lr-sr__moments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--lr-s-1);
+  margin-top: var(--lr-s-1);
+}
+.lr-sr__moment {
+  padding: 1px 6px;
+  font-family: var(--lr-font-mono);
+  font-size: var(--lr-fs-xs);
+  color: var(--lr-text-muted);
+  text-decoration: none;
+  border: 1px solid var(--lr-border);
+  border-radius: var(--lr-r-pill);
+}
+a.lr-sr__moment:hover { color: var(--lr-accent); border-color: var(--lr-accent); }
+.lr-sr__moment--more { border-color: transparent; }
+.lr-sr__more {
+  display: block;
+  width: 100%;
+  padding: 6px var(--lr-s-4);
+  font: inherit;
+  font-size: var(--lr-fs-xs);
+  text-align: left;
+  color: var(--lr-accent);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.lr-sr__more:hover,
+.lr-sr__more.is-active { background: var(--lr-surface-hover); }
+.lr-sr__empty,
+.lr-sr__note {
+  padding: var(--lr-s-2) var(--lr-s-4);
+  font-size: var(--lr-fs-sm);
+  color: var(--lr-text-faint);
 }
 
 /* ---- Badges and pills ---- */

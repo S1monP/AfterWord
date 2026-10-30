@@ -94,6 +94,14 @@ input, textarea, select {
 
 .lr-num { font-family: var(--lr-font-mono); font-variant-numeric: tabular-nums; }
 
+/* Words matching a search (search box, ?hl= on a recording). */
+mark {
+  color: inherit;
+  background: color-mix(in srgb, var(--lr-accent) 32%, transparent);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
 /* Page-level fade-in. Cards stagger inside the dashboard. */
 @keyframes lr-fade-in {
   from { opacity: 0; transform: translateY(4px); }

@@ -33,7 +33,7 @@ class InitialiseTests(LRTestCase):
         for expected in ("sessions", "chunks", "courses", "artifacts"):
             self.assertIn(expected, tables, f"missing table {expected}")
 
-    def test_fts5_table_created(self) -> None:
+    def test_search_tables_created(self) -> None:
         store = self.app.config["LR_STORAGE"]
         with store._connect() as conn:  # type: ignore[attr-defined]
             names = {
@@ -42,7 +42,9 @@ class InitialiseTests(LRTestCase):
                     "SELECT name FROM sqlite_master WHERE type='table'"
                 ).fetchall()
             }
-        self.assertIn("artifacts_fts", names)
+        for name in ("search_items", "search_rows", "search_fts"):
+            self.assertIn(name, names)
+        self.assertNotIn("artifacts_fts", names)  # the old, unused index
 
 
 class SessionTests(LRTestCase):
@@ -458,8 +460,8 @@ class M8TransitionGuardTests(LRTestCase):
 
 
 class M8AddArtifactTests(LRTestCase):
-    """Storage.add_artifact inserts into both artifacts and
-    artifacts_fts and returns the row."""
+    """Storage.add_artifact inserts into artifacts and returns the
+    row."""
 
     def _make(self):
         import uuid
@@ -485,17 +487,6 @@ class M8AddArtifactTests(LRTestCase):
         fetched = store.get_artifact(sid, "transcript")
         self.assertIsNotNone(fetched)
         self.assertEqual(fetched["content"], "hello world")
-
-    def test_add_artifact_indexes_in_fts(self):
-        sid, store = self._make()
-        store.add_artifact(sid, "transcript", "needle in a haystack")
-        with store._tx() as conn:
-            row = conn.execute(
-                "SELECT body FROM artifacts_fts WHERE body MATCH ?",
-                ("needle",),
-            ).fetchone()
-        self.assertIsNotNone(row)
-        self.assertIn("needle", row["body"])
 
     def test_add_artifact_missing_session_raises_keyerror(self):
         store = self.app.config["LR_STORAGE"]
@@ -526,8 +517,7 @@ class M8AddArtifactTests(LRTestCase):
             rows = conn.execute(
                 "SELECT COUNT(*) FROM artifacts WHERE session_id = ? "
                 "AND kind = 'transcript'", (sid,)).fetchone()[0]
-            hits = conn.execute(
-                "SELECT body FROM artifacts_fts WHERE artifacts_fts "
-                "MATCH 'needle'").fetchall()
         self.assertEqual(rows, 1)
-        self.assertEqual([h[0] for h in hits], ["second needle"])
+        import search
+        hits = search.search(store, "needle")["recording"]
+        self.assertEqual([h.best["text"] for h in hits], ["second needle"])

@@ -765,17 +765,16 @@ class DeleteExportTests(LRTestCase):
 
     def test_delete_keeps_filed_items_unlinked(self):
         store, sid, task = self._recording()
+        import search
+        self.assertEqual(len(search.search(store, "entropy")["recording"]), 1)
         folder = store.session_dir(sid)
         self.assertTrue(folder.exists())
         resp = self.client.delete(f"/api/v1/sessions/{sid}")
         self.assertEqual(resp.status_code, 200)
         self.assertIsNone(store.get_session(sid))
         self.assertFalse(folder.exists())
-        with store._tx() as conn:
-            left = conn.execute(
-                "SELECT COUNT(*) FROM artifacts_fts WHERE session_id = ?",
-                (sid,)).fetchone()[0]
-        self.assertEqual(left, 0)
+        import search
+        self.assertEqual(search.search(store, "entropy")["recording"], [])
         from services.tasks import TasksService
         kept = TasksService(store).get(task.id)
         self.assertEqual(kept.title, "Submit essay")

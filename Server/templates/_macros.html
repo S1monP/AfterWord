@@ -33,7 +33,7 @@
                   title="Play from {{ line.stamp }}">{{ line.stamp }}</button>
         {%- endif -%}
         {%- if line.speaker %} <span class="lr-tline__who">{{ line.speaker }}</span>{% endif %}
-        {{ line.text }}
+        {{ line.text|search_marks }}
       </p>
     {% endfor %}
   </div>

@@ -44,16 +44,16 @@
     <section class="lr-detail__summary">
       <h3>Summary</h3>
       {% if summary and summary.content %}
-        <div class="lr-prose">{{ summary.content }}</div>
+        <div class="lr-prose">{{ summary.content|search_marks }}</div>
         {% for section in summary.sections %}
-          {% if section.heading %}<h4>{{ section.heading }}</h4>{% endif %}
-          <div class="lr-prose">{{ section.text }}</div>
+          {% if section.heading %}<h4>{{ section.heading|search_marks }}</h4>{% endif %}
+          <div class="lr-prose">{{ section.text|search_marks }}</div>
         {% endfor %}
         {% if summary.key_points %}
           <h4>Key points</h4>
           <ul class="lr-prose">
             {% for point in summary.key_points %}
-              <li>{{ point }}</li>
+              <li>{{ point|search_marks }}</li>
             {% endfor %}
           </ul>
         {% endif %}

@@ -596,13 +596,6 @@ class WebUITests(LRTestCase):
         self.client.post("/api/v1/sessions/abcdef1234567890/finish")
 
 
-class SearchStubTests(LRTestCase):
-
-    def test_search_returns_empty_hits(self) -> None:
-        r = self.client.get("/api/v1/search?q=anything")
-        self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.get_json()["hits"], [])
-
 class EventsApiTests(LRTestCase):
     """HTTP surface for /api/v1/events/* (added in Milestone 5)."""
 

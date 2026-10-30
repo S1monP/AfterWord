@@ -16,3 +16,7 @@ tzdata>=2024.1
 
 # Production web server for serve.py (python app.py is for development).
 waitress>=3.0
+
+# Search: word stems, so "лекция" finds "лекции" and "meeting" finds
+# "meetings" (search.py). Pure Python.
+snowballstemmer>=2.2

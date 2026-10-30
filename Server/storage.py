@@ -6,7 +6,7 @@ class, :class:`Storage`, that the API and services layers talk to.
 Phase A responsibilities:
 
 * Maintain the SQLite schema (sessions, chunks, plus the future-use
-  courses / artifacts / artifacts_fts tables that are created empty).
+  courses / artifacts tables that are created empty).
 * Write each uploaded chunk atomically: ``chunks/NNN.aac.tmp`` then rename.
 * List and read stitched audio (``full.aac``).
 * Stitch chunks into a single ``full.aac`` and remove the originals.
@@ -222,16 +222,56 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_artifacts_session_kind ON artifacts(session_id, kind)",
+    # Search (search.py). Every searchable item (recording, note, task,
+    # event) is split into pieces: a title, a summary paragraph, one
+    # transcript line (at_ms = where it is in the audio). ``words`` and
+    # ``stems`` are the piece's normalised words and their stems;
+    # search_fts indexes those two. search_items records which version
+    # (stamp) of each item the rows were built from.
     """
-    CREATE VIRTUAL TABLE IF NOT EXISTS artifacts_fts USING fts5(
-        artifact_id UNINDEXED,
-        session_id  UNINDEXED,
-        course_id   UNINDEXED,
-        kind        UNINDEXED,
-        body,
-        tokenize = 'porter unicode61 remove_diacritics 2'
+    CREATE TABLE IF NOT EXISTS search_items (
+        item_type  TEXT NOT NULL,
+        item_id    TEXT NOT NULL,
+        stamp      TEXT NOT NULL,
+        PRIMARY KEY (item_type, item_id)
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS search_rows (
+        id         INTEGER PRIMARY KEY,
+        item_type  TEXT NOT NULL,
+        item_id    TEXT NOT NULL,
+        field      TEXT NOT NULL,
+        at_ms      INTEGER,
+        text       TEXT NOT NULL,
+        words      TEXT NOT NULL,
+        stems      TEXT NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_search_rows_item ON search_rows(item_type, item_id)",
+    """
+    CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(
+        words, stems,
+        content = 'search_rows', content_rowid = 'id',
+        tokenize = 'unicode61 remove_diacritics 2'
+    )
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS search_rows_ai AFTER INSERT ON search_rows
+    BEGIN
+        INSERT INTO search_fts (rowid, words, stems)
+        VALUES (new.id, new.words, new.stems);
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS search_rows_ad AFTER DELETE ON search_rows
+    BEGIN
+        INSERT INTO search_fts (search_fts, rowid, words, stems)
+        VALUES ('delete', old.id, old.words, old.stems);
+    END
+    """,
+    # The first search index, never queried; replaced by the above.
+    "DROP TABLE IF EXISTS artifacts_fts",
     # -- Tier 1 schema additions --
     # Notes: independent of recordings. Markdown source + render cache.
     """
@@ -1395,16 +1435,15 @@ class Storage:
         *,
         model: Optional[str] = None,
     ) -> dict[str, Any]:
-        """Store a session's artifact of ``kind`` and mirror it into
-        the FTS table, replacing any earlier one of the same kind.
+        """Store a session's artifact of ``kind``, replacing any
+        earlier one of the same kind.
 
         ``kind`` is one of the artifact kinds used by the pipeline
         (``transcript``, ``summary``, ``extraction``, …). A session
         has at most one of each: a retry re-runs the pipeline, and
         keeping the old rows left duplicate search hits. The row id
-        is a fresh uuid4 hex; ``created_at`` is set to now. The
-        FTS table is also written so the artifact is searchable
-        later (M10: search).
+        is a fresh uuid4 hex; ``created_at`` is set to now. Search
+        picks the new artifact up by itself (search.py).
 
         Returns the row as a dict with the same shape as
         :meth:`get_artifact`. Raises :class:`KeyError` if the
@@ -1424,11 +1463,6 @@ class Storage:
         now = now_iso()
         with self._tx() as conn:
             conn.execute(
-                "DELETE FROM artifacts_fts WHERE artifact_id IN "
-                "(SELECT id FROM artifacts WHERE session_id = ? AND kind = ?)",
-                (session_id, kind),
-            )
-            conn.execute(
                 "DELETE FROM artifacts WHERE session_id = ? AND kind = ?",
                 (session_id, kind),
             )
@@ -1440,18 +1474,6 @@ class Storage:
                 """,
                 (artifact_id, session_id, kind, content, model, now),
             )
-            # Mirror into the FTS table so later search includes
-            # this artifact. ``course_id`` is left NULL — it's only
-            # useful for session-side joins; the search code can
-            # resolve it via ``session_id`` if it needs to.
-            conn.execute(
-                """
-                INSERT INTO artifacts_fts
-                    (artifact_id, session_id, course_id, kind, body)
-                VALUES (?, ?, NULL, ?, ?)
-                """,
-                (artifact_id, session_id, kind, content),
-            )
         return {
             "id": artifact_id,
             "session_id": session_id,
@@ -1462,18 +1484,12 @@ class Storage:
         }
 
     def delete_artifacts(self, session_id: str, *kinds: str) -> None:
-        """Remove a session's artifacts of the given kinds (and their
-        search rows). Used when a summary no longer fits the session,
-        e.g. after its kind was changed by hand."""
+        """Remove a session's artifacts of the given kinds. Used when a
+        summary no longer fits the session, e.g. after its kind was
+        changed by hand."""
         placeholders = ",".join("?" for _ in kinds)
         params = (session_id, *kinds)
         with self._tx() as conn:
-            conn.execute(
-                "DELETE FROM artifacts_fts WHERE artifact_id IN "
-                "(SELECT id FROM artifacts WHERE session_id = ? "
-                f"AND kind IN ({placeholders}))",
-                params,
-            )
             conn.execute(
                 "DELETE FROM artifacts WHERE session_id = ? "
                 f"AND kind IN ({placeholders})",
@@ -2274,17 +2290,16 @@ class Storage:
             )
 
     def delete_session(self, session_id: str) -> bool:
-        """Delete a recording: its row, artifacts, chunks and search
-        rows, and its folder (audio). Items it filed into the to-do
-        list, deadlines and calendar are kept, without their link.
-        Returns False if there was no such session."""
+        """Delete a recording: its row, artifacts and chunks, and its
+        folder (audio). Items it filed into the to-do list, deadlines
+        and calendar are kept, without their link. Returns False if
+        there was no such session."""
         if self.get_session(session_id) is None:
             return False
         self.unlink_filed(session_id)
         with self._tx() as conn:
-            conn.execute("DELETE FROM artifacts_fts WHERE session_id = ?",
-                         (session_id,))
             # artifacts and chunks cascade; matched events are unset.
+            # Its search rows go at the next search (search.py).
             conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
         shutil.rmtree(self.session_dir(session_id), ignore_errors=True)
         return True
@@ -2314,6 +2329,101 @@ class Storage:
                 (session_id,),
             ).fetchone()
         return self._row_to_event(row) if row is not None else None
+
+    # --- search index (search.py builds the rows) --------------------------
+
+    def search_source_stamps(self) -> dict[tuple[str, str], str]:
+        """``{(item_type, item_id): stamp}`` for everything searchable
+        now. A stamp changes whenever the item's searchable text may
+        have: a recording's title, kind and the ids of its summary and
+        transcript (artifacts are replaced, never edited); a note's,
+        task's or event's text itself (``updated_at`` only has whole
+        seconds). search.py keeps a digest of it."""
+        out: dict[tuple[str, str], str] = {}
+        with self._tx() as conn:
+            for row in conn.execute(
+                """
+                SELECT s.id, COALESCE(s.title, '') || char(31)
+                    || COALESCE(s.title_source, '') || char(31)
+                    || COALESCE(s.kind, '') || char(31)
+                    || COALESCE((SELECT MAX(a.id) FROM artifacts a
+                                 WHERE a.session_id = s.id
+                                 AND a.kind = 'summary'), '') || char(31)
+                    || COALESCE((SELECT MAX(a.id) FROM artifacts a
+                                 WHERE a.session_id = s.id
+                                 AND a.kind = 'transcript'), '')
+                FROM sessions s
+                """
+            ):
+                out[("recording", row[0])] = row[1]
+            for item_type, table, columns in (
+                ("note", "notes", ("title", "body_md")),
+                ("task", "tasks", ("title", "description", "body_md")),
+                ("event", "events", ("title", "location", "description")),
+            ):
+                text = " || char(31) || ".join(
+                    f"COALESCE({c}, '')" for c in columns)
+                for row in conn.execute(f"SELECT id, {text} FROM {table}"):
+                    out[(item_type, row[0])] = row[1]
+        return out
+
+    def search_indexed_stamps(self) -> dict[tuple[str, str], str]:
+        """``{(item_type, item_id): stamp}`` the index was built from."""
+        with self._tx() as conn:
+            return {(r[0], r[1]): r[2] for r in conn.execute(
+                "SELECT item_type, item_id, stamp FROM search_items"
+            )}
+
+    def search_put_item(
+        self, item_type: str, item_id: str, stamp: str,
+        rows: list[tuple[str, Optional[int], str, str, str]],
+    ) -> None:
+        """Replace an item's search rows: ``(field, at_ms, text, words,
+        stems)`` each."""
+        with self._tx() as conn:
+            conn.execute(
+                "DELETE FROM search_rows WHERE item_type = ? AND item_id = ?",
+                (item_type, item_id),
+            )
+            conn.executemany(
+                "INSERT INTO search_rows "
+                "(item_type, item_id, field, at_ms, text, words, stems) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [(item_type, item_id, *row) for row in rows],
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO search_items (item_type, item_id, stamp) "
+                "VALUES (?, ?, ?)",
+                (item_type, item_id, stamp),
+            )
+
+    def search_drop_item(self, item_type: str, item_id: str) -> None:
+        """Remove an item (deleted, or no longer searchable) from search."""
+        with self._tx() as conn:
+            conn.execute(
+                "DELETE FROM search_rows WHERE item_type = ? AND item_id = ?",
+                (item_type, item_id),
+            )
+            conn.execute(
+                "DELETE FROM search_items WHERE item_type = ? AND item_id = ?",
+                (item_type, item_id),
+            )
+
+    def search_match(self, fts_query: str, limit: int) -> list[dict[str, Any]]:
+        """Rows matching an FTS5 query, best first (``score``: bm25,
+        lower is better)."""
+        with self._tx() as conn:
+            rows = conn.execute(
+                """
+                SELECT r.item_type, r.item_id, r.field, r.at_ms, r.text,
+                       bm25(search_fts) AS score
+                FROM search_fts JOIN search_rows r ON r.id = search_fts.rowid
+                WHERE search_fts MATCH ?
+                ORDER BY score LIMIT ?
+                """,
+                (fts_query, limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def _row_to_event(self, row: sqlite3.Row) -> Event:
         keys = row.keys()

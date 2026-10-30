@@ -9,7 +9,8 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-from flask import current_app, Flask
+from flask import current_app, Flask, g, has_request_context, request
+from markupsafe import escape, Markup
 
 import services
 import services.notes  # noqa: F401
@@ -18,6 +19,7 @@ import services.events  # noqa: F401
 import services.classification  # noqa: F401
 import services.courses  # noqa: F401
 import services.llm  # noqa: F401
+import search
 import storage
 import timeutil
 from services import transcode
@@ -192,38 +194,29 @@ def register_filters(app: Flask) -> None:
     app.template_filter("rec_title")(rec_title)
     app.template_filter("rec_when")(rec_when)
 
-    # Transcript lines for display: "[12:34] Speaker 2: text" becomes
-    # {"t": 754, "stamp": "12:34", "speaker": "Speaker 2", "text": ...};
-    # lines without a marker (plain transcripts) have t None.
-    @app.template_filter("transcript_lines")
-    def _transcript_lines(text: Optional[str]) -> list[dict]:
-        out = []
-        for line in (text or "").splitlines():
-            if not line.strip():
-                continue
-            m = _TRANSCRIPT_LINE.match(line)
-            if not m:
-                out.append({"t": None, "stamp": None, "speaker": None,
-                            "text": line.strip()})
-                continue
-            parts = [int(p) for p in m.group("stamp").split(":")]
-            seconds = 0
-            for p in parts:
-                seconds = seconds * 60 + p
-            out.append({"t": seconds, "stamp": m.group("stamp"),
-                        "speaker": m.group("speaker"),
-                        "text": m.group("text").strip()})
-        return out
+    # A page opened from a search result (?hl=<query>) marks the
+    # matched words, in every word form (search.highlight).
+    @app.template_filter("search_marks")
+    def _search_marks(text: Optional[str]) -> Any:
+        raw = request.args.get("hl", "") if has_request_context() else ""
+        if not raw or not text:
+            return text
+        if "lr_hl_query" not in g:
+            g.lr_hl_query = search.parse_query(raw)
+        return Markup("").join(
+            Markup("<mark>%s</mark>") % part if matched else escape(part)
+            for part, matched in search.highlight(text, g.lr_hl_query)
+        )
+
+    # Transcript lines for display: {"t", "stamp", "speaker", "text"}.
+    app.template_filter("transcript_lines")(
+        services.llm.parse_transcript_lines,
+    )
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-_TRANSCRIPT_LINE = re.compile(
-    r"^\[(?P<stamp>(?:\d+:)?\d{1,2}:\d{2})\]\s*"
-    r"(?:(?P<speaker>Speaker \d+):\s*)?(?P<text>.*)$"
-)
 
 # Name shown for a recording that has no real title yet.
 _KIND_LABEL = {

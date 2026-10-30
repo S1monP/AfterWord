@@ -208,6 +208,8 @@
 .lr-dashboard__search {
   grid-row: 1;
   min-height: 0;
+  position: relative;
+  z-index: 20;
 }
 .lr-dashboard__inner {
   grid-row: 2;

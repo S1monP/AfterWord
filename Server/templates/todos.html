@@ -45,7 +45,7 @@
             {% for t in tasks %}
               {% set overdue = t.status == 'open' and t.due_at and is_overdue(t.due_at, now_iso) %}
               {% set due_today = t.status == 'open' and t.due_at and is_due_today(t.due_at, now_iso) and not overdue %}
-              <li class="lr-todo {% if t.status == 'done' %}is-done{% endif %} {% if t.status == 'cancelled' %}is-cancelled{% endif %} {% if overdue %}is-overdue{% endif %}"
+              <li id="todo-{{ t.id }}" class="lr-todo {% if t.status == 'done' %}is-done{% endif %} {% if t.status == 'cancelled' %}is-cancelled{% endif %} {% if overdue %}is-overdue{% endif %}"
                   data-todo-id="{{ t.id }}" data-status="{{ t.status }}" data-priority="{{ t.priority }}">
                 <input class="lr-todo__check" type="checkbox"
                        {% if t.status == 'done' %}checked{% endif %}
@@ -112,7 +112,7 @@
             {% for d in deadlines %}
               {% set d_overdue = d.status == 'open' and is_overdue(d.due_at, now_iso) %}
               {% set d_due_today = d.status == 'open' and not d_overdue and is_due_today(d.due_at, now_iso) %}
-              <li class="lr-todo lr-deadline {% if d.status == 'done' %}is-done{% endif %} {% if d.status == 'cancelled' %}is-cancelled{% endif %} {% if d_overdue %}is-overdue{% endif %}"
+              <li id="todo-{{ d.id }}" class="lr-todo lr-deadline {% if d.status == 'done' %}is-done{% endif %} {% if d.status == 'cancelled' %}is-cancelled{% endif %} {% if d_overdue %}is-overdue{% endif %}"
                   data-todo-id="{{ d.id }}" data-status="{{ d.status }}" data-priority="{{ d.priority }}">
                 <input class="lr-todo__check" type="checkbox"
                        {% if d.status == 'done' %}checked{% endif %}
