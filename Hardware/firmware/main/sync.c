@@ -269,9 +269,10 @@ static const char *base_name(const char *path) {
 }
 
 // started_at, in local wall-clock time like the folder names.  Timed folders
-// carry it in their name; untimed ones (rec_nt...) only get one when their
-// start.txt is from this boot and the clock has been set since.  "" makes
-// the server use the upload time.
+// carry it in their name.  An untimed one (rec_nt...) has a start.txt of
+// "<boot> <us since boot>", which only converts to a time on that same boot
+// once the clock is set; the result is then written back as "T <time>" so a
+// later reboot keeps it.  "" makes the server use the upload time.
 static void started_at_for(const char *folder, char *out, size_t cap) {
     out[0] = '\0';
     int Y, Mo, D, H, Mi;
@@ -279,20 +280,32 @@ static void started_at_for(const char *folder, char *out, size_t cap) {
         snprintf(out, cap, "%04d-%02d-%02dT%02d:%02d:00", Y, Mo, D, H, Mi);
         return;
     }
-    if (!time_valid()) return;
-    char p[128];
+    char p[128], line[48], iso[24];
     snprintf(p, sizeof(p), "%s/" SESSION_START_FILE, folder);
     FILE *f = fopen(p, "r");
     if (!f) return;
+    bool got = fgets(line, sizeof(line), f) != NULL;
+    fclose(f);
+    if (!got) return;
+    if (sscanf(line, "T %23s", iso) == 1) {
+        strlcpy(out, iso, cap);
+        return;
+    }
     unsigned long boot = 0;
     long long start_us = 0;
-    int ok = fscanf(f, "%lu %lld", &boot, &start_us);
-    fclose(f);
-    if (ok != 2 || boot != app_boot_id()) return;
+    if (!time_valid() || sscanf(line, "%lu %lld", &boot, &start_us) != 2 ||
+        boot != app_boot_id()) {
+        return;
+    }
     time_t start = time(NULL) - (time_t)((esp_timer_get_time() - start_us) / 1000000);
     struct tm t;
     localtime_r(&start, &t);
     strftime(out, cap, "%Y-%m-%dT%H:%M:%S", &t);
+    f = fopen(p, "w");
+    if (f) {
+        fprintf(f, "T %s\n", out);
+        fclose(f);
+    }
 }
 
 // SESS_DONE when the session was confirmed and deleted; SESS_OFFLINE when
@@ -378,6 +391,11 @@ static void sweep(void) {
     if (n == 0) return;
 
     ESP_LOGI(TAG, "sweep: %d session folder(s)", n);
+    // Pin down the start time of every untimed session from this boot now,
+    // not only the ones this sweep gets to: it stops at the first
+    // unreachable server, and a reboot before the next one would lose them.
+    char ignored[32];
+    for (int i = 0; i < n; i++) started_at_for(folders[i], ignored, sizeof(ignored));
     ui_set_syncing(true);
     int done = 0;
     bool offline = false;
