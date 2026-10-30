@@ -60,25 +60,26 @@ copy `secrets.example.h`).
 
 ## Build and flash
 
-Toolchain: **ESP-IDF v5.5.6**, installed at `C:\esp\v5.5.6\esp-idf` with
-tools in `C:\Espressif`.
+Toolchain: **ESP-IDF v6.1**, installed with Espressif's EIM installer
+(`winget install Espressif.EIM-CLI`) at `C:\esp\v6.1\esp-idf` with tools in
+`C:\Espressif\tools`.
 
-**VS Code (ESP-IDF extension):** install the "ESP-IDF" extension
-(Espressif) and run *ESP-IDF: Configure ESP-IDF Extension* → *Use existing
-setup* → pick `C:\esp\v5.5.6\esp-idf` with tools path `C:\Espressif`. Open
-the `Hardware/firmware` folder, set the target to `esp32s3`, select the COM
+**VS Code (ESP-IDF extension):** the extension finds EIM installs by itself.
+Run *ESP-IDF: Select Current ESP-IDF Version* → `v6.1`. Open the
+`Hardware/firmware` folder, set the target to `esp32s3`, select the COM
 port, then *Build, Flash and Monitor* (the flame icon in the status bar).
 
 **Command line (PowerShell):**
 
 ```powershell
-$env:IDF_TOOLS_PATH = 'C:\Espressif'
-$env:PATH = 'C:\Espressif\tools\python;' + $env:PATH
-. C:\esp\v5.5.6\esp-idf\export.ps1
+. C:\Espressif\tools\Microsoft.v6.1.PowerShell_profile.ps1
 cd Hardware\firmware
 idf.py build
 idf.py -p COM5 flash monitor     # your port; Ctrl+] quits the monitor
 ```
+
+Upgrading ESP-IDF regenerates `sdkconfig`: delete it and `build/`, then
+build again.
 
 Logs are printed at 115200 baud on both USB ports.
 

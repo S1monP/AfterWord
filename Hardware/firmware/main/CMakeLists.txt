@@ -23,7 +23,6 @@ idf_component_register(
         esp_timer
         esp_wifi
         fatfs
-        json
         mbedtls
         nvs_flash
         sdmmc
