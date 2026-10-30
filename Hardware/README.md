@@ -109,9 +109,12 @@ Watch the monitor output for each step.
    - Listen: volume (`MIC_GAIN` in `config.h`), and no gap where one chunk
      ends and the next begins. For a quick chunk test, temporarily set
      `CHUNK_SECONDS` to 30.
-3. **Power cut.** Record ~1 minute, pull power, power on again. The log
-   should trim the last chunk, and the audio up to ~10 s before the cut
-   should be there.
+3. **Power cut.** Record ~1 minute, pull power, power on again. The last
+   chunk should hold the audio up to the last 10 s save before the cut
+   and decode cleanly. The card only learns the new file size at a save,
+   so there is usually nothing to trim; a `trimming` line appears only
+   when the cut lands mid-save. After the cold boot, expect
+   `clock set by NTP` within a few seconds of `connected`.
 4. **Upload.** Start `python app.py` in `Server/`. `SERVER_URL` in
    `config.h` must match the PC's IP (`ipconfig`). End a session: it should
    upload, flash green, and appear in the web UI.
