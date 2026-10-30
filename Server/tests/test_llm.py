@@ -212,6 +212,7 @@ class TranscriptionProviderTests(unittest.TestCase):
                 os.environ[env_name] = old
         self.assertNotIn(b'"provider"', capture["data"])
 
+    @skip_without_ffmpeg
     def test_transcribe_sends_aac_format(self):
         capture = {}
         p = TranscriptionProvider(
