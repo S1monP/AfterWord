@@ -23,6 +23,12 @@ static const char *TAG = "portal";
 
 static volatile bool s_saved;
 
+// SSIDs seen by the last scan on the add page, to warn when a typed-in one
+// is not among them.
+#define SEEN_MAX 20
+static char s_seen[SEEN_MAX][33];
+static int  s_seen_n;
+
 static const char PAGE_HEAD[] =
     "<!DOCTYPE html><html><head><meta charset='utf-8'>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
@@ -81,13 +87,15 @@ static esp_err_t page_add(httpd_req_t *req) {
         "<option value=''>-- choose a visible network --</option>");
 
     wifi_scan_config_t scan = {.show_hidden = false};
+    s_seen_n = 0;
     if (esp_wifi_scan_start(&scan, true) == ESP_OK) {
-        uint16_t n = 20;
+        uint16_t n = SEEN_MAX;
         wifi_ap_record_t *aps = calloc(n, sizeof(wifi_ap_record_t));
         if (aps && esp_wifi_scan_get_ap_records(&n, aps) == ESP_OK) {
             for (int i = 0; i < n; i++) {
                 const char *ssid = (const char *)aps[i].ssid;
                 if (!ssid[0]) continue;
+                strlcpy(s_seen[s_seen_n++], ssid, sizeof(s_seen[0]));
                 httpd_resp_sendstr_chunk(req, "<option value='");
                 send_escaped(req, ssid);
                 httpd_resp_sendstr_chunk(req, "'>");
@@ -103,6 +111,8 @@ static esp_err_t page_add(httpd_req_t *req) {
         "<input id='ssid' name='s_manual' placeholder='...or type SSID manually' maxlength='32'>"
         "<input name='p' type='password' placeholder='Wi-Fi password' maxlength='63'>"
         "<button type='submit'>Save</button></form>"
+        "<p class='empty'>Only 2.4 GHz networks show up: this device cannot use "
+        "5 GHz. For an iPhone hotspot, turn on Maximise Compatibility.</p>"
         "<a class='btn back' href='/'>Back</a>");
     httpd_resp_sendstr_chunk(req, PAGE_TAIL);
     return httpd_resp_sendstr_chunk(req, NULL);
@@ -188,9 +198,26 @@ static esp_err_t page_save(httpd_req_t *req) {
             "<a href='/add'>Back</a></body></html>");
     }
     wifi_mgr_add_network(ssid, p);
-    httpd_resp_sendstr(req,
-        "<html><body><h1>Saved!</h1>"
-        "<p>The device will now leave setup mode and connect.</p></body></html>");
+    bool seen = false;
+    for (int i = 0; i < s_seen_n && !seen; i++) seen = strcmp(s_seen[i], ssid) == 0;
+    httpd_resp_sendstr_chunk(req, PAGE_HEAD);
+    if (seen) {
+        httpd_resp_sendstr_chunk(req,
+            "<h1>Saved!</h1><p>The device will now leave setup mode and connect.</p>");
+    } else {
+        // Typed in and not in the scan: saved anyway (it may be hidden, or
+        // switched off for now), but say why it may never connect.
+        httpd_resp_sendstr_chunk(req, "<h1>Saved, but not visible</h1><p>&ldquo;");
+        send_escaped(req, ssid);
+        httpd_resp_sendstr_chunk(req,
+            "&rdquo; was not in range when this page loaded. This device only uses "
+            "2.4 GHz networks: a 5 GHz network, or a phone hotspot without "
+            "Maximise Compatibility, will never connect.</p>"
+            "<p>The device now leaves setup mode and tries it every minute. To "
+            "change it, hold the button while powering on to reopen this page.</p>");
+    }
+    httpd_resp_sendstr_chunk(req, PAGE_TAIL);
+    httpd_resp_sendstr_chunk(req, NULL);
     s_saved = true;
     return ESP_OK;
 }
