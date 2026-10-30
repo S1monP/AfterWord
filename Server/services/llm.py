@@ -127,6 +127,9 @@ class Deadline:
 class Summary:
     text: str
     key_points: list[str] = field(default_factory=list)
+    #: ``{"heading": ..., "text": ...}`` dicts, in order. Empty for
+    #: short recordings.
+    sections: list[dict] = field(default_factory=list)
     deadlines: list[Deadline] = field(default_factory=list)
     topics: list[str] = field(default_factory=list)
 
@@ -146,7 +149,9 @@ class LLMProvider:
         :class:`Classification` with kind + confidence."""
         raise NotImplementedError
 
-    def summarize(self, transcript: str) -> Summary:
+    def summarize(
+        self, transcript: str, kind: Optional[str] = None,
+    ) -> Summary:
         raise NotImplementedError
 
     def extract(self, transcript: str, kind: str) -> list[dict]:
@@ -184,7 +189,9 @@ class _NoOpProvider(LLMProvider):
         # classified but obviously not from an LLM.
         return Classification(kind="other", confidence=0.0)
 
-    def summarize(self, transcript: str) -> Summary:
+    def summarize(
+        self, transcript: str, kind: Optional[str] = None,
+    ) -> Summary:
         # Empty Summary so the pipeline persists an empty
         # summary artifact; the UI's "no summary yet" placeholder
         # shows. Matches the no-op semantic: no LLM = no work.
@@ -844,7 +851,9 @@ class TranscriptionProvider(LLMProvider):
             "TextProvider for classification"
         )
 
-    def summarize(self, transcript: str) -> Summary:
+    def summarize(
+        self, transcript: str, kind: Optional[str] = None,
+    ) -> Summary:
         raise LLMConfigError(
             "TranscriptionProvider only transcribes; use "
             "TextProvider for summarisation"
@@ -963,39 +972,43 @@ def _chunk_text(
     return chunks
 
 
-# Per-section system prompt for the map step. Tells the model it is
-# looking at a fragment, so it focuses on what's actually present
-# rather than guessing about the whole.
-_SUMMARISE_SECTION_PROMPT = (
-    "You summarise a single section of a longer audio transcript. "
-    "Reply with ONLY a JSON object (no prose, no markdown fences) with "
-    "exactly two keys: 'text' and 'key_points'.\n\n"
-    "- 'text' is 1-3 sentences summarising THIS SECTION ONLY. Do not "
-    "speculate about content outside the section.\n"
-    "- 'key_points' is a list of 0-5 short bullet points (each under 20 "
-    "words) covering the most important takeaways FROM THIS SECTION.\n\n"
-    "If the section is empty, repetitive, or contains no useful content, "
-    "return {\"text\": \"\", \"key_points\": []}."
-)
+# Map step for long recordings: notes on one part of the transcript,
+# with a heading. The synthesis step merges them into sections.
+def _section_notes_prompt(kind: Optional[str]) -> str:
+    return (
+        "You write notes on ONE part of a longer audio transcript. "
+        "Reply with ONLY a JSON object (no prose, no markdown fences) "
+        "with exactly three keys: 'heading', 'text' and 'key_points'.\n\n"
+        "- 'heading' is a short title (under 8 words) for what this "
+        "part covers.\n"
+        "- 'text' is notes on THIS PART ONLY, about 80-150 words, "
+        "keeping the specifics: names, numbers, definitions, examples, "
+        "decisions. Write less if the part has little content.\n"
+        "- 'key_points' is a list of 0-5 short bullet points (each "
+        "under 20 words) FROM THIS PART.\n\n"
+        + _KIND_GUIDE.get(kind or "other", _KIND_GUIDE["other"])
+        + "\n\nIf the part is empty, repetitive, or has no useful "
+        "content, return {\"heading\": \"\", \"text\": \"\", "
+        "\"key_points\": []}."
+    )
 
 
-# Synthesis prompt: takes the partial summaries and produces a single
-# coherent summary + deduplicated key points.
-_SYNTHESISE_SUMMARIES_PROMPT = (
-    "You are given a list of partial summaries, each describing one "
-    "section of a longer audio recording (in order). Your job is to "
-    "synthesise them into ONE coherent final summary.\n\n"
-    "Reply with ONLY a JSON object (no prose, no markdown fences) with "
-    "exactly two keys: 'text' and 'key_points'.\n\n"
-    "- 'text' is a 2-4 sentence summary of the WHOLE recording, written "
-    "in the third person, present tense. Weave the section summaries "
-    "together naturally; don't reference the sections.\n"
-    "- 'key_points' is a deduplicated list of 3-7 short bullet points "
-    "(each under 20 words) covering the most important takeaways from "
-    "the entire recording. Drop near-duplicates; keep distinct points.\n\n"
-    "If the partials are empty, return "
-    "{\"text\": \"no content\", \"key_points\": []}."
-)
+# Synthesis step: merges the notes on each part into one summary
+# without shortening them back down to a few sentences.
+def _synthesis_prompt(kind: Optional[str], transcript_chars: int) -> str:
+    return (
+        "You are given notes on consecutive parts of one audio "
+        "recording, in order. Combine them into ONE summary of the "
+        "whole recording.\n\n"
+        + _summary_shape(kind, transcript_chars)
+        + "\n\nMerge neighbouring parts on the same subject into one "
+        "section, and split a part that covers two subjects. Keep the "
+        "specifics from the notes; do not reduce them to one-line "
+        "mentions. Do not refer to 'parts' or 'notes'.\n\n"
+        "If the notes are empty, return "
+        "{\"text\": \"no content\", \"sections\": [], "
+        "\"key_points\": []}."
+    )
 
 
 # Per-section system prompt for extraction. Same shape as the
@@ -1026,47 +1039,62 @@ def _summarise_one_chunk(
     *,
     section_index: int,
     total_sections: int,
+    kind: Optional[str] = None,
 ) -> Summary:
-    """Run the per-chunk summarise LLM call. Returns an empty
+    """Run the per-chunk notes LLM call. Returns an empty
     :class:`Summary` on a parse error so the map step degrades
     gracefully (the synthesis step will just have one fewer input).
+    The part's heading is returned as the only entry of ``sections``.
     """
     user_prompt = (
-        f"This is section {section_index + 1} of {total_sections} of "
-        f"a longer transcript. Summarise it:\n\n{chunk}"
+        f"This is part {section_index + 1} of {total_sections} of "
+        f"a longer transcript. Write notes on it:\n\n{chunk}"
     )
     try:
         message = provider._chat(
-            _SUMMARISE_SECTION_PROMPT, user_prompt,
-            max_chars=_CHUNK_SIZE,
+            _section_notes_prompt(kind), user_prompt,
+            timeout=_SUMMARY_TIMEOUT, max_chars=_CHUNK_SIZE,
         )
-        return _parse_summarise_response(message.encode("utf-8"))
+        raw = message.encode("utf-8")
+        heading = _load_json_object(raw, "summary").get("heading")
+        out = _parse_summarise_response(raw)
     except LLMError:
         return Summary(text="", key_points=[])
+    out.sections = (
+        [{"heading": heading.strip(), "text": out.text}]
+        if isinstance(heading, str) and heading.strip() and out.text
+        else []
+    )
+    return out
 
 
 def _synthesise_summaries(
     provider: "TextProvider",
     partials: list[Summary],
+    *,
+    kind: Optional[str] = None,
+    transcript_chars: int = 0,
 ) -> Summary:
-    """Run the synthesis LLM call that takes the partial
-    summaries and produces the final, coherent summary.
+    """Run the synthesis LLM call that merges the notes on each
+    part into the final summary.
     """
     if not partials:
         return Summary(text="", key_points=[])
     formatted = "\n\n".join(
-        f"[Section {i + 1}] {p.text}\n  Key points: "
-        + (", ".join(p.key_points) if p.key_points else "(none)")
+        f"[Part {i + 1}"
+        + (f": {p.sections[0]['heading']}" if p.sections else "")
+        + f"]\n{p.text}\nKey points: "
+        + ("; ".join(p.key_points) if p.key_points else "(none)")
         for i, p in enumerate(partials)
     )
     user_prompt = (
-        f"Below are partial summaries of {len(partials)} sections of "
-        f"a longer recording. Synthesise them into one final summary:\n\n"
+        f"Below are notes on {len(partials)} consecutive parts of "
+        f"one recording. Combine them into one summary:\n\n"
         f"{formatted}"
     )
     message = provider._chat(
-        _SYNTHESISE_SUMMARIES_PROMPT, user_prompt,
-        max_chars=_CHUNK_SIZE,
+        _synthesis_prompt(kind, transcript_chars), user_prompt,
+        timeout=_SUMMARY_TIMEOUT, max_chars=_SYNTHESIS_MAX_CHARS,
     )
     return _parse_summarise_response(message.encode("utf-8"))
 
@@ -1183,28 +1211,93 @@ def _parse_classify_response(raw: bytes) -> Classification:
 
 # --- Summarisation (M9) --------------------------------------------------
 #
-# The summariser produces a 2-3 sentence overview plus a list of
-# key points. We keep the response shape small enough to fit
-# comfortably in the 12k-char prompt window the model is given.
+# A summary is an overview ('text'), sections with headings, and key
+# points. Its length is picked here from the transcript length, not
+# left to the model, so a two-minute memo stays short and a two-hour
+# lecture gets real notes. Its structure follows the recording kind.
 
-_SUMMARISE_SYSTEM_PROMPT = (
-    "You are a personal-note summariser. Given an audio transcript, "
-    "produce a JSON object with exactly two keys: 'text' and 'key_points'.\n\n"
-    "- 'text' is a 2-3 sentence summary of the recording. "
-    "Write in the third person, present tense, like notes you'd read back "
-    "next month to remember what was discussed.\n"
-    "- 'key_points' is a list of 3-7 short bullet points (each under 20 words) "
-    "covering the most important takeaways.\n\n"
-    "Reply with ONLY the JSON object, no prose, no markdown fences."
-)
+#: (transcript chars up to, overview, sections, key points). Speech is
+#: roughly 800 characters a minute: ~4 min, ~15 min, ~1 h, longer.
+_SUMMARY_BANDS: list[tuple[float, str, str, str]] = [
+    (3_000, "1-3 sentences", "", "0-3"),
+    (12_000, "2-4 sentences", "0-4 sections of 1-3 sentences each", "3-6"),
+    (48_000, "3-5 sentences",
+     "3-6 sections of about 50-100 words each", "5-10"),
+    (float("inf"), "4-6 sentences",
+     "5-10 sections of about 60-120 words each", "8-15"),
+]
+
+# How each kind of recording is structured.
+_KIND_GUIDE: dict[str, str] = {
+    "lecture": (
+        "This is a lecture. Write notes a student could revise from: "
+        "follow the order the material was taught and cover the main "
+        "concepts, definitions, formulas, examples and arguments, with "
+        "their specifics. If the lecturer stressed something as "
+        "important, for the exam, or for an assignment, end with a "
+        "section headed 'Exam and assignment notes'."
+    ),
+    "meeting": (
+        "This is a meeting. Order the sections: the purpose, the main "
+        "discussion points (one section per topic), 'Decisions', then "
+        "'Open questions'. Leave out any that have no content. Say who "
+        "said or decided what when the speakers can be told apart."
+    ),
+    "voice_memo": (
+        "This is a personal voice memo. Stay close to what was said. "
+        "Use sections only if it covers several separate subjects."
+    ),
+    "other": (
+        "Use sections only if the recording covers several separate "
+        "subjects."
+    ),
+}
+
+# Requests that write long summaries need more than the default 60 s.
+_SUMMARY_TIMEOUT = 180.0
+# The synthesis prompt carries the notes on every part (~1 KB each).
+_SYNTHESIS_MAX_CHARS = 60_000
 
 
-def _parse_summarise_response(raw: bytes) -> Summary:
-    """Parse the raw model output into a :class:`Summary`.
+def _summary_shape(kind: Optional[str], transcript_chars: int) -> str:
+    """The JSON shape, length and structure rules for a summary."""
+    overview, sections, points = next(
+        (o, sec, kp) for limit, o, sec, kp in _SUMMARY_BANDS
+        if transcript_chars <= limit
+    )
+    sections_rule = (
+        f"- 'sections' is a list of {sections}, in the order they came "
+        "up. Each is an object with 'heading' (a short title, under 8 "
+        "words) and 'text' (plain prose, no bullet points).\n"
+        if sections else
+        "- 'sections' is an empty list: the recording is short.\n"
+    )
+    return (
+        "Reply with ONLY a JSON object (no prose, no markdown fences) "
+        "with exactly three keys: 'text', 'sections' and "
+        "'key_points'.\n\n"
+        f"- 'text' is an overview of the whole recording in {overview}.\n"
+        + sections_rule
+        + f"- 'key_points' is a list of {points} short bullet points "
+        "(each under 20 words) with the most important takeaways.\n\n"
+        "Write in the third person, present tense, like notes you'd "
+        "read back next month. Use only what is in the transcript. "
+        "These lengths are upper limits: if the recording has little "
+        "content, write less. Never pad.\n\n"
+        + _KIND_GUIDE.get(kind or "other", _KIND_GUIDE["other"])
+    )
 
-    Same code-fence / JSON-extraction tolerance as
-    :func:`_parse_classify_response`.
-    """
+
+def _summarise_prompt(kind: Optional[str], transcript_chars: int) -> str:
+    return (
+        "You are a personal-note summariser. Given an audio transcript, "
+        "produce a summary.\n\n" + _summary_shape(kind, transcript_chars)
+    )
+
+
+def _load_json_object(raw: bytes, what: str) -> dict:
+    """Find and parse the JSON object in a model reply, tolerating
+    code fences and prose around it."""
     text = raw.decode("utf-8", errors="replace").strip()
     if text.startswith("```"):
         lines = text.splitlines()
@@ -1216,19 +1309,47 @@ def _parse_summarise_response(raw: bytes) -> Summary:
     end = text.rfind("}")
     if start == -1 or end == -1 or end <= start:
         raise LLMError(
-            f"summary response has no JSON object: {text[:200]!r}"
+            f"{what} response has no JSON object: {text[:200]!r}"
         )
     candidate = text[start:end + 1]
     try:
         obj = json.loads(candidate)
     except ValueError as exc:
         raise LLMError(
-            f"summary response is not valid JSON: {candidate[:200]!r}"
+            f"{what} response is not valid JSON: {candidate[:200]!r}"
         ) from exc
     if not isinstance(obj, dict):
         raise LLMError(
-            f"summary response is not a JSON object: {candidate[:200]!r}"
+            f"{what} response is not a JSON object: {candidate[:200]!r}"
         )
+    return obj
+
+
+def _parse_sections(raw_sections: object) -> list[dict]:
+    """Keep the well-formed ``{"heading", "text"}`` entries."""
+    if not isinstance(raw_sections, list):
+        return []
+    out = []
+    for sec in raw_sections:
+        if not isinstance(sec, dict):
+            continue
+        heading, body = sec.get("heading"), sec.get("text")
+        if isinstance(body, str) and body.strip():
+            out.append({
+                "heading": heading.strip() if isinstance(heading, str) else "",
+                "text": body.strip(),
+            })
+    return out
+
+
+def _parse_summarise_response(raw: bytes) -> Summary:
+    """Parse the raw model output into a :class:`Summary`.
+
+    Same code-fence / JSON-extraction tolerance as
+    :func:`_parse_classify_response`. ``sections`` is optional:
+    malformed entries are dropped rather than failing the summary.
+    """
+    obj = _load_json_object(raw, "summary")
     text_summary = obj.get("text", "")
     if not isinstance(text_summary, str):
         raise LLMError(
@@ -1240,7 +1361,10 @@ def _parse_summarise_response(raw: bytes) -> Summary:
             f"summary 'key_points' is not a list: {raw_points!r}"
         )
     key_points = [str(p) for p in raw_points]
-    return Summary(text=text_summary.strip(), key_points=key_points)
+    return Summary(
+        text=text_summary.strip(), key_points=key_points,
+        sections=_parse_sections(obj.get("sections")),
+    )
 
 
 # --- Extraction (M9) -----------------------------------------------------
@@ -1445,13 +1569,17 @@ class TextProvider(LLMProvider):
             content = _THINK_RE.sub("", content).strip()
         return content
 
-    def summarize(self, transcript: str) -> Summary:
-        """Produce a 2-3 sentence summary plus key points.
+    def summarize(
+        self, transcript: str, kind: Optional[str] = None,
+    ) -> Summary:
+        """Produce an overview, sections and key points, sized to the
+        transcript and structured by ``kind`` (see
+        :func:`_summary_shape`).
 
         For short transcripts (one chunk or less) this is a single
         LLM call. For long transcripts the work is split into a
-        map step (one call per chunk) followed by a reduce step
-        (one synthesis call that combines the partials). See
+        map step (notes on each chunk) followed by a reduce step
+        (one synthesis call that merges them). See
         :func:`_chunk_text` and :func:`_synthesise_summaries`.
         """
         if not isinstance(transcript, str):
@@ -1460,9 +1588,9 @@ class TextProvider(LLMProvider):
         if len(chunks) == 1:
             # Short path: one call, same shape as before.
             message = self._chat(
-                _SUMMARISE_SYSTEM_PROMPT,
+                _summarise_prompt(kind, len(transcript)),
                 f"Summarise this transcript:\n\n{transcript}",
-                max_chars=_CHUNK_SIZE,
+                timeout=_SUMMARY_TIMEOUT, max_chars=_CHUNK_SIZE,
             )
             if not isinstance(message, str):
                 raise LLMError(
@@ -1474,10 +1602,13 @@ class TextProvider(LLMProvider):
         partials = [
             _summarise_one_chunk(
                 self, chunk, section_index=i, total_sections=len(chunks),
+                kind=kind,
             )
             for i, chunk in enumerate(chunks)
         ]
-        return _synthesise_summaries(self, partials)
+        return _synthesise_summaries(
+            self, partials, kind=kind, transcript_chars=len(transcript),
+        )
 
     def extract(self, transcript: str, kind: str) -> list[dict]:
         """Pull structured items out of a transcript.

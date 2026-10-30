@@ -82,9 +82,10 @@ def _parse_summary_artifact(artifact: Optional[dict]) -> Optional[dict]:
     """Split a summary artifact into display fields.
 
     The pipeline stores the summary as a JSON payload
-    ``{"text": ..., "key_points": [...]}``. This returns a copy of
-    the artifact dict with ``content`` replaced by the human
-    summary text and a ``key_points`` list added. If the content
+    ``{"text": ..., "sections": [...], "key_points": [...]}``. This
+    returns a copy of the artifact dict with ``content`` replaced by
+    the overview text, plus ``sections`` (``{"heading", "text"}``
+    dicts; absent in older summaries) and ``key_points`` lists. If the content
     isn't parseable JSON (legacy/plain payloads), the artifact is
     returned unchanged with no key points.
     """
@@ -106,6 +107,13 @@ def _parse_summary_artifact(artifact: Optional[dict]) -> Optional[dict]:
         if isinstance(raw_points, list)
         else []
     )
+    raw_sections = payload.get("sections")
+    out["sections"] = [
+        {"heading": str(sec.get("heading") or ""),
+         "text": str(sec.get("text"))}
+        for sec in (raw_sections if isinstance(raw_sections, list) else [])
+        if isinstance(sec, dict) and str(sec.get("text") or "").strip()
+    ]
     return out
 
 

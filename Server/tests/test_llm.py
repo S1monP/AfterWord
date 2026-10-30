@@ -707,6 +707,69 @@ class TextProviderTests(unittest.TestCase):
         self.assertEqual(out.text, "A meeting about the new design.")
         self.assertEqual(out.key_points, ["Point 1", "Point 2"])
 
+    def test_summarize_parses_sections(self):
+        body = json.dumps({"choices": [{"message": {"content": json.dumps({
+            "text": "Overview.", "key_points": [],
+            "sections": [
+                {"heading": "Entropy", "text": " Notes. "},
+                {"heading": "Empty", "text": ""},       # dropped
+                "not an object",                          # dropped
+                {"text": "No heading."},
+            ],
+        })}}]}).encode("utf-8")
+        p = TextProvider("k", http_transport=_fake(200, body))
+        out = p.summarize("x", kind="lecture")
+        self.assertEqual(out.sections, [
+            {"heading": "Entropy", "text": "Notes."},
+            {"heading": "", "text": "No heading."},
+        ])
+
+    def test_summary_length_follows_transcript_and_kind(self):
+        body = json.dumps({"choices": [{"message": {
+            "content": '{"text": "t", "key_points": []}'}}]}).encode("utf-8")
+
+        def system_prompt(transcript, kind):
+            capture = {}
+            TextProvider(
+                "k", http_transport=_fake(200, body, capture),
+            ).summarize(transcript, kind=kind)
+            return json.loads(capture["data"])["messages"][0]["content"]
+
+        short = system_prompt("hello there", "voice_memo")
+        self.assertIn("'sections' is an empty list", short)
+        self.assertIn("1-3 sentences", short)
+        self.assertIn("personal voice memo", short)
+        medium = system_prompt("word " * 2000, "lecture")
+        self.assertIn("0-4 sections", medium)
+        self.assertIn("Exam and assignment notes", medium)
+        self.assertIn("Never pad", medium)
+
+    def test_long_transcript_notes_then_merges_sections(self):
+        calls = []
+
+        def transport(url, *, data=None, headers=None, timeout=60.0):
+            sent = json.loads(data)
+            calls.append(sent)
+            if "Combine them" in sent["messages"][1]["content"]:
+                content = {"text": "Whole lecture.", "key_points": ["k"],
+                           "sections": [{"heading": "A", "text": "B"}]}
+            else:
+                content = {"heading": f"Part {len(calls)}",
+                           "text": "Detailed notes.", "key_points": []}
+            return 200, json.dumps({"choices": [{"message": {
+                "content": json.dumps(content)}}]}).encode("utf-8")
+
+        p = TextProvider("k", http_transport=transport)
+        out = p.summarize("word " * 12_000, kind="lecture")   # 60k chars
+        self.assertEqual(out.text, "Whole lecture.")
+        self.assertEqual(out.sections, [{"heading": "A", "text": "B"}])
+        *notes, synthesis = calls
+        self.assertGreater(len(notes), 4)
+        self.assertIn("80-150 words", notes[0]["messages"][0]["content"])
+        # The longest band, and each part's heading reaches the merge.
+        self.assertIn("5-10 sections", synthesis["messages"][0]["content"])
+        self.assertIn("[Part 1: Part 1]", synthesis["messages"][1]["content"])
+
     def test_summarize_handles_fenced_json(self):
         body = json.dumps({
             "choices": [{

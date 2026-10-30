@@ -35,6 +35,10 @@
       <h3>Summary</h3>
       {% if summary and summary.content %}
         <div class="lr-prose">{{ summary.content }}</div>
+        {% for section in summary.sections %}
+          {% if section.heading %}<h4>{{ section.heading }}</h4>{% endif %}
+          <div class="lr-prose">{{ section.text }}</div>
+        {% endfor %}
         {% if summary.key_points %}
           <h4>Key points</h4>
           <ul class="lr-prose">

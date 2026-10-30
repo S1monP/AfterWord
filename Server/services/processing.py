@@ -8,7 +8,7 @@ post-finish pipeline, which runs the LLM steps in order:
   2. Persist the transcript as an ``artifacts`` row (kind='transcript')
   3. ``TextProvider.classify(transcript)``        → (kind, confidence)
   4. ``Storage.set_kind(...)``                    → session.kind
-  5. ``TextProvider.summarize(transcript)``       → Summary
+  5. ``TextProvider.summarize(transcript, kind)`` → Summary
   6. Persist the summary as an ``artifacts`` row (kind='summary')
   7. ``TextProvider.extract(transcript, kind)``   → list of items
   8. Persist the extraction as an ``artifacts`` row (kind='extraction')
@@ -49,7 +49,7 @@ from storage import (
 
 import timeutil
 from services.events import EventsService
-from services.llm import LLMError, LLMProvider
+from services.llm import LLMError, LLMProvider, Summary
 
 
 # Why the pipeline stopped. Used to label the ``failed`` status so the
@@ -160,7 +160,7 @@ def run_post_finish_pipeline(
       1. ``transcribing``  → call transcript_provider.transcribe(wav)
       2. ``transcribed``   → store the transcript artifact
       3. ``classifying``   → call classifier.classify(transcript)
-      4. ``summarising``   → call llm_provider.summarize(transcript)
+      4. ``summarising``   → call llm_provider.summarize(transcript, kind)
       5. ``extracting``    → call llm_provider.extract(transcript, kind)
       6. ``done``          → all artifacts persisted
 
@@ -354,6 +354,7 @@ def run_post_finish_pipeline(
                 resume_summary = Summary(
                     text=str(prior.get("text", "")),
                     key_points=list(prior.get("key_points", [])),
+                    sections=list(prior.get("sections", [])),
                 )
             except (ValueError, TypeError, AttributeError):
                 resume_summary = None  # corrupt artifact; redo
@@ -365,20 +366,11 @@ def run_post_finish_pipeline(
         )
     if resume_summary is not None:
         summary = resume_summary
-        summary_payload = json.dumps({
-            "text": summary.text,
-            "key_points": list(summary.key_points),
-        })
+        summary_payload = _summary_payload(summary)
     else:
         try:
-            summary = llm_provider.summarize(transcript)
-            # Serialise the Summary as JSON so the storage layer
-            # doesn't need to know the dataclass shape. ``text`` is
-            # the display string; ``key_points`` is a list.
-            summary_payload = json.dumps({
-                "text": summary.text,
-                "key_points": list(summary.key_points),
-            })
+            summary = llm_provider.summarize(transcript, kind=kind)
+            summary_payload = _summary_payload(summary)
         except LLMError as exc:
             return _mark_failed(
                 storage, session_id, REASON_SUMMARISE_FAILED,
@@ -449,6 +441,18 @@ def run_post_finish_pipeline(
         "summary_chars": len(summary.text),
         "extracted_items": len(items),
     }
+
+
+def _summary_payload(summary: Summary) -> str:
+    """Serialise a Summary as JSON so the storage layer doesn't need
+    to know the dataclass shape. ``text`` is the overview,
+    ``sections`` a list of ``{"heading", "text"}``, ``key_points``
+    a list of strings."""
+    return json.dumps({
+        "text": summary.text,
+        "sections": list(summary.sections),
+        "key_points": list(summary.key_points),
+    })
 
 
 def _time_match_session(storage: Storage, session_id: str) -> bool:

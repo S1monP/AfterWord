@@ -202,7 +202,7 @@ class TranscribeRouteTests(LRTestCase):
                     raise LLMError("simulated")
                 return Classification(kind=kind, confidence=conf)
 
-            def summarize(self, transcript):
+            def summarize(self, transcript, kind=None):
                 # M9: stub returns an empty Summary so the pipeline
                 # can complete without an LLM.
                 from services.llm import Summary
@@ -322,7 +322,7 @@ class TranscribeRouteTests(LRTestCase):
             def classify(self, transcript):
                 raise LLMError("first run fails")
 
-            def summarize(self, transcript):
+            def summarize(self, transcript, kind=None):
                 # M9: even on the "first run" failure path, the
                 # pipeline calls summarise after classify. Have
                 # it raise so the failure propagates.
@@ -354,7 +354,7 @@ class TranscribeRouteTests(LRTestCase):
                     kind="other", confidence=0.5,
                 )
 
-            def summarize(self, transcript):
+            def summarize(self, transcript, kind=None):
                 # M9: empty Summary so the pipeline reaches done.
                 from services.llm import Summary
                 return Summary(text="", key_points=[])
@@ -891,7 +891,7 @@ class PipelineResilienceTests(LRTestCase):
             def classify(self, t):
                 raise AssertionError("must not classify on resume")
 
-            def summarize(self, t):
+            def summarize(self, t, kind=None):
                 raise AssertionError("must not re-summarise on resume")
 
             def extract(self, t, k):
@@ -953,7 +953,7 @@ class PipelineResilienceTests(LRTestCase):
             def classify(self, t):
                 return noop_text.classify(t)
 
-            def summarize(self, t):
+            def summarize(self, t, kind=None):
                 return noop_text.summarize(t)
 
             def extract(self, t, k):

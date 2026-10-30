@@ -65,7 +65,7 @@ class _StubClassifier(LLMProvider):
             raise LLMError("simulated classifier failure")
         return Classification(kind=self._kind, confidence=self._confidence)
 
-    def summarize(self, transcript):
+    def summarize(self, transcript, kind=None):
         # M9: return an empty Summary so the pipeline can run
         # through summarising/extracting to ``done``.
         return Summary(text="", key_points=[])
@@ -383,7 +383,7 @@ class PipelineSummariseExtractTests(LRTestCase):
             def classify(self, transcript):
                 raise RuntimeError("not used")
 
-            def summarize(self, transcript):
+            def summarize(self, transcript, kind=None):
                 raise RuntimeError("not used")
 
             def extract(self, transcript, kind):
@@ -395,7 +395,7 @@ class PipelineSummariseExtractTests(LRTestCase):
             def classify(self, transcript):
                 return Classification(kind="lecture", confidence=0.8)
 
-            def summarize(self, transcript):
+            def summarize(self, transcript, kind=None):
                 return Summary(
                     text="A lecture on testing.",
                     key_points=["tests are good", "coverage matters"],
@@ -441,6 +441,57 @@ class PipelineSummariseExtractTests(LRTestCase):
                          len("A lecture on testing."))
         self.assertEqual(result["extracted_items"], 2)
 
+    def test_summary_gets_kind_keeps_sections_and_resumes(self):
+        from services.llm import (
+            Classification, LLMError, LLMProvider, Summary,
+        )
+
+        class T(LLMProvider):
+            name = "t"
+
+            def __init__(self):
+                self.summary_kinds = []
+                self.extract_fails = True
+
+            def transcribe(self, audio_path):
+                return "x"
+
+            def classify(self, transcript):
+                return Classification(kind="lecture", confidence=0.9)
+
+            def summarize(self, transcript, kind=None):
+                self.summary_kinds.append(kind)
+                return Summary(
+                    text="Overview.", key_points=["p"],
+                    sections=[{"heading": "Entropy", "text": "Notes."}],
+                )
+
+            def extract(self, transcript, kind):
+                if self.extract_fails:
+                    raise LLMError("extraction broke")
+                return []
+
+        store = self.app.config["LR_STORAGE"]
+        sid = _make_ready_session(self)
+        t = T()
+        run = lambda resume: processing.run_post_finish_pipeline(
+            store, sid, transcript_provider=t, classifier=t,
+            llm_provider=t, resume=resume,
+        )
+        self.assertFalse(run(False)["ok"])
+        self.assertEqual(t.summary_kinds, ["lecture"])
+        parsed = json.loads(store.get_artifact(sid, "summary")["content"])
+        self.assertEqual(
+            parsed["sections"], [{"heading": "Entropy", "text": "Notes."}],
+        )
+        # Resume reuses the stored summary (sections included).
+        store.set_status(sid, storage.STATUS_READY)
+        t.extract_fails = False
+        self.assertTrue(run(True)["ok"])
+        self.assertEqual(t.summary_kinds, ["lecture"])
+        parsed = json.loads(store.get_artifact(sid, "summary")["content"])
+        self.assertEqual(parsed["sections"][0]["heading"], "Entropy")
+
     def test_summarise_failure_marks_failed(self):
         from services.llm import (
             Classification, LLMError, LLMProvider,
@@ -455,7 +506,7 @@ class PipelineSummariseExtractTests(LRTestCase):
             def classify(self, transcript):
                 return Classification(kind="lecture", confidence=0.8)
 
-            def summarize(self, transcript):
+            def summarize(self, transcript, kind=None):
                 raise LLMError("upstream timed out")
 
             def extract(self, transcript, kind):
@@ -494,7 +545,7 @@ class PipelineSummariseExtractTests(LRTestCase):
             def classify(self, transcript):
                 return Classification(kind="meeting", confidence=0.7)
 
-            def summarize(self, transcript):
+            def summarize(self, transcript, kind=None):
                 return Summary(text="meeting summary", key_points=[])
 
             def extract(self, transcript, kind):
