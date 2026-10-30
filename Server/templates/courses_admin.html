@@ -45,12 +45,12 @@
       <h1 class="lr-page__title">Courses admin</h1>
       <div class="lr-page__sub">
         Create, edit, and delete the courses used by the
-        <a href="{{ url_for('ui_lectures') }}">Lectures</a> sidebar.
+        <a href="{{ url_for('pages.ui_lectures') }}">Lectures</a> sidebar.
         Bookmark this page &mdash; it is not linked from the top nav.
       </div>
     </div>
     <a class="lr-btn lr-btn--primary"
-       href="{{ url_for('ui_course_new') }}">+ Add a course</a>
+       href="{{ url_for('pages.ui_course_new') }}">+ Add a course</a>
   </header>
 
   {% if courses %}
@@ -79,9 +79,9 @@
               <td style="text-align: right;">
                 <div class="lr-courses-actions" style="justify-content: flex-end;">
                   <a class="lr-btn lr-btn--ghost"
-                     href="{{ url_for('ui_course_edit', course_id=c.id) }}">Edit</a>
+                     href="{{ url_for('pages.ui_course_edit', course_id=c.id) }}">Edit</a>
                   <form method="post"
-                        action="{{ url_for('delete_course_action', course_id=c.id) }}"
+                        action="{{ url_for('pages.delete_course_action', course_id=c.id) }}"
                         style="display: inline;"
                         onsubmit="return confirm('Delete this course? Sessions will be unlinked (not deleted).');">
                     <button class="lr-btn lr-btn--danger" type="submit">

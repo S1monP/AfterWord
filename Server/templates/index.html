@@ -13,7 +13,7 @@
   {% if kind_filter %}
     <div class="lr-row" style="margin-bottom: var(--lr-s-4); gap: var(--lr-s-3); align-items: center;">
       <span class="lr-badge lr-badge--accent">Filter: {{ kind_filter }}</span>
-      <a class="lr-card__action" href="{{ url_for('ui_index') }}">Clear filter · see all →</a>
+      <a class="lr-card__action" href="{{ url_for('pages.ui_index') }}">Clear filter · see all →</a>
     </div>
   {% endif %}
 
@@ -36,7 +36,7 @@
           {% endif %}
         </p>
         <p style="margin-top: var(--lr-s-3);">
-          <a class="lr-btn lr-btn--primary" href="{{ url_for('ui_upload') }}">Upload a recording</a>
+          <a class="lr-btn lr-btn--primary" href="{{ url_for('pages.ui_upload') }}">Upload a recording</a>
         </p>
       </div>
     </div>
@@ -58,7 +58,7 @@
           {% for s in sessions %}
             <tr>
               <td>
-                <a href="{{ url_for('ui_session', session_id=s.id) }}">
+                <a href="{{ url_for('pages.ui_session', session_id=s.id) }}">
                   {{ s.title or '(untitled)' }}
                 </a>
                 <div class="lr-mono">{{ s.id[:12] }}…</div>

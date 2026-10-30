@@ -19,10 +19,10 @@
       <div style="margin-bottom: var(--lr-s-3);">
         <a class="lr-btn lr-btn--primary"
            style="display: block; text-align: center;"
-           href="{{ url_for('ui_notes', new=1) }}">+ Add note</a>
+           href="{{ url_for('pages.ui_notes', new=1) }}">+ Add note</a>
       </div>
 
-      <form class="lr-search" method="get" action="{{ url_for('ui_notes') }}" role="search"
+      <form class="lr-search" method="get" action="{{ url_for('pages.ui_notes') }}" role="search"
             style="margin-bottom: var(--lr-s-3);">
         <input class="lr-input" type="search" name="q" value="{{ q or '' }}"
                placeholder="Search notes&hellip;" aria-label="Search notes">
@@ -30,7 +30,7 @@
       </form>
       {% if q %}
         <div style="margin: calc(-1 * var(--lr-s-2)) 0 var(--lr-s-3);">
-          <a class="lr-course__empty" href="{{ url_for('ui_notes') }}">Clear search</a>
+          <a class="lr-course__empty" href="{{ url_for('pages.ui_notes') }}">Clear search</a>
         </div>
       {% endif %}
 
@@ -40,7 +40,7 @@
           {% for n in notes %}
             <li>
               <a class="lr-course__lecture {% if note and n.id == note.id %}is-active{% endif %}"
-                 href="{{ url_for('ui_notes', note_id=n.id) }}"
+                 href="{{ url_for('pages.ui_notes', note_id=n.id) }}"
                  data-note-link="{{ n.id }}">{{ n.title }}</a>
             </li>
           {% endfor %}
@@ -86,7 +86,7 @@
             editor, or add a new one.
           </p>
           <p style="margin-top: var(--lr-s-3);">
-            <a class="lr-btn lr-btn--primary" href="{{ url_for('ui_notes', new=1) }}">+ Add note</a>
+            <a class="lr-btn lr-btn--primary" href="{{ url_for('pages.ui_notes', new=1) }}">+ Add note</a>
           </p>
         </div>
       {% endif %}

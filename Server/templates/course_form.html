@@ -9,7 +9,7 @@
 <div class="lr-page">
   <header class="lr-page__header">
     <div>
-      <a class="lr-page__back" href="{{ url_for('ui_courses_admin') }}">
+      <a class="lr-page__back" href="{{ url_for('pages.ui_courses_admin') }}">
         &larr; Courses admin
       </a>
     </div>
@@ -30,7 +30,7 @@
   {% endif %}
 
   <form method="post"
-        action="{% if mode == 'new' %}{{ url_for('create_course_action') }}{% else %}{{ url_for('update_course_action', course_id=course.id) }}{% endif %}"
+        action="{% if mode == 'new' %}{{ url_for('pages.create_course_action') }}{% else %}{{ url_for('pages.update_course_action', course_id=course.id) }}{% endif %}"
         class="lr-card lr-card--padded"
         style="margin-top: var(--lr-s-4);">
     <label class="lr-field">
@@ -61,7 +61,7 @@
 
     <div class="lr-form-actions">
       <a class="lr-btn lr-btn--ghost"
-         href="{{ url_for('ui_courses_admin') }}">Cancel</a>
+         href="{{ url_for('pages.ui_courses_admin') }}">Cancel</a>
       <button class="lr-btn lr-btn--primary" type="submit">
         {% if mode == 'new' %}Create course{% else %}Save changes{% endif %}
       </button>

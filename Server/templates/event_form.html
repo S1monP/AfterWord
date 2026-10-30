@@ -9,7 +9,7 @@
 <div class="lr-page">
   <header class="lr-page__header">
     <div>
-      <a class="lr-page__back" href="{{ url_for('ui_calendar') }}">
+      <a class="lr-page__back" href="{{ url_for('pages.ui_calendar') }}">
         &larr; Calendar
       </a>
     </div>
@@ -38,7 +38,7 @@
   {% endif %}
 
   <form method="post"
-        action="{% if mode == 'new' %}{{ url_for('create_event_action') }}{% else %}{{ url_for('update_event_action', event_id=event.id) }}{% endif %}"
+        action="{% if mode == 'new' %}{{ url_for('pages.create_event_action') }}{% else %}{{ url_for('pages.update_event_action', event_id=event.id) }}{% endif %}"
         class="lr-card lr-card--padded"
         style="margin-top: var(--lr-s-4);">
     <label class="lr-field">
@@ -115,10 +115,10 @@
 
     <div class="lr-form-actions">
       <a class="lr-btn lr-btn--ghost"
-         href="{{ url_for('ui_calendar') }}">Cancel</a>
+         href="{{ url_for('pages.ui_calendar') }}">Cancel</a>
       {% if mode == 'edit' %}
         <form method="post"
-              action="{{ url_for('delete_event_action', event_id=event.id) }}"
+              action="{{ url_for('pages.delete_event_action', event_id=event.id) }}"
               style="display: inline;"
               onsubmit="return confirm('Delete this event? This cannot be undone.');">
           <button class="lr-btn lr-btn--danger" type="submit">Delete</button>

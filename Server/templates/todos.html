@@ -19,13 +19,13 @@
       <header class="lr-card__header">
         <h2 class="lr-card__title">Tasks</h2>
         <div class="lr-card__actions">
-          <a class="lr-card__action {% if status_filter == '' %}is-active{% endif %}" href="{{ url_for('ui_todos') }}">All</a>
-          <a class="lr-card__action {% if status_filter == 'open' %}is-active{% endif %}" href="{{ url_for('ui_todos', status='open') }}">Open</a>
-          <a class="lr-card__action {% if status_filter == 'done' %}is-active{% endif %}" href="{{ url_for('ui_todos', status='done') }}">Done</a>
+          <a class="lr-card__action {% if status_filter == '' %}is-active{% endif %}" href="{{ url_for('pages.ui_todos') }}">All</a>
+          <a class="lr-card__action {% if status_filter == 'open' %}is-active{% endif %}" href="{{ url_for('pages.ui_todos', status='open') }}">Open</a>
+          <a class="lr-card__action {% if status_filter == 'done' %}is-active{% endif %}" href="{{ url_for('pages.ui_todos', status='done') }}">Done</a>
         </div>
       </header>
 
-      <form class="lr-card__quickadd" method="post" action="{{ url_for('ui_todos_quick') }}">
+      <form class="lr-card__quickadd" method="post" action="{{ url_for('pages.ui_todos_quick') }}">
         <input class="lr-input" type="text" name="title" required maxlength="200"
                placeholder="Add a task and press Enter..." autocomplete="off">
         <select class="lr-input lr-input--narrow" name="priority" aria-label="Priority" title="Priority">
@@ -78,15 +78,15 @@
         <h2 class="lr-card__title">Deadlines</h2>
         <div class="lr-card__actions">
           <a class="lr-card__action {% if deadline_status == '' %}is-active{% endif %}"
-             href="{{ url_for('ui_todos', status=(status_filter or None)) }}">All</a>
+             href="{{ url_for('pages.ui_todos', status=(status_filter or None)) }}">All</a>
           <a class="lr-card__action {% if deadline_status == 'open' %}is-active{% endif %}"
-             href="{{ url_for('ui_todos', status=(status_filter or None), deadline_status='open') }}">Open</a>
+             href="{{ url_for('pages.ui_todos', status=(status_filter or None), deadline_status='open') }}">Open</a>
           <a class="lr-card__action {% if deadline_status == 'done' %}is-active{% endif %}"
-             href="{{ url_for('ui_todos', status=(status_filter or None), deadline_status='done') }}">Done</a>
+             href="{{ url_for('pages.ui_todos', status=(status_filter or None), deadline_status='done') }}">Done</a>
         </div>
       </header>
 
-      <form class="lr-card__quickadd" method="post" action="{{ url_for('ui_todos_deadline_quick') }}">
+      <form class="lr-card__quickadd" method="post" action="{{ url_for('pages.ui_todos_deadline_quick') }}">
         <input class="lr-input" type="text" name="title" required maxlength="200"
                placeholder="Add a deadline and press Enter..." autocomplete="off">
         <input class="lr-input lr-input--narrow" type="date" name="due_at"
@@ -114,7 +114,7 @@
                 {% if d.source_ref %}
                   {% set offset_ms = d.source_offset_ms or 0 %}
                   <a class="lr-todo__title lr-todo__title--linked"
-                     href="{{ url_for('ui_session', session_id=d.source_ref) }}?t={{ offset_ms }}"
+                     href="{{ url_for('pages.ui_session', session_id=d.source_ref) }}?t={{ offset_ms }}"
                      title="Jump to this moment in the recording">{{ d.title }}</a>
                 {% else %}
                   <span class="lr-todo__title" tabindex="0">{{ d.title }}</span>

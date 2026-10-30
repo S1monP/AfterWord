@@ -37,7 +37,7 @@ from flask import (
 
 #: Endpoints the recorder calls. Token-checked; never behind the login.
 DEVICE_ENDPOINTS = frozenset({
-    "api_create_session", "api_put_chunk", "api_finish_session",
+    "sessions_api.api_create_session", "sessions_api.api_put_chunk", "sessions_api.api_finish_session",
 })
 #: Reachable without logging in.
 OPEN_ENDPOINTS = frozenset({"auth.login", "static"})

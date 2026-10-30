@@ -5,7 +5,7 @@
 
 {% block content %}
 <div class="lr-page">
-  <a class="lr-back" href="{{ url_for('ui_index') }}">&larr; All recordings</a>
+  <a class="lr-back" href="{{ url_for('pages.ui_index') }}">&larr; All recordings</a>
 
   <section class="lr-card">
     <div class="lr-row" style="align-items: flex-start; justify-content: space-between;">
@@ -44,9 +44,9 @@
       <h2>Playback</h2>
       <div class="lr-player" style="margin-top: var(--lr-s-3);">
         <audio controls preload="metadata"
-               src="{{ url_for('api_get_audio', session_id=session.id) }}"></audio>
+               src="{{ url_for('sessions_api.api_get_audio', session_id=session.id) }}"></audio>
         <a class="lr-btn"
-           href="{{ url_for('api_get_audio', session_id=session.id) }}"
+           href="{{ url_for('sessions_api.api_get_audio', session_id=session.id) }}"
            download="{{ (session.title or session.id) ~ '.aac' }}">Download</a>
         <button class="lr-btn" id="lr-rerun-ai" type="button"
                 data-session-id="{{ session.id }}">

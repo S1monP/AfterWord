@@ -113,14 +113,14 @@
       </div>
     </div>
     <a class="lr-btn lr-btn--primary"
-       href="{{ url_for('ui_event_new') }}">+ New event</a>
+       href="{{ url_for('pages.ui_event_new') }}">+ New event</a>
   </header>
 
   <nav class="lr-row"
        style="justify-content: space-between; align-items: center;
               margin-top: var(--lr-s-3);">
     <a class="lr-btn lr-btn--ghost"
-       href="{{ url_for('ui_calendar', year=prev_year, month=prev_month) }}">
+       href="{{ url_for('pages.ui_calendar', year=prev_year, month=prev_month) }}">
       &larr; Previous
     </a>
     <h2 style="font-size: var(--lr-fs-xl); margin: 0;">
@@ -129,10 +129,10 @@
     <div style="display: flex; gap: var(--lr-s-2);">
       {% if not is_current_month %}
         <a class="lr-btn lr-btn--ghost"
-           href="{{ url_for('ui_calendar') }}">Today</a>
+           href="{{ url_for('pages.ui_calendar') }}">Today</a>
       {% endif %}
       <a class="lr-btn lr-btn--ghost"
-         href="{{ url_for('ui_calendar', year=next_year, month=next_month) }}">
+         href="{{ url_for('pages.ui_calendar', year=next_year, month=next_month) }}">
         Next &rarr;
       </a>
     </div>
@@ -153,12 +153,12 @@
                     {% if is_today %}lr-cal__cell--today{% endif %}"
              role="gridcell">
           <a class="lr-cal__daynum"
-             href="{{ url_for('ui_event_new') }}?date={{ iso_date }}">
+             href="{{ url_for('pages.ui_event_new') }}?date={{ iso_date }}">
             {{ cell.date.day }}
           </a>
           {% for ev in cell.events %}
             <a class="lr-cal__chip lr-cal__chip--{{ ev.kind }}"
-               href="{{ url_for('ui_event_edit', event_id=ev.id) }}"
+               href="{{ url_for('pages.ui_event_edit', event_id=ev.id) }}"
                title="{{ ev.title }}">
               <strong>{{ ev.starts_at|local_time }}</strong>
               {{ ev.title }}
@@ -173,7 +173,7 @@
                 {% for ev in cell.events[3:] %}
                   <li>
                     <a class="lr-cal__chip lr-cal__chip--{{ ev.kind }}"
-                       href="{{ url_for('ui_event_edit', event_id=ev.id) }}"
+                       href="{{ url_for('pages.ui_event_edit', event_id=ev.id) }}"
                        title="{{ ev.title }}">
                       <strong>{{ ev.starts_at|local_time }}</strong>
                       {{ ev.title }}
@@ -199,7 +199,7 @@
         calendar or another scheduling tool. Events are added as meetings;
         re-classify individual events afterwards.
       </p>
-      <form method="post" action="{{ url_for('api_import_events_ics') }}"
+      <form method="post" action="{{ url_for('events_api.api_import_events_ics') }}"
             enctype="multipart/form-data">
         <div class="lr-row" style="gap: var(--lr-s-3); align-items: center;
                                     flex-wrap: wrap;">
@@ -221,7 +221,7 @@
   // inline without a hard reload.
   document.addEventListener("DOMContentLoaded", function () {
     var form = document.querySelector(
-      "form[action='{{ url_for('api_import_events_ics') }}']"
+      "form[action='{{ url_for('events_api.api_import_events_ics') }}']"
     );
     if (!form) return;
     form.addEventListener("submit", function (e) {

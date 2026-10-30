@@ -23,7 +23,7 @@
     {% if selected_session.full_audio_size %}
       <section class="lr-detail__player">
         <audio controls preload="metadata"
-               src="{{ url_for('api_get_audio', session_id=selected_session.id) }}"></audio>
+               src="{{ url_for('sessions_api.api_get_audio', session_id=selected_session.id) }}"></audio>
       </section>
     {% else %}
       <section class="lr-detail__player lr-empty-card">

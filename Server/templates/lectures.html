@@ -37,7 +37,7 @@
               {% for lec in group.lectures %}
                 <li>
                   <a class="lr-course__lecture"
-                     href="{{ url_for('ui_lectures') }}?session={{ lec.id }}"
+                     href="{{ url_for('pages.ui_lectures') }}?session={{ lec.id }}"
                      data-session-link="{{ lec.id }}"
                      data-kind="lecture">{{ lec.title or '(untitled)' }}</a>
                 </li>
@@ -61,7 +61,7 @@
               {% for lec in uncategorised_lectures %}
                 <li>
                   <a class="lr-course__lecture"
-                     href="{{ url_for('ui_lectures') }}?session={{ lec.id }}"
+                     href="{{ url_for('pages.ui_lectures') }}?session={{ lec.id }}"
                      data-session-link="{{ lec.id }}"
                      data-kind="lecture">{{ lec.title or '(untitled)' }}</a>
                 </li>
@@ -72,7 +72,7 @@
       {% else %}
         <p style="color: var(--lr-text-faint); font-size: var(--lr-fs-sm); margin: 0;">
           No courses yet. Go to
-          <a href="{{ url_for('ui_courses_admin') }}">courses admin</a>
+          <a href="{{ url_for('pages.ui_courses_admin') }}">courses admin</a>
           to add one.
         </p>
       {% endif %}

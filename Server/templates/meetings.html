@@ -22,7 +22,7 @@
           {% for m in meetings %}
             <li>
               <a class="lr-course__lecture {% if m.id == selected_id %}is-active{% endif %}"
-                 href="{{ url_for('ui_meetings') }}?session={{ m.id }}"
+                 href="{{ url_for('pages.ui_meetings') }}?session={{ m.id }}"
                  data-session-link="{{ m.id }}"
                  data-kind="meeting">{{ m.title or '(untitled)' }}</a>
             </li>
