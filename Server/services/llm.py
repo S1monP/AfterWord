@@ -245,10 +245,12 @@ DEFAULT_TRANSCRIBE_PROVIDER_OPTIONS: dict = {
     "azure": {"diarization": {"enabled": True}},
 }
 
-#: OpenRouter rejects transcription request bodies over 50 MB with
-#: a bare 413. We refuse to send anything close to that and raise
-#: a clear, actionable error instead.
-MAX_TRANSCRIBE_BODY_BYTES = 45 * 1024 * 1024
+#: OpenRouter takes JSON bodies up to 50 MB, but only OpenAI and Groq
+#: models accept inline audio over 25 MB; other providers (Azure,
+#: which serves the default model) reject it. We refuse to send
+#: anything over this and raise a clear, actionable error instead
+#: (the piece is then halved). A 25-minute MP3 piece is ~8 MB.
+MAX_TRANSCRIBE_BODY_BYTES = 24 * 1024 * 1024
 
 #: Valid recording kinds the classifier can return.
 #: Mirrors ``storage.RECORDING_KINDS`` and
@@ -724,6 +726,29 @@ class TranscriptionProvider(LLMProvider):
             )
         return out
 
+    def _stt_audio(
+        self, piece_path: Path, mp3: Path,
+    ) -> tuple[Path, Optional[str]]:
+        """The file and format label to send for one piece.
+
+        Pieces stay AAC (stream-copied from storage) for segmenting
+        and halving; only the upload is MP3, written to ``mp3`` in
+        the work dir, because the Azure-hosted model rejects AAC
+        (see ``transcode.transcode_for_stt``). Without ffmpeg, or
+        for input ffmpeg cannot decode, the piece is sent as it is,
+        labelled with its sniffed format.
+        """
+        if not self._probe_ffmpeg():
+            return piece_path, None
+        from services import transcode as _tx
+        try:
+            _tx.transcode_for_stt(
+                piece_path, mp3, ffmpeg_path=self._ffmpeg_path,
+            )
+        except _tx.TranscodeError:
+            return piece_path, None
+        return mp3, "mp3"
+
     @staticmethod
     def _is_transient_failure(exc: Exception) -> bool:
         """Whether halving the piece could plausibly help: upstream
@@ -755,7 +780,10 @@ class TranscriptionProvider(LLMProvider):
         failing the whole recording.
         """
         try:
-            raw = self._post_transcription(piece_path)
+            raw = self._post_transcription(*self._stt_audio(
+                piece_path,
+                Path(work_dir) / f"stt-{depth}-{int(offset * 1000)}.mp3",
+            ))
         except (LLMError, urllib.error.URLError, OSError) as exc:
             duration = self._probe_duration(piece_path)
             if (

@@ -213,17 +213,39 @@ class TranscriptionProviderTests(unittest.TestCase):
         self.assertNotIn(b'"provider"', capture["data"])
 
     @skip_without_ffmpeg
-    def test_transcribe_sends_aac_format(self):
+    def test_transcribe_sends_mp3(self):
+        """Stored AAC is sent as MP3: Azure's MAI Transcribe rejects
+        AAC (raw or in M4A) with a bare "Provider returned 400"."""
         capture = {}
         p = TranscriptionProvider(
-            "k", http_transport=_fake(200, b'{"text": "x"}', capture),
+            "k", ffmpeg_path=FFMPEG_PATH,
+            http_transport=_fake(200, b'{"text": "x"}', capture),
+        )
+        import base64
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            audio = _write_aac(d, seconds=0.5)
+            p.transcribe(audio)
+        payload = json.loads(capture["data"])
+        self.assertEqual(payload["input_audio"]["format"], "mp3")
+        head = base64.b64decode(payload["input_audio"]["data"])[:3]
+        self.assertTrue(head == b"ID3" or head[0] == 0xFF, head)
+
+    @skip_without_ffmpeg
+    def test_transcribe_leaves_no_files_next_to_the_recording(self):
+        """A short recording is sent whole; its MP3 copy goes in the
+        temp work dir, never into the session folder."""
+        p = TranscriptionProvider(
+            "k", ffmpeg_path=FFMPEG_PATH,
+            http_transport=_fake(200, b'{"text": "x"}'),
         )
         import tempfile
         from pathlib import Path
         with tempfile.TemporaryDirectory() as d:
             audio = _write_aac(d, seconds=0.5)
+            before = sorted(Path(d).iterdir())
             p.transcribe(audio)
-        self.assertIn(b'"format": "aac"', capture["data"])
+            self.assertEqual(sorted(Path(d).iterdir()), before)
 
     def test_transcribe_unsniffable_audio_defaults_to_aac(self):
         capture = {}
@@ -384,22 +406,25 @@ class TranscriptionProviderTests(unittest.TestCase):
                 "segments": [],
             }).encode("utf-8"))
 
-        # 40 MB of WAV (8 kHz → ~43 min) as a single piece -> ~53 MB
-        # body, over the 45 MB cap -> cut in half -> two ~27 MB
-        # bodies, fine.
+        # 10 min of 8 kHz WAV sent whole -> ~2.4 MB of 32 kbps MP3,
+        # ~3.2 MB as base64. With the cap lowered to 2.5 MB it is cut
+        # in half -> two ~1.6 MB bodies, fine.
+        from unittest import mock
+        cap = int(2.5 * 1024 * 1024)
         p = TranscriptionProvider(
             "k", chunk_max_seconds=10 ** 9, ffmpeg_path=FFMPEG_PATH,
             http_transport=transport,
         )
         import tempfile
         from pathlib import Path
-        with tempfile.TemporaryDirectory() as d:
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(llm, "MAX_TRANSCRIBE_BODY_BYTES", cap):
             audio = _write_real_wav(
-                Path(d), rate=8000, data=b"\x00" * (40 * 1024 * 1024),
+                Path(d), rate=8000, data=b"\x00" * (600 * 8000 * 2),
             )
             text = p.transcribe(audio)
         self.assertEqual(len(bodies), 2)
-        self.assertTrue(all(b < 45 * 1024 * 1024 for b in bodies))
+        self.assertTrue(all(b < cap for b in bodies))
         self.assertEqual(text, "part 1\npart 2")
 
     def test_transcribe_verbose_json_with_speakers(self):

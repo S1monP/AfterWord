@@ -33,6 +33,10 @@ AAC_SAMPLE_RATE = 22050
 AAC_CHANNELS = 1
 AAC_BITRATE = "64k"
 
+#: Audio sent to the transcription API (see :func:`transcode_for_stt`).
+STT_SAMPLE_RATE = 16000
+STT_BITRATE = "32k"
+
 
 class TranscodeError(Exception):
     """Raised when transcoding fails for any reason.
@@ -272,22 +276,18 @@ def decode_duration(
 # Transcode
 # ---------------------------------------------------------------------------
 
-def transcode_to_aac(
+def _encode(
     src: Path,
     dst: Path,
+    codec_args: list[str],
+    expect_kind: str,
     *,
-    ffmpeg_path: str = "ffmpeg",
-    sample_rate: int = AAC_SAMPLE_RATE,
-    channels: int = AAC_CHANNELS,
-    bitrate: str = AAC_BITRATE,
-    timeout_sec: int = 600,
+    ffmpeg_path: str,
+    timeout_sec: int,
 ) -> int:
-    """Convert ``src`` to canonical AAC-LC (ADTS) at ``dst``.
-
-    Returns the size of the produced file. Raises
-    :class:`TranscodeError` on any failure with a stable ``reason``
-    code.
-    """
+    """Run ffmpeg ``src`` -> ``dst`` with ``codec_args`` and check
+    the result sniffs as ``expect_kind``. Returns the output size;
+    raises :class:`TranscodeError` with a stable ``reason`` code."""
     if not src.exists() or src.stat().st_size == 0:
         raise TranscodeError(TranscodeError.REASON_BAD_INPUT,
                              "empty or missing file")
@@ -310,11 +310,7 @@ def transcode_to_aac(
         ffmpeg_path,
         "-y", "-hide_banner", "-loglevel", "error",
         "-i", str(src),
-        "-ar", str(sample_rate),
-        "-ac", str(channels),
-        "-c:a", "aac",
-        "-b:a", bitrate,
-        "-f", "adts",
+        *codec_args,
         str(dst),
     ]
 
@@ -345,14 +341,59 @@ def transcode_to_aac(
             "ffmpeg produced no usable output",
         )
 
-    # Verify the output is really ADTS AAC.
-    if sniff_format(dst).kind != "aac":
+    if sniff_format(dst).kind != expect_kind:
         raise TranscodeError(
             TranscodeError.REASON_FFMPEG_FAILED,
-            "ffmpeg output is not AAC",
+            f"ffmpeg output is not {expect_kind.upper()}",
         )
 
     return dst.stat().st_size
+
+
+def transcode_to_aac(
+    src: Path,
+    dst: Path,
+    *,
+    ffmpeg_path: str = "ffmpeg",
+    sample_rate: int = AAC_SAMPLE_RATE,
+    channels: int = AAC_CHANNELS,
+    bitrate: str = AAC_BITRATE,
+    timeout_sec: int = 600,
+) -> int:
+    """Convert ``src`` to canonical AAC-LC (ADTS) at ``dst``.
+
+    Returns the size of the produced file. Raises
+    :class:`TranscodeError` on any failure with a stable ``reason``
+    code.
+    """
+    return _encode(
+        src, dst,
+        ["-ar", str(sample_rate), "-ac", str(channels),
+         "-c:a", "aac", "-b:a", bitrate, "-f", "adts"],
+        "aac", ffmpeg_path=ffmpeg_path, timeout_sec=timeout_sec,
+    )
+
+
+def transcode_for_stt(
+    src: Path,
+    dst: Path,
+    *,
+    ffmpeg_path: str = "ffmpeg",
+    timeout_sec: int = 600,
+) -> int:
+    """Encode ``src`` as the MP3 sent to the transcription API.
+
+    Azure's MAI Transcribe (behind OpenRouter) rejects AAC, raw ADTS
+    or in M4A, with a bare "Provider returned 400"; MP3 is accepted.
+    16 kHz mono is what speech models work at, and 32 kbps keeps a
+    25-minute piece near 6 MB, well under the 25 MB inline cap.
+    """
+    return _encode(
+        src, dst,
+        ["-ar", str(STT_SAMPLE_RATE), "-ac", "1",
+         "-c:a", "libmp3lame", "-b:a", STT_BITRATE, "-f", "mp3"],
+        "mp3", ffmpeg_path=ffmpeg_path, timeout_sec=timeout_sec,
+    )
 
 
 def ingest_audio_file(
