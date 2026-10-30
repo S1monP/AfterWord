@@ -872,6 +872,31 @@ class DefaultProvidersTests(unittest.TestCase):
         self.assertIsInstance(providers["transcript"], TranscriptionProvider)
         self.assertIsInstance(providers["text"], TextProvider)
 
+    def test_models_default_and_env_override(self):
+        from unittest import mock
+        env = {llm.TRANSCRIPTION_MODEL_ENV: "", llm.TEXT_MODEL_ENV: ""}
+        with mock.patch.dict(os.environ, env):
+            t = TranscriptionProvider("k")
+            x = TextProvider("k")
+        self.assertEqual(t.name, llm.TRANSCRIPTION_MODEL)
+        self.assertEqual(x.name, llm.TEXT_MODEL)
+        env = {llm.TRANSCRIPTION_MODEL_ENV: "openai/whisper-1",
+               llm.TEXT_MODEL_ENV: "some/text-model"}
+        capture = {}
+        with mock.patch.dict(os.environ, env):
+            t = TranscriptionProvider("k")
+            x = TextProvider(
+                "k", http_transport=_fake(200, b'{"choices": []}', capture),
+            )
+        # name is what artifacts record as the generating model.
+        self.assertEqual(t.name, "openai/whisper-1")
+        self.assertEqual(x.name, "some/text-model")
+        try:
+            x.classify("hello")
+        except llm.LLMError:
+            pass                    # empty choices; only the request matters
+        self.assertEqual(json.loads(capture["data"])["model"], "some/text-model")
+
     def test_get_provider_default(self):
         providers = llm.default_providers(
             transcription_key="", text_key="",
