@@ -105,10 +105,38 @@ static bool make_session_folder(void) {
     return true;
 }
 
+// Waits up to `ms` for an aborted upload to let go of the card.
+static bool wait_sync_idle(uint32_t ms) {
+    for (uint32_t t = 0; sync_busy() && t < ms; t += 50) vTaskDelay(pdMS_TO_TICKS(50));
+    return !sync_busy();
+}
+
+// A card read failed during an upload (seen on the breadboard while WiFi
+// transmits hard).  If the card no longer answers, a fresh init usually
+// brings it back; if not, show the error now rather than an idle green
+// that fails at the next recording.
+static void check_sd_card(void) {
+    if (storage_card_ok()) {
+        ESP_LOGW(TAG, "SD card answers; uploads resume at the next retry");
+    } else if (storage_remount() == ESP_OK) {
+        ESP_LOGW(TAG, "SD card remounted; uploads resume at the next retry");
+    } else {
+        enter_error("SD card not responding");
+        return;                                 // no more sweeps until restart
+    }
+    sync_clear_sd_error();
+}
+
 static void session_start(void) {
     sync_set_recording(true);                   // abort any upload, keep SD/radio free
     wifi_mgr_set_recording(true);
-    if (!make_session_folder()) {
+    // Creating the folder is the first write since the card was last used;
+    // if it fails the card may have dropped out: one fresh init, then retry.
+    bool ok = make_session_folder();
+    if (!ok && wait_sync_idle(3000) && storage_remount() == ESP_OK) {
+        ok = make_session_folder();
+    }
+    if (!ok) {
         sync_set_recording(false);
         wifi_mgr_set_recording(false);
         enter_error("cannot create session folder");
@@ -232,6 +260,9 @@ void app_main(void) {
         btn_event_t ev;
         if (xQueueReceive(buttons, &ev, pdMS_TO_TICKS(250)) == pdTRUE) {
             handle_button(ev);
+        }
+        if (s_state == ST_IDLE && sync_sd_error() && !sync_busy()) {
+            check_sd_card();
         }
         if (s_state == ST_RECORDING || s_state == ST_PAUSED) {
             if (audio_has_error()) {

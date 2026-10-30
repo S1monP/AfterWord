@@ -23,3 +23,11 @@ void sync_kick(uint32_t delay_ms);
 
 // Recording on: abort any sweep and start no new ones.  Off: allow again.
 void sync_set_recording(bool recording);
+
+// True while a sweep is reading the card / uploading.
+bool sync_busy(void);
+
+// True after a card read failed during a sweep.  The sweep stops and no
+// new one starts until main has checked the card and cleared it.
+bool sync_sd_error(void);
+void sync_clear_sd_error(void);

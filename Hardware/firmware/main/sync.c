@@ -38,6 +38,8 @@ static TaskHandle_t   s_task;
 static volatile bool  s_abort;
 static volatile bool  s_recording;
 static volatile int64_t s_next_us = INT64_MAX;
+static volatile bool  s_busy;           // a sweep is running
+static volatile bool  s_sd_error;       // a card read failed during the sweep
 
 // The chunks of one session as found on the SD.  Local numbers can have
 // gaps; the server wants 1..N, so server index k is the k-th smallest local
@@ -94,7 +96,10 @@ static int http_request(esp_http_client_method_t method, const char *path,
         while (sent < len) {
             if (s_abort) goto out;              // server keeps a torn chunk; re-PUT fixes it
             size_t n = fread(block, 1, sizeof(block), file);
-            if (n == 0) goto out;
+            if (n == 0) {                       // shorter than stat() said: the card
+                s_sd_error = true;
+                goto out;
+            }
             for (size_t off = 0; off < n;) {
                 int w = esp_http_client_write(c, block + off, n - off);
                 if (w <= 0) goto out;
@@ -142,12 +147,22 @@ static bool announced(int status) { return status == 200 || status == 201; }
 static int put_chunk(const char *id, int index, const char *file_path) {
     static char resp[RESP_CAP];
     struct stat st;
-    if (stat(file_path, &st) != 0 || st.st_size == 0) {
-        ESP_LOGW(TAG, "chunk %d: %s missing or empty", index, file_path);
+    // list_chunks() just saw this file, so failing to stat or open it means
+    // the card, not the file.
+    if (stat(file_path, &st) != 0) {
+        ESP_LOGW(TAG, "chunk %d: cannot read %s", index, file_path);
+        s_sd_error = true;
+        return -1;
+    }
+    if (st.st_size == 0) {
+        ESP_LOGW(TAG, "chunk %d: %s is empty", index, file_path);
         return -1;
     }
     FILE *f = fopen(file_path, "rb");
-    if (!f) return -1;
+    if (!f) {
+        s_sd_error = true;
+        return -1;
+    }
     char path[128];
     snprintf(path, sizeof(path), "/api/v1/sessions/%s/chunks/%d", id, index);
     int64_t t0 = esp_timer_get_time();
@@ -210,7 +225,10 @@ static bool list_chunks(const char *folder, session_chunks_t *sc) {
     sc->legacy_wav = false;
     sc->overflow = false;
     DIR *d = opendir(folder);
-    if (!d) return false;
+    if (!d) {                                       // sweep() just listed it
+        s_sd_error = true;
+        return false;
+    }
     struct dirent *e;
     while ((e = readdir(d)) != NULL) {
         if (storage_chunk_number(e->d_name, ".wav")) sc->legacy_wav = true;
@@ -344,7 +362,10 @@ static sess_result_t sync_session(const char *folder) {
 
 static void sweep(void) {
     DIR *root = opendir(SD_MOUNT);
-    if (!root) return;
+    if (!root) {
+        s_sd_error = true;
+        return;
+    }
     static char folders[MAX_FOLDERS][300];
     int n = 0;
     struct dirent *e;
@@ -360,7 +381,7 @@ static void sweep(void) {
     ui_set_syncing(true);
     int done = 0;
     bool offline = false;
-    for (int i = 0; i < n && !s_abort && !offline; i++) {
+    for (int i = 0; i < n && !s_abort && !offline && !s_sd_error; i++) {
         sess_result_t r = sync_session(folders[i]);
         if (r == SESS_DONE) {
             done++;
@@ -370,6 +391,7 @@ static void sweep(void) {
     }
     ui_set_syncing(false);
     if (s_abort) ESP_LOGI(TAG, "sweep aborted (recording started)");
+    if (s_sd_error) ESP_LOGE(TAG, "SD card read failed; sweep stopped, card check pending");
     if (offline) {
         ESP_LOGW(TAG, "server %s unreachable; next try in %lu min", SERVER_URL,
                  (unsigned long)(SYNC_RETRY_INTERVAL_MS / 60000));
@@ -389,11 +411,18 @@ static void sync_task(void *arg) {
             continue;                               // re-evaluate the deadline
         }
         s_next_us = esp_timer_get_time() + (int64_t)SYNC_RETRY_INTERVAL_MS * 1000;
-        if (s_recording || !wifi_mgr_connected()) continue;
+        // Skip while a card error is still waiting for main to check it.
+        if (s_recording || !wifi_mgr_connected() || s_sd_error) continue;
         s_abort = false;
+        s_busy = true;
         sweep();
+        s_busy = false;
     }
 }
+
+bool sync_busy(void) { return s_busy; }
+bool sync_sd_error(void) { return s_sd_error; }
+void sync_clear_sd_error(void) { s_sd_error = false; }
 
 void sync_start(void) {
     // 12 KB: an HTTPS (TLS) handshake needs the headroom.

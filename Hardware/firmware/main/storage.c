@@ -19,8 +19,10 @@
 static const char *TAG = "storage";
 
 static sdmmc_card_t *s_card;
+static bool          s_bus_ready;
 
-esp_err_t storage_mount(void) {
+static esp_err_t bus_init(void) {
+    if (s_bus_ready) return ESP_OK;         // the bus outlives remounts
     spi_bus_config_t bus = {
         .mosi_io_num = PIN_SD_MOSI,
         .miso_io_num = PIN_SD_MISO,
@@ -34,6 +36,13 @@ esp_err_t storage_mount(void) {
         ESP_LOGE(TAG, "SPI bus init failed: %s", esp_err_to_name(err));
         return err;
     }
+    s_bus_ready = true;
+    return ESP_OK;
+}
+
+esp_err_t storage_mount(void) {
+    esp_err_t err = bus_init();
+    if (err != ESP_OK) return err;
 
     sdspi_device_config_t slot = SDSPI_DEVICE_CONFIG_DEFAULT();
     slot.gpio_cs = PIN_SD_CS;
@@ -60,7 +69,21 @@ esp_err_t storage_mount(void) {
         }
         ESP_LOGW(TAG, "mount at %d kHz failed: %s", freqs_khz[i], esp_err_to_name(err));
     }
+    s_card = NULL;
     return err;
+}
+
+esp_err_t storage_remount(void) {
+    ESP_LOGW(TAG, "remounting the SD card");
+    if (s_card) {
+        esp_vfs_fat_sdcard_unmount(SD_MOUNT, s_card);   // also drops the SPI device
+        s_card = NULL;
+    }
+    return storage_mount();
+}
+
+bool storage_card_ok(void) {
+    return s_card != NULL && sdmmc_get_status(s_card) == ESP_OK;
 }
 
 bool storage_exists(const char *path) {
