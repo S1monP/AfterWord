@@ -11,6 +11,7 @@ import services.events  # noqa: F401
 import services.classification  # noqa: F401
 import timeutil
 from services import transcode
+from web.pipeline import set_kind_by_hand
 from web.common import (
     _STATUS_LABEL,
     _estimate_duration_seconds,
@@ -202,6 +203,64 @@ def ui_meetings() -> Any:
         selected_id=selected_id,
         **right_ctx,
     )
+
+
+def _is_other(sess) -> bool:
+    """Shown on the Other page: kind 'other', or finished without a
+    kind (no speech, or processing failed)."""
+    return sess.kind == "other" or (
+        sess.kind is None and sess.status in ("done", "failed")
+    )
+
+
+@bp.get("/other")
+def ui_other() -> Any:
+    """Two-pane page for recordings that are not lectures, meetings
+    or voice memos, with a control to classify each by hand."""
+    store = current_app_storage()
+    recordings = [s for s in store.list_sessions() if _is_other(s)]
+    selected_id = request.args.get("session", "").strip()
+    right_ctx = (_selected_session_context(selected_id)
+                 if selected_id else {
+                     "selected_session": None,
+                     "summary": None, "transcript": None,
+                 })
+    right_ctx.update(
+        show_classify=True,
+        kinds=sorted(services.classification.VALID_KINDS),
+        kind_label="Recording",
+    )
+    if request.headers.get("X-Soft-Nav") == "1":
+        return render_template("_session_detail.html", **right_ctx)
+    return render_template(
+        "other.html",
+        recordings=recordings,
+        selected_id=selected_id,
+        **right_ctx,
+    )
+
+
+# Where a session lives once it has this kind.
+_KIND_PAGES = {
+    "lecture": ("pages.ui_lectures", "session"),
+    "meeting": ("pages.ui_meetings", "session"),
+    "voice_memo": ("pages.ui_notes", "memo"),
+    "other": ("pages.ui_other", "session"),
+}
+
+
+@bp.post("/sessions/<session_id>/kind")
+def ui_set_kind(session_id: str) -> Any:
+    """Form post from the Other page: classify by hand, then go to
+    the page the recording now belongs on."""
+    if current_app_storage().get_session(session_id) is None:
+        abort(404)
+    kind = request.form.get("kind", "").strip()
+    if kind not in _KIND_PAGES:
+        abort(400)
+    set_kind_by_hand(current_app._get_current_object(), session_id, kind)
+    endpoint, param = _KIND_PAGES[kind]
+    return redirect(url_for(endpoint, **{param: session_id}))
 
 
 @bp.get("/notes")

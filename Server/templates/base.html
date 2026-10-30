@@ -33,6 +33,8 @@
            class="{% if request.endpoint == 'pages.ui_meetings' %}is-active{% endif %}">Meetings</a>
         <a href="{{ url_for('pages.ui_notes') }}"
            class="{% if request.endpoint == 'pages.ui_notes' %}is-active{% endif %}">Notes</a>
+        <a href="{{ url_for('pages.ui_other') }}"
+           class="{% if request.endpoint == 'pages.ui_other' %}is-active{% endif %}">Other</a>
         <a href="{{ url_for('pages.ui_todos') }}"
            class="{% if request.endpoint == 'pages.ui_todos' %}is-active{% endif %}">Todos</a>
         <a href="{{ url_for('pages.ui_calendar') }}"

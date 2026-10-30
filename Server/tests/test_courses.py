@@ -562,3 +562,68 @@ class CoursesServiceIsRealTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class OtherUiTests(LRTestCase):
+    def _finished(self, kind, status="done", detail=None):
+        sid = _seed_session(self, status=status, kind=kind)
+        store = self.app.config["LR_STORAGE"]
+        store.full_audio_path(sid).write_bytes(self.make_wav(b"\x00" * 256))
+        if detail:
+            with store._tx() as conn:
+                conn.execute(
+                    "UPDATE sessions SET status_detail = ? WHERE id = ?",
+                    (detail, sid),
+                )
+        return sid
+
+    def test_lists_other_and_unclassified_finished(self):
+        other = self._finished("other")
+        silent = self._finished(None, detail="no speech detected")
+        broken = self._finished(None, status="failed", detail="boom")
+        lecture = self._finished("lecture")
+        memo = self._finished("voice_memo")
+        body = self.client.get("/other").get_data(as_text=True)
+        for sid in (other, silent, broken):
+            self.assertIn(f"?session={sid}", body)
+        for sid in (lecture, memo):
+            self.assertNotIn(f"?session={sid}", body)
+        self.assertIn("no speech detected", body)
+        detail = self.client.get(
+            f"/other?session={silent}", headers={"X-Soft-Nav": "1"},
+        ).get_data(as_text=True)
+        self.assertIn("Classify as", detail)
+        self.assertIn("No speech detected.", detail)
+
+    def test_classify_moves_and_rewrites_summary(self):
+        store = self.app.config["LR_STORAGE"]
+        sid = self._finished("other")
+        store.add_artifact(sid, "transcript", "some lecture talk")
+        store.add_artifact(sid, "summary", '{"text": "old other summary"}')
+        resp = self.client.post(f"/sessions/{sid}/kind",
+                                data={"kind": "lecture"})
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(resp.location.endswith(f"/lectures?session={sid}"))
+        sess = store.get_session(sid)
+        self.assertEqual(sess.kind, "lecture")
+        self.assertEqual(sess.status, "done")
+        # The summary was written again (no-op provider in tests).
+        self.assertNotIn("old other summary",
+                         store.get_artifact(sid, "summary")["content"])
+
+    def test_classify_as_memo_goes_to_notes_without_summary(self):
+        store = self.app.config["LR_STORAGE"]
+        sid = self._finished("other")
+        store.add_artifact(sid, "transcript", "buy milk")
+        store.add_artifact(sid, "summary", '{"text": "old"}')
+        resp = self.client.post(f"/sessions/{sid}/kind",
+                                data={"kind": "voice_memo"})
+        self.assertTrue(resp.location.endswith(f"/notes?memo={sid}"))
+        self.assertIsNone(store.get_artifact(sid, "summary"))
+        self.assertEqual(store.get_session(sid).status, "done")
+
+    def test_classify_rejects_unknown_kind(self):
+        sid = self._finished("other")
+        resp = self.client.post(f"/sessions/{sid}/kind", data={"kind": "x"})
+        self.assertEqual(resp.status_code, 400)
+        resp = self.client.post("/sessions/nope/kind", data={"kind": "other"})
+        self.assertEqual(resp.status_code, 404)

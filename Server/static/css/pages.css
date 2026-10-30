@@ -384,6 +384,18 @@
   padding: var(--lr-s-4);
 }
 .lr-detail__header { margin-bottom: var(--lr-s-3); }
+.lr-detail__classify {
+  display: flex;
+  align-items: center;
+  gap: var(--lr-s-2);
+  margin-top: var(--lr-s-2);
+  font-size: var(--lr-fs-sm);
+}
+.lr-other__tag {
+  margin-left: var(--lr-s-1);
+  font-size: var(--lr-fs-xs);
+  color: var(--lr-text-faint);
+}
 .lr-detail__title {
   font-size: var(--lr-fs-xl);
   margin: 0 0 var(--lr-s-2);

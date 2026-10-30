@@ -29,6 +29,7 @@ from web.pipeline import (
     _PIPELINE_LOCK,
     _RETRYABLE_STATUSES,
     _enqueue_pipeline,
+    set_kind_by_hand,
 )
 
 
@@ -316,9 +317,9 @@ def api_set_kind(session_id: str) -> Any:
 
     Body: ``{"kind": "lecture" | "voice_memo" | "meeting" | "other" | null}``
 
-    Returns the updated session. This is the only classification
-    route that does real work in Tier 1; the LLM-driven
-    ``classify`` route lands in Tier 3.
+    Returns the updated session. A finished session that changes
+    kind gets its summary rewritten for the new kind (see
+    :func:`web.pipeline.set_kind_by_hand`).
     """
     store = current_app_storage()
     if store.get_session(session_id) is None:
@@ -338,12 +339,11 @@ def api_set_kind(session_id: str) -> Any:
                 f"{sorted(storage.Storage.RECORDING_KINDS)} or null"
             ),
         }), 400
-    confidence = payload.get("confidence")
-    if confidence is None and kind is not None:
-        # Manual override â€” treat as full confidence.
-        confidence = 1.0
     try:
-        sess = store.set_kind(session_id, kind, confidence=confidence)
+        sess = set_kind_by_hand(
+            current_app._get_current_object(), session_id, kind,
+            confidence=payload.get("confidence"),
+        )
     except ValueError as exc:
         return jsonify({"error": "invalid_payload", "detail": str(exc)}), 400
     return jsonify({"session": sess.to_api_dict()})

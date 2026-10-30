@@ -67,6 +67,47 @@ def _enqueue_pipeline(app: Flask, session_id: str) -> bool:
     return True
 
 
+def set_kind_by_hand(
+    app: Flask, session_id: str, kind, *, confidence=None,
+) -> storage.Session:
+    """Set a session's kind by hand (``confidence`` defaults to 1.0).
+
+    When a finished session with a transcript changes kind, its
+    summary and extraction are dropped and the pipeline runs again
+    with ``resume=True``: the transcript is reused and the kind is
+    kept, so only the text steps run, now written for the new kind
+    (a voice memo just loses them). Raises ``ValueError`` for a bad
+    kind, like :meth:`storage.Storage.set_kind`.
+    """
+    store = app.config["LR_STORAGE"]
+    before = store.get_session(session_id)
+    if confidence is None and kind is not None:
+        confidence = 1.0
+    sess = store.set_kind(session_id, kind, confidence=confidence)
+    if (
+        kind is not None
+        and before is not None
+        and before.kind != kind
+        and before.status == storage.STATUS_DONE
+        and store.get_artifact(session_id, "transcript") is not None
+    ):
+        store.delete_artifacts(session_id, "summary", "extraction")
+        store.set_status(session_id, storage.STATUS_READY, status_detail=None)
+        if app.config.get("LR_PIPELINE_BACKGROUND", True):
+            _enqueue_pipeline(app, session_id)
+        else:
+            providers = app.config["LR_LLM_PROVIDERS"]
+            processing.run_post_finish_pipeline(
+                store, session_id,
+                transcript_provider=providers.get("transcript"),
+                classifier=providers.get("text"),
+                llm_provider=providers.get("text"),
+                resume=True,
+            )
+        sess = store.get_session(session_id)
+    return sess
+
+
 def _start_pipeline_worker(app: Flask) -> threading.Thread:
     """Start the FIFO pipeline worker for ``app`` (one per app, daemon).
 
