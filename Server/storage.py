@@ -79,14 +79,18 @@ ALLOWED_STATUS_TRANSITIONS: dict[str, frozenset[str]] = {
     STATUS_READY: frozenset({
         STATUS_TRANSCRIBING, STATUS_FAILED,
     }),
+    # ``done`` straight after transcribing: no speech in the recording.
     STATUS_TRANSCRIBING: frozenset({
-        STATUS_TRANSCRIBED, STATUS_FAILED, STATUS_READY,
+        STATUS_TRANSCRIBED, STATUS_DONE, STATUS_FAILED, STATUS_READY,
     }),
+    # ``done`` after transcribed/classifying: a voice memo, which keeps
+    # only its transcript (no summary or extraction).
     STATUS_TRANSCRIBED: frozenset({
-        STATUS_CLASSIFYING, STATUS_SUMMARISING, STATUS_FAILED, STATUS_READY,
+        STATUS_CLASSIFYING, STATUS_SUMMARISING, STATUS_DONE,
+        STATUS_FAILED, STATUS_READY,
     }),
     STATUS_CLASSIFYING: frozenset({
-        STATUS_SUMMARISING, STATUS_FAILED, STATUS_READY,
+        STATUS_SUMMARISING, STATUS_DONE, STATUS_FAILED, STATUS_READY,
     }),
     STATUS_SUMMARISING: frozenset({
         STATUS_EXTRACTING, STATUS_FAILED, STATUS_READY,
@@ -1427,6 +1431,25 @@ class Storage:
             "model": model,
             "created_at": now,
         }
+
+    def delete_artifacts(self, session_id: str, *kinds: str) -> None:
+        """Remove a session's artifacts of the given kinds (and their
+        search rows). Used when a summary no longer fits the session,
+        e.g. after its kind was changed by hand."""
+        placeholders = ",".join("?" for _ in kinds)
+        params = (session_id, *kinds)
+        with self._tx() as conn:
+            conn.execute(
+                "DELETE FROM artifacts_fts WHERE artifact_id IN "
+                "(SELECT id FROM artifacts WHERE session_id = ? "
+                f"AND kind IN ({placeholders}))",
+                params,
+            )
+            conn.execute(
+                "DELETE FROM artifacts WHERE session_id = ? "
+                f"AND kind IN ({placeholders})",
+                params,
+            )
 
     # --- notes ------------------------------------------------------------
 

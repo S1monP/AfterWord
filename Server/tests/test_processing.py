@@ -241,7 +241,7 @@ class PipelineFailureTests(LRTestCase):
         self.assertIsNotNone(artifact)
         self.assertEqual(artifact["content"], "transcript text")
 
-    def test_empty_transcript_marks_failed(self):
+    def test_empty_transcript_ends_done_no_speech(self):
         class EmptyTranscribe(LLMProvider):
             name = "empty"
 
@@ -251,16 +251,52 @@ class PipelineFailureTests(LRTestCase):
             def classify(self, transcript):
                 raise RuntimeError("not reached")
 
+        store = self.app.config["LR_STORAGE"]
         sid = _make_ready_session(self)
         result = processing.run_post_finish_pipeline(
-            self.app.config["LR_STORAGE"], sid,
+            store, sid,
             transcript_provider=EmptyTranscribe(),
             classifier=_StubClassifier(),
         )
-        self.assertFalse(result["ok"])
-        self.assertEqual(
-            result["reason"], processing.REASON_TRANSCRIBE_FAILED,
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["no_speech"])
+        sess = store.get_session(sid)
+        self.assertEqual(sess.status, storage.STATUS_DONE)
+        self.assertEqual(sess.status_detail, processing.NO_SPEECH_DETAIL)
+        self.assertIsNone(sess.kind)
+        self.assertIsNone(store.get_artifact(sid, "transcript"))
+
+    def test_voice_memo_keeps_only_transcript(self):
+        class Memo(LLMProvider):
+            name = "memo"
+
+            def transcribe(self, audio_path):
+                return "buy milk"
+
+            def classify(self, transcript):
+                return Classification(kind="voice_memo", confidence=0.9)
+
+            def summarize(self, transcript, kind=None):
+                raise RuntimeError("memos are not summarised")
+
+            def extract(self, transcript, kind):
+                raise RuntimeError("memos are not extracted")
+
+        store = self.app.config["LR_STORAGE"]
+        sid = _make_ready_session(self)
+        # A summary from an earlier run (as another kind) is removed.
+        store.add_artifact(sid, "summary", '{"text": "old"}')
+        result = processing.run_post_finish_pipeline(
+            store, sid, transcript_provider=Memo(), classifier=Memo(),
+            llm_provider=Memo(),
         )
+        self.assertTrue(result["ok"])
+        self.assertEqual(store.get_session(sid).status, storage.STATUS_DONE)
+        self.assertEqual(
+            store.get_artifact(sid, "transcript")["content"], "buy milk",
+        )
+        self.assertIsNone(store.get_artifact(sid, "summary"))
+        self.assertIsNone(store.get_artifact(sid, "extraction"))
 
 
 class PipelineSessionStateTests(LRTestCase):

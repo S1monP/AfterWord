@@ -63,6 +63,11 @@ REASON_NO_AUDIO = "no_audio"
 REASON_NO_TRANSCRIPT = "no_transcript"
 REASON_NOT_READY = "not_ready"
 
+#: ``status_detail`` of a session that finished with no speech in it.
+NO_SPEECH_DETAIL = "no speech detected"
+#: Kinds that keep only their transcript: no summary, no extraction.
+TRANSCRIPT_ONLY_KINDS = frozenset({"voice_memo"})
+
 
 def _set_status(
     storage: Storage,
@@ -252,10 +257,23 @@ def run_post_finish_pipeline(
                 f"transcribe: {exc!r}",
             )
     if not isinstance(transcript, str) or not transcript.strip():
-        return _mark_failed(
-            storage, session_id, REASON_TRANSCRIBE_FAILED,
-            "transcribe: empty result",
-        )
+        # Silence (or noise) is a finished recording, not a failure:
+        # it ends done, without a kind, so it shows on the Other page.
+        try:
+            storage.delete_artifacts(
+                session_id, "transcript", "summary", "extraction",
+            )
+            _set_status(
+                storage, session_id, STATUS_DONE,
+                status_detail=NO_SPEECH_DETAIL,
+            )
+        except _PipelineError as exc:
+            return _mark_failed(
+                storage, session_id, "bad_transition", str(exc),
+            )
+        return {"ok": True, "kind": None, "confidence": None,
+                "no_speech": True, "transcript_chars": 0,
+                "summary_chars": 0, "extracted_items": 0}
     # 4. Persist the transcript as an artifact and bump status.
     #    (Skipped on resume — the artifact is already there.)
     if resume_transcript is None:
@@ -335,6 +353,20 @@ def run_post_finish_pipeline(
             )
     else:
         kind, confidence = sess_now.kind, sess_now.kind_confidence
+
+    # 6b. Voice memos keep only their transcript (shown on the Notes
+    # page with the audio), so they skip the summary and extraction.
+    if kind in TRANSCRIPT_ONLY_KINDS:
+        try:
+            storage.delete_artifacts(session_id, "summary", "extraction")
+            _set_status(storage, session_id, STATUS_DONE)
+        except _PipelineError as exc:
+            return _mark_failed(
+                storage, session_id, "bad_transition", str(exc),
+            )
+        return {"ok": True, "kind": kind, "confidence": confidence,
+                "transcript_chars": len(transcript),
+                "summary_chars": 0, "extracted_items": 0}
 
     # 7. Summarise. A no-op summariser (no API key configured)
     # returns an empty Summary, so this step always succeeds in
