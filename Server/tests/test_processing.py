@@ -83,7 +83,7 @@ def _make_ready_session(case):
     sid = uuid.uuid4().hex
     store = case.app.config["LR_STORAGE"]
     store.upsert_session(
-        sid, title="test", expected_count=1,
+        sid, title="rec_2026-01-15T1000", expected_count=1,
         sample_rate=22050, channels=1, bits_per_sample=32,
         started_at="2026-01-15T10:00:00Z",
     )
@@ -276,6 +276,9 @@ class PipelineFailureTests(LRTestCase):
             def classify(self, transcript):
                 return Classification(kind="voice_memo", confidence=0.9)
 
+            def suggest_title(self, transcript):
+                return "Milk"
+
             def summarize(self, transcript, kind=None):
                 raise RuntimeError("memos are not summarised")
 
@@ -297,6 +300,7 @@ class PipelineFailureTests(LRTestCase):
         )
         self.assertIsNone(store.get_artifact(sid, "summary"))
         self.assertIsNone(store.get_artifact(sid, "extraction"))
+        self.assertEqual(store.get_session(sid).title, "Milk")
 
 
 class PipelineSessionStateTests(LRTestCase):
@@ -613,6 +617,72 @@ class PipelineSummariseExtractTests(LRTestCase):
         )
 
 
+class _TopicClassifier(_StubClassifier):
+    """A classifier whose summary carries a title."""
+
+    def __init__(self, topic, **kw):
+        super().__init__(**kw)
+        self.topic = topic
+
+    def summarize(self, transcript, kind=None):
+        return Summary(text="overview", key_points=[], title=self.topic)
+
+
+class RecordingTitleTests(LRTestCase):
+    def _device_named(self):
+        sid = _make_ready_session(self)
+        with self.app.config["LR_STORAGE"]._tx() as conn:
+            conn.execute("UPDATE sessions SET title = ? WHERE id = ?",
+                         ("rec_2026-01-15T1000", sid))
+        return sid
+
+    def _run(self, sid, classifier):
+        return processing.run_post_finish_pipeline(
+            self.app.config["LR_STORAGE"], sid,
+            transcript_provider=_StubTranscript("some talk"),
+            classifier=classifier,
+        )
+
+    def test_ai_topic_names_the_recording(self):
+        store = self.app.config["LR_STORAGE"]
+        sid = self._device_named()
+        self._run(sid, _TopicClassifier("Entropy and the second law"))
+        sess = store.get_session(sid)
+        self.assertEqual(sess.title, "Entropy and the second law")
+        self.assertEqual(sess.title_source, "ai")
+        # The title is kept with the summary, for resumed runs.
+        self.assertEqual(
+            json.loads(store.get_artifact(sid, "summary")["content"])["title"],
+            "Entropy and the second law",
+        )
+
+    def test_name_given_by_hand_is_kept(self):
+        store = self.app.config["LR_STORAGE"]
+        sid = _make_ready_session(self)
+        store.set_session_title(sid, "My name", source="user")
+        self._run(sid, _TopicClassifier("Something else"))
+        sess = store.get_session(sid)
+        self.assertEqual(sess.title, "My name")
+        self.assertEqual(sess.title_source, "user")
+
+    def test_no_topic_keeps_device_name(self):
+        store = self.app.config["LR_STORAGE"]
+        sid = self._device_named()
+        self._run(sid, _StubClassifier())
+        sess = store.get_session(sid)
+        self.assertEqual(sess.title, "rec_2026-01-15T1000")
+        self.assertIsNone(sess.title_source)
+
+    def test_real_name_from_the_api_is_kept(self):
+        store = self.app.config["LR_STORAGE"]
+        sid = _make_ready_session(self)
+        with store._tx() as conn:
+            conn.execute("UPDATE sessions SET title = 'Linear Algebra' "
+                         "WHERE id = ?", (sid,))
+        self._run(sid, _TopicClassifier("Something else"))
+        self.assertEqual(store.get_session(sid).title, "Linear Algebra")
+
+
 class CalendarTimeMatchTests(LRTestCase):
     """Pipeline step 0: calendar time-match sets kind/course/title
     from the matched event without any AI; the AI classifier is only
@@ -660,8 +730,9 @@ class CalendarTimeMatchTests(LRTestCase):
         self.assertEqual(sess.kind, "lecture")
         self.assertEqual(sess.kind_confidence, 1.0)
         self.assertEqual(sess.course_id, course_id)
-        # Course name + human date, per the naming convention.
-        self.assertEqual(sess.title, "CS101 · 15 Jan 2026")
+        # The course name (pages show the date on its own line).
+        self.assertEqual(sess.title, "CS101")
+        self.assertEqual(sess.title_source, "calendar")
         # The AI classifier was never called.
         self.assertEqual(classifier.calls, [])
         # The calendar shows the pairing.
@@ -669,6 +740,18 @@ class CalendarTimeMatchTests(LRTestCase):
             ev.id,
         ).matched_session_id
         self.assertEqual(matched, sid)
+
+    def test_matched_lecture_is_course_and_topic(self):
+        sid, ev, course_id = self._seed(
+            event_title="Lecture 5", event_kind="lecture",
+            starts_at="2026-01-15T10:05:00Z",
+            ends_at="2026-01-15T11:00:00Z",
+            course="CS101",
+        )
+        self._run(sid, _TopicClassifier("Hash tables"))
+        sess = self.app.config["LR_STORAGE"].get_session(sid)
+        self.assertEqual(sess.title, "CS101: Hash tables")
+        self.assertEqual(sess.title_source, "calendar")
 
     def test_time_match_without_course_uses_event_name(self):
         sid, ev, _ = self._seed(
@@ -680,7 +763,7 @@ class CalendarTimeMatchTests(LRTestCase):
         self.assertTrue(result["ok"])
         sess = self.app.config["LR_STORAGE"].get_session(sid)
         self.assertIsNone(sess.course_id)
-        self.assertEqual(sess.title, "Lecture 5 · 15 Jan 2026")
+        self.assertEqual(sess.title, "Lecture 5")
         self.assertEqual(classifier.calls, [])
 
     def test_time_match_meeting_uses_event_name(self):
@@ -695,7 +778,7 @@ class CalendarTimeMatchTests(LRTestCase):
         sess = self.app.config["LR_STORAGE"].get_session(sid)
         self.assertEqual(sess.kind, "meeting")
         # Meetings are named after the event, not the course.
-        self.assertEqual(sess.title, "Weekly sync · 15 Jan 2026")
+        self.assertEqual(sess.title, "Weekly sync")
         self.assertEqual(classifier.calls, [])
 
     def test_no_match_uses_ai_fallback(self):

@@ -39,7 +39,7 @@
                   <a class="lr-course__lecture"
                      href="{{ url_for('pages.ui_lectures') }}?session={{ lec.id }}"
                      data-session-link="{{ lec.id }}"
-                     data-kind="lecture">{{ lec.title or '(untitled)' }}</a>
+                     data-kind="lecture">{{ lec|rec_title }}<span class="lr-rec__when">{{ lec|rec_when }}</span></a>
                 </li>
               {% else %}
                 <li class="lr-course__empty">No lectures yet</li>
@@ -63,7 +63,7 @@
                   <a class="lr-course__lecture"
                      href="{{ url_for('pages.ui_lectures') }}?session={{ lec.id }}"
                      data-session-link="{{ lec.id }}"
-                     data-kind="lecture">{{ lec.title or '(untitled)' }}</a>
+                     data-kind="lecture">{{ lec|rec_title }}<span class="lr-rec__when">{{ lec|rec_when }}</span></a>
                 </li>
               {% endfor %}
             </ul>

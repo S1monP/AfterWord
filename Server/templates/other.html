@@ -25,7 +25,7 @@
               <a class="lr-course__lecture {% if r.id == selected_id %}is-active{% endif %}"
                  href="{{ url_for('pages.ui_other') }}?session={{ r.id }}"
                  data-session-link="{{ r.id }}">
-                {{ r.title or '(untitled)' }}
+                {{ r|rec_title }}<span class="lr-rec__when">{{ r|rec_when }}</span>
                 {% if r.status == 'failed' %}<span class="lr-other__tag">failed</span>
                 {% elif r.status_detail %}<span class="lr-other__tag">{{ r.status_detail }}</span>{% endif %}
               </a>

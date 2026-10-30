@@ -24,7 +24,7 @@
               <a class="lr-course__lecture {% if m.id == selected_id %}is-active{% endif %}"
                  href="{{ url_for('pages.ui_meetings') }}?session={{ m.id }}"
                  data-session-link="{{ m.id }}"
-                 data-kind="meeting">{{ m.title or '(untitled)' }}</a>
+                 data-kind="meeting">{{ m|rec_title }}<span class="lr-rec__when">{{ m|rec_when }}</span></a>
             </li>
           {% endfor %}
         </ul>

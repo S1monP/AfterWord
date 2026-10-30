@@ -106,7 +106,7 @@
               <ul class="lr-dash-list">
                 {% for s in recent_lectures %}
                   <li>
-                    <a href="{{ url_for('pages.ui_lectures', session=s.id) }}">{{ s.title or '(untitled)' }}</a>
+                    <a href="{{ url_for('pages.ui_lectures', session=s.id) }}">{{ s|rec_title }}<span class="lr-rec__when">{{ s|rec_when }}</span></a>
                     <span class="lr-dash-list__meta lr-mono">{{ s.started_at|local_date }}</span>
                   </li>
                 {% endfor %}
@@ -134,7 +134,7 @@
               <ul class="lr-dash-list">
                 {% for s in recent_meetings %}
                   <li>
-                    <a href="{{ url_for('pages.ui_meetings', session=s.id) }}">{{ s.title or '(untitled)' }}</a>
+                    <a href="{{ url_for('pages.ui_meetings', session=s.id) }}">{{ s|rec_title }}<span class="lr-rec__when">{{ s|rec_when }}</span></a>
                     <span class="lr-dash-list__meta lr-mono">{{ s.started_at|local_date }}</span>
                   </li>
                 {% endfor %}

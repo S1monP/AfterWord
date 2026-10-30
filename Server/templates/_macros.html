@@ -10,6 +10,18 @@
   {% endif %}
 {%- endmacro %}
 
+{# Pencil that opens an inline rename form for a recording. #}
+{% macro rename_form(sess, name) -%}
+  <details class="lr-rename">
+    <summary title="Rename" aria-label="Rename">&#9998;</summary>
+    <form method="post" action="{{ url_for('pages.ui_set_title', session_id=sess.id) }}">
+      <input class="lr-input" name="title" value="{{ name }}" maxlength="200" required>
+      <input type="hidden" name="next" value="{{ request.full_path }}">
+      <button class="lr-btn" type="submit">Save</button>
+    </form>
+  </details>
+{%- endmacro %}
+
 {% macro priority_dot(priority) -%}
   <span class="lr-priority lr-priority--{{ priority or 'low' }}"></span>
 {%- endmacro %}

@@ -36,6 +36,7 @@ import traceback
 from typing import Optional
 
 from storage import (
+    title_is_placeholder,
     STATUS_CLASSIFYING,
     STATUS_DONE,
     STATUS_EXTRACTING,
@@ -358,6 +359,11 @@ def run_post_finish_pipeline(
     # page with the audio), so they skip the summary and extraction.
     if kind in TRANSCRIPT_ONLY_KINDS:
         try:
+            topic = llm_provider.suggest_title(transcript)
+        except Exception:  # pragma: no cover  (a title is optional)
+            topic = ""
+        _apply_title(storage, session_id, topic)
+        try:
             storage.delete_artifacts(session_id, "summary", "extraction")
             _set_status(storage, session_id, STATUS_DONE)
         except _PipelineError as exc:
@@ -387,6 +393,7 @@ def run_post_finish_pipeline(
                     text=str(prior.get("text", "")),
                     key_points=list(prior.get("key_points", [])),
                     sections=list(prior.get("sections", [])),
+                    title=str(prior.get("title", "")),
                 )
             except (ValueError, TypeError, AttributeError):
                 resume_summary = None  # corrupt artifact; redo
@@ -427,6 +434,7 @@ def run_post_finish_pipeline(
                 storage, session_id, REASON_SUMMARISE_FAILED,
                 f"persist summary: {exc!r}",
             )
+    _apply_title(storage, session_id, summary.title)
 
     # 8. Extract. Same pattern: LLM error → mark failed;
     # otherwise persist as an ``extraction`` artifact.
@@ -481,10 +489,31 @@ def _summary_payload(summary: Summary) -> str:
     ``sections`` a list of ``{"heading", "text"}``, ``key_points``
     a list of strings."""
     return json.dumps({
+        "title": summary.title,
         "text": summary.text,
         "sections": list(summary.sections),
         "key_points": list(summary.key_points),
     })
+
+
+def _apply_title(storage: Storage, session_id: str, topic: str) -> None:
+    """Name a recording from its AI topic. A recording matched to a
+    calendar event is "<course or event>: <topic>"; one renamed by
+    hand keeps its name. Never fails the pipeline."""
+    try:
+        sess = storage.get_session(session_id)
+        if sess is None or not title_is_placeholder(sess):
+            return
+        event = storage.event_for_session(session_id)
+        base = _calendar_base(event, storage) if event else None
+        title = f"{base}: {topic}" if base and topic else (base or topic)
+        if title:
+            storage.set_session_title(
+                session_id, title[:200],
+                source="calendar" if base else "ai",
+            )
+    except Exception:  # pragma: no cover  (defensive)
+        traceback.print_exc()
 
 
 def _time_match_session(storage: Storage, session_id: str) -> bool:
@@ -516,12 +545,14 @@ def _time_match_session(storage: Storage, session_id: str) -> bool:
                 storage.set_session_course(session_id, event.course_id)
             except (KeyError, ValueError):
                 pass  # course vanished; leave the session unassigned
-        try:
-            storage.set_session_title(
-                session_id, _event_title_for_session(event, storage, sess),
-            )
-        except (KeyError, ValueError):
-            pass
+        if title_is_placeholder(sess):
+            try:
+                storage.set_session_title(
+                    session_id, _calendar_base(event, storage),
+                    source="calendar",
+                )
+            except (KeyError, ValueError):
+                pass
         events.match_session(event.id, session_id, 1.0)
         return True
     except Exception:  # pragma: no cover  (defensive)
@@ -529,42 +560,15 @@ def _time_match_session(storage: Storage, session_id: str) -> bool:
         return False
 
 
-def _event_title_for_session(
-    event, storage: Storage, session,
-) -> str:
-    """Human name for a time-matched recording.
-
-    Lectures are named after their course ("CS101 · 15 Oct 2026"),
-    other events after the event itself ("Weekly sync · 15 Oct
-    2026"). If the exact title already exists on another session,
-    the recording start time disambiguates ("… · 14:05").
-    """
-    try:
-        date_part = _fmt_event_date(event.starts_at)
-    except (ValueError, AttributeError):
-        date_part = ""
+def _calendar_base(event, storage: Storage) -> str:
+    """The calendar part of a matched recording's name: the course for
+    a lecture, else the event's own title. The date is not part of the
+    name; pages show it on a line of its own."""
     if event.kind == "lecture" and event.course_id:
         course = storage.get_course(event.course_id)
-        base = course.name if course else event.title
-    else:
-        base = event.title
-    title = f"{base} · {date_part}" if date_part else base
-    taken = any(
-        s.id != session.id and s.title == title
-        for s in storage.list_sessions()
-    )
-    started = timeutil.to_local(session.started_at)
-    if taken and started is not None:
-        title = f"{title} · {started:%H:%M}"
-    return title
-
-
-def _fmt_event_date(iso_ts: str) -> str:
-    """Format an ISO-8601 timestamp as a local date ("15 Oct 2026")."""
-    dt = timeutil.to_local(iso_ts)
-    if dt is None:
-        raise ValueError(f"not a timestamp: {iso_ts!r}")
-    return dt.strftime("%d %b %Y")
+        if course:
+            return course.name
+    return event.title
 
 
 def _mark_failed(

@@ -130,6 +130,8 @@ class Summary:
     #: ``{"heading": ..., "text": ...}`` dicts, in order. Empty for
     #: short recordings.
     sections: list[dict] = field(default_factory=list)
+    #: A short name for the recording ("Entropy and the second law").
+    title: str = ""
     deadlines: list[Deadline] = field(default_factory=list)
     topics: list[str] = field(default_factory=list)
 
@@ -156,6 +158,11 @@ class LLMProvider:
 
     def extract(self, transcript: str, kind: str) -> list[dict]:
         raise NotImplementedError
+
+    def suggest_title(self, transcript: str) -> str:
+        """A short name for a recording that gets no summary (voice
+        memos). Providers without a text model return ""."""
+        return ""
 
 
 class _NoOpProvider(LLMProvider):
@@ -1294,7 +1301,7 @@ def _language_rule(language: Optional[str] = None) -> str:
     is decided first (see :meth:`TextProvider._output_language`)."""
     language = language or _summary_languages()[0]
     return (
-        f"Write everything (overview, headings, notes, key points, "
+        f"Write everything (title, overview, headings, notes, key points, "
         f"items) in {language}, translating if the transcript is in "
         f"another language. Keep names as spoken."
     )
@@ -1334,8 +1341,11 @@ def _summary_shape(
     )
     return (
         "Reply with ONLY a JSON object (no prose, no markdown fences) "
-        "with exactly three keys: 'text', 'sections' and "
+        "with exactly four keys: 'title', 'text', 'sections' and "
         "'key_points'.\n\n"
+        "- 'title' names what the recording is about in 2-7 words, like "
+        "a note's title (\"Entropy and the second law\"). No date, no "
+        "quotes, no 'Lecture on' or 'Meeting about'.\n"
         f"- 'text' is an overview of the whole recording in {overview}.\n"
         + sections_rule
         + f"- 'key_points' is a list of {points} short bullet points "
@@ -1429,7 +1439,24 @@ def _parse_summarise_response(raw: bytes) -> Summary:
     return Summary(
         text=text_summary.strip(), key_points=key_points,
         sections=_parse_sections(obj.get("sections")),
+        title=_clean_title(obj.get("title")),
     )
+
+
+def _clean_title(raw: object) -> str:
+    """A model-written title, trimmed to one tidy line ("" if none)."""
+    if not isinstance(raw, str):
+        return ""
+    title = " ".join(raw.split()).strip(" \"'.")
+    return title[:120]
+
+
+_TITLE_PROMPT = (
+    "Name this voice memo. Reply with ONLY a JSON object (no prose, no "
+    "markdown fences) with one key, 'title': 2-7 words saying what the "
+    "memo is about, like a note's title (\"Ideas for the cabin trip\"). "
+    "No date, no quotes."
+)
 
 
 # --- Extraction (M9) -----------------------------------------------------
@@ -1661,6 +1688,24 @@ class TextProvider(LLMProvider):
                 self._languages.clear()
             self._languages[key] = _pick_language(detected)
         return self._languages[key]
+
+    def suggest_title(self, transcript: str) -> str:
+        """A short title for a recording that gets no summary, in the
+        language picked by :meth:`_output_language`. "" on failure."""
+        if not isinstance(transcript, str) or not transcript.strip():
+            return ""
+        language = self._output_language(transcript)
+        try:
+            reply = self._chat(
+                _TITLE_PROMPT + "\n\n" + _language_rule(language),
+                transcript, max_chars=_CHUNK_SIZE,
+            )
+            return _clean_title(
+                _load_json_object(str(reply).encode("utf-8"), "title")
+                .get("title"),
+            )
+        except LLMError:
+            return ""
 
     def summarize(
         self, transcript: str, kind: Optional[str] = None,

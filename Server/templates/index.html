@@ -59,7 +59,7 @@
             <tr>
               <td>
                 <a href="{{ url_for('pages.ui_session', session_id=s.id) }}">
-                  {{ s.title or '(untitled)' }}
+                  {{ s|rec_title }}<span class="lr-rec__when">{{ s|rec_when }}</span>
                 </a>
                 <div class="lr-mono">{{ s.id[:12] }}…</div>
               </td>

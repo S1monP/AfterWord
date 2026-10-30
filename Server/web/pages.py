@@ -11,6 +11,7 @@ import services.events  # noqa: F401
 import services.classification  # noqa: F401
 import timeutil
 from services import transcode
+from auth import _safe_next
 from web.pipeline import set_kind_by_hand
 from web.common import (
     _STATUS_LABEL,
@@ -247,6 +248,22 @@ _KIND_PAGES = {
     "voice_memo": ("pages.ui_notes", "memo"),
     "other": ("pages.ui_other", "session"),
 }
+
+
+@bp.post("/sessions/<session_id>/title")
+def ui_set_title(session_id: str) -> Any:
+    """Form post from a recording's pencil: rename it. A name given by
+    hand is never replaced by the AI or the calendar."""
+    store = current_app_storage()
+    if store.get_session(session_id) is None:
+        abort(404)
+    try:
+        store.set_session_title(
+            session_id, request.form.get("title", ""), source="user",
+        )
+    except ValueError:
+        abort(400)
+    return redirect(_safe_next(request.form.get("next")))
 
 
 @bp.post("/sessions/<session_id>/kind")

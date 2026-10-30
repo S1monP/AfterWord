@@ -8,16 +8,12 @@
 {% if selected_session %}
   <article class="lr-detail" data-session-id="{{ selected_session.id }}">
     <header class="lr-detail__header">
-      <h2 class="lr-detail__title">
-        {{ selected_session.title or '(untitled)' }}
-      </h2>
-      <div class="lr-detail__meta lr-mono">
-        {{ selected_session.id[:8] }}&hellip; &middot;
-        started {{ selected_session.started_at|iso_local }}
-        {% if selected_session.ended_at or selected_session.finished_at %}
-          &middot; ended {{ (selected_session.ended_at or selected_session.finished_at)|iso_local }}
-        {% endif %}
+      {% import "_macros.html" as ui %}
+      <div class="lr-detail__titlerow">
+        <h2 class="lr-detail__title">{{ selected_session|rec_title }}</h2>
+        {{ ui.rename_form(selected_session, selected_session|rec_title) }}
       </div>
+      <div class="lr-detail__meta">{{ selected_session|rec_when }}</div>
       {% if show_classify %}
         <form class="lr-detail__classify" method="post"
               action="{{ url_for('pages.ui_set_kind', session_id=selected_session.id) }}">

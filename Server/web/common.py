@@ -186,10 +186,48 @@ def register_filters(app: Flask) -> None:
         dt = timeutil.to_local(iso)
         return dt.strftime("%H:%M") if dt else (iso or "")[11:16]
 
+    # Recording names: the stored title, except the device's folder
+    # name, which shows as the kind ("Meeting") until the AI names it.
+    @app.template_filter("rec_title")
+    def _rec_title(sess: storage.Session) -> str:
+        if sess.title and not (
+            sess.title_source is None and storage.title_is_placeholder(sess)
+        ):
+            return sess.title
+        return _KIND_LABEL.get(sess.kind or "", "Recording")
+
+    # The line under a recording's name: "Thu 30 Oct 2026, 13:10 · 11 min".
+    @app.template_filter("rec_when")
+    def _rec_when(sess: storage.Session) -> str:
+        dt = timeutil.to_local(sess.started_at)
+        when = dt.strftime("%a %d %b %Y, %H:%M") if dt else ""
+        seconds = _estimate_duration_seconds(sess)
+        if seconds >= 1:
+            when += " \u00b7 " + _short_duration(seconds)
+        return when
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+# Name shown for a recording that has no real title yet.
+_KIND_LABEL = {
+    "lecture": "Lecture",
+    "meeting": "Meeting",
+    "voice_memo": "Voice memo",
+    "reminder": "Reminder",
+    "other": "Recording",
+}
+
+
+def _short_duration(seconds: float) -> str:
+    """45 s, 11 min, 1 h 52 min."""
+    s = int(round(seconds))
+    if s < 60:
+        return f"{s} s"
+    h, m = divmod(round(s / 60), 60)
+    return f"{h} h {m} min" if h else f"{m} min"
 
 _STATUS_LABEL = {
     storage.STATUS_RECEIVING: "Receiving",

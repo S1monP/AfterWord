@@ -707,6 +707,19 @@ class TextProviderTests(unittest.TestCase):
         self.assertEqual(out.text, "A meeting about the new design.")
         self.assertEqual(out.key_points, ["Point 1", "Point 2"])
 
+    def test_summary_title_and_suggest_title(self):
+        body = json.dumps({"choices": [{"message": {"content": json.dumps({
+            "title": ' "Entropy  and the second law." ', "text": "t",
+            "key_points": []})}}]}).encode("utf-8")
+        p = TextProvider("k", http_transport=_fake(200, body))
+        self.assertEqual(p.summarize("x").title, "Entropy and the second law")
+        body = json.dumps({"choices": [{"message": {
+            "content": '{"title": "Buy milk"}'}}]}).encode("utf-8")
+        p = TextProvider("k", http_transport=_fake(200, body))
+        self.assertEqual(p.suggest_title("remember to buy milk"), "Buy milk")
+        p = TextProvider("k", http_transport=_fake(503, b"down"))
+        self.assertEqual(p.suggest_title("remember to buy milk"), "")
+
     def test_summarize_parses_sections(self):
         body = json.dumps({"choices": [{"message": {"content": json.dumps({
             "text": "Overview.", "key_points": [],

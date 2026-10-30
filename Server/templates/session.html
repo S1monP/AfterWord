@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% import "_macros.html" as ui %}
 
-{% block title %}{{ session.title or session.id }} &middot; Lecture Recorder{% endblock %}
+{% block title %}{{ session|rec_title }} &middot; Lecture Recorder{% endblock %}
 
 {% block content %}
 <div class="lr-page">
@@ -10,9 +10,13 @@
   <section class="lr-card">
     <div class="lr-row" style="align-items: flex-start; justify-content: space-between;">
       <div>
-        <h1 style="font-size: var(--lr-fs-2xl); margin-bottom: var(--lr-s-1);">
-          {{ session.title or '(untitled)' }}
-        </h1>
+        <div class="lr-detail__titlerow">
+          <h1 style="font-size: var(--lr-fs-2xl); margin-bottom: var(--lr-s-1);">
+            {{ session|rec_title }}
+          </h1>
+          {{ ui.rename_form(session, session|rec_title) }}
+        </div>
+        <div class="lr-detail__meta">{{ session|rec_when }}</div>
         <div class="lr-mono">{{ session.id }}</div>
       </div>
       <div class="lr-row" style="gap: var(--lr-s-2);">

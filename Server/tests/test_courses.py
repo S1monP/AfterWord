@@ -660,3 +660,36 @@ class NotesVoiceMemoTests(LRTestCase):
 
     def test_unknown_memo_is_404(self):
         self.assertEqual(self.client.get("/notes?memo=nope").status_code, 404)
+
+
+class RecordingNameTests(LRTestCase):
+    def test_device_name_shows_as_kind_with_date_line(self):
+        store = self.app.config["LR_STORAGE"]
+        sid = _seed_session(self, status="done", kind="meeting")
+        with store._tx() as conn:
+            conn.execute("UPDATE sessions SET title = 'rec_2026-01-15T1000' "
+                         "WHERE id = ?", (sid,))
+        body = self.client.get("/meetings").get_data(as_text=True)
+        self.assertNotIn("rec_2026-01-15T1000", body)
+        self.assertIn(">Meeting<span class=\"lr-rec__when\">Thu 15 Jan 2026, 10:00", body)
+
+    def test_rename_by_hand(self):
+        store = self.app.config["LR_STORAGE"]
+        sid = _seed_session(self, status="done", kind="meeting")
+        resp = self.client.post(
+            f"/sessions/{sid}/title",
+            data={"title": "  Budget review ", "next": f"/meetings?session={sid}"},
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(resp.location.endswith(f"/meetings?session={sid}"))
+        sess = store.get_session(sid)
+        self.assertEqual((sess.title, sess.title_source), ("Budget review", "user"))
+        detail = self.client.get(f"/meetings?session={sid}").get_data(as_text=True)
+        self.assertIn("Budget review", detail)
+        self.assertIn("lr-rename", detail)
+        # Off-site next is ignored; empty titles are refused.
+        resp = self.client.post(f"/sessions/{sid}/title",
+                                data={"title": "x", "next": "//evil.example"})
+        self.assertTrue(resp.location.endswith("/"))
+        self.assertEqual(self.client.post(f"/sessions/{sid}/title",
+                                          data={"title": " "}).status_code, 400)

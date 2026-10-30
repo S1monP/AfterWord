@@ -585,6 +585,9 @@ def api_upload_audio() -> Any:
             audio_bytes=aac_bytes,
             started_at=started_at,
         )
+        if title_input is not None and title_input.strip():
+            # A name typed on the upload page is kept, like a rename.
+            sess = store.set_session_title(sess.id, title, source="user")
     except transcode.TranscodeError as exc:
         return jsonify({
             "error": exc.reason,

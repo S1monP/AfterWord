@@ -107,6 +107,19 @@ ALLOWED_STATUS_TRANSITIONS: dict[str, frozenset[str]] = {
 
 _SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_\-]{4,64}$")
 _CONTROL_CHARS_TITLE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+# The device's folder names (rec_2026-10-30T1310, rec_nt19_1) and the
+# upload page's default: placeholders, not names.
+_DEVICE_NAME = re.compile(r"^rec_(\d{4}-\d{2}-\d{2}T\d{4}|nt\d+)(_\d+)?$")
+
+
+def title_is_placeholder(sess: "Session") -> bool:
+    """True when a session has no real name yet, so the calendar or
+    the AI may name it: no title, or the device's folder name."""
+    if sess.title_source in ("ai", "calendar"):
+        return True
+    if sess.title_source == "user":
+        return False
+    return not sess.title or bool(_DEVICE_NAME.match(sess.title))
 _CHUNK_INDEX_MIN = 1
 WAV_HEADER_SIZE = 44
 
@@ -302,6 +315,9 @@ SCHEMA_ALTERS: tuple[str, ...] = (
     # events: course association (calendar time-matching assigns the
     # matched event's course to the recording automatically).
     "ALTER TABLE events ADD COLUMN course_id TEXT REFERENCES courses(id)",
+    # sessions: where the title came from ('calendar' | 'ai' | 'user';
+    # NULL = the device's folder name, not a real title).
+    "ALTER TABLE sessions ADD COLUMN title_source TEXT",
     # tasks: the merged todos + deadlines table; nothing to alter
     # because it was created at table-creation time. Future columns
     # go here.
@@ -445,12 +461,17 @@ class Session:
     kind: Optional[str] = None
     kind_confidence: Optional[float] = None
     kind_set_at: Optional[str] = None
+    # Where ``title`` came from: 'calendar' (matched event), 'ai'
+    # (topic from the transcript), 'user' (renamed by hand, never
+    # overwritten), or None (the device's folder name).
+    title_source: Optional[str] = None
 
     def to_api_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "course_id": self.course_id,
             "title": self.title,
+            "title_source": self.title_source,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "status": self.status,
@@ -939,6 +960,9 @@ class Storage:
             kind=row["kind"] if "kind" in row.keys() else None,
             kind_confidence=row["kind_confidence"] if "kind_confidence" in row.keys() else None,
             kind_set_at=row["kind_set_at"] if "kind_set_at" in row.keys() else None,
+            title_source=(
+                row["title_source"] if "title_source" in row.keys() else None
+            ),
         )
 
     def _write_meta_json(self, session_id: str) -> None:
@@ -1284,10 +1308,13 @@ class Storage:
         assert sess is not None
         return sess
 
-    def set_session_title(self, session_id: str, title: str) -> Session:
-        """Rename a session. Used by the calendar time-matcher to give
-        matched recordings a human name (and available for future
-        manual renames).
+    TITLE_SOURCES: frozenset[str] = frozenset({"calendar", "ai", "user"})
+
+    def set_session_title(
+        self, session_id: str, title: str, *, source: Optional[str] = None,
+    ) -> Session:
+        """Rename a session and record where the name came from
+        (``source``, one of :attr:`TITLE_SOURCES`, or None).
 
         Raises ``KeyError`` if the session doesn't exist;
         ``ValueError`` for empty/oversized titles or control
@@ -1305,12 +1332,14 @@ class Storage:
             raise ValueError("title must be at most 200 chars")
         if _CONTROL_CHARS_TITLE.search(title):
             raise ValueError("title contains control characters")
+        if source is not None and source not in self.TITLE_SOURCES:
+            raise ValueError(f"unknown title source: {source!r}")
         now = now_iso()
         with self._tx() as conn:
             conn.execute(
-                "UPDATE sessions SET title = ?, updated_at = ? "
-                "WHERE id = ?",
-                (title, now, session_id),
+                "UPDATE sessions SET title = ?, title_source = ?, "
+                "updated_at = ? WHERE id = ?",
+                (title, source, now, session_id),
             )
         self._write_meta_json(session_id)
         sess = self.get_session(session_id)
@@ -2211,6 +2240,16 @@ class Storage:
                 (now_iso(), session_id),
             )
             return cur.rowcount
+
+    def event_for_session(self, session_id: str) -> Optional[Event]:
+        """The calendar event a recording was matched to, if any."""
+        with self._tx() as conn:
+            row = conn.execute(
+                "SELECT * FROM events WHERE matched_session_id = ? "
+                "ORDER BY starts_at LIMIT 1",
+                (session_id,),
+            ).fetchone()
+        return self._row_to_event(row) if row is not None else None
 
     def _row_to_event(self, row: sqlite3.Row) -> Event:
         keys = row.keys()
