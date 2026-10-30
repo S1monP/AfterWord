@@ -1335,10 +1335,13 @@ class Storage:
         *,
         model: Optional[str] = None,
     ) -> dict[str, Any]:
-        """Insert a new artifact row and mirror it into the FTS table.
+        """Store a session's artifact of ``kind`` and mirror it into
+        the FTS table, replacing any earlier one of the same kind.
 
         ``kind`` is one of the artifact kinds used by the pipeline
-        (``transcript``, ``summary``, ``extraction``, …). The row id
+        (``transcript``, ``summary``, ``extraction``, …). A session
+        has at most one of each: a retry re-runs the pipeline, and
+        keeping the old rows left duplicate search hits. The row id
         is a fresh uuid4 hex; ``created_at`` is set to now. The
         FTS table is also written so the artifact is searchable
         later (M10: search).
@@ -1360,6 +1363,15 @@ class Storage:
         artifact_id = uuid.uuid4().hex
         now = now_iso()
         with self._tx() as conn:
+            conn.execute(
+                "DELETE FROM artifacts_fts WHERE artifact_id IN "
+                "(SELECT id FROM artifacts WHERE session_id = ? AND kind = ?)",
+                (session_id, kind),
+            )
+            conn.execute(
+                "DELETE FROM artifacts WHERE session_id = ? AND kind = ?",
+                (session_id, kind),
+            )
             conn.execute(
                 """
                 INSERT INTO artifacts

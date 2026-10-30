@@ -511,11 +511,23 @@ class M8AddArtifactTests(LRTestCase):
         with self.assertRaises(ValueError):
             store.add_artifact(sid, "transcript", None)  # type: ignore[arg-type]
 
-    def test_add_artifact_multiple_per_session(self):
-        """Two transcripts for the same session → get_artifact
-        returns the most recent one."""
+    def test_add_artifact_replaces_same_kind(self):
+        """A second transcript (pipeline retry) replaces the first,
+        in the table and the search index; other kinds stay."""
         sid, store = self._make()
-        store.add_artifact(sid, "transcript", "first")
-        store.add_artifact(sid, "transcript", "second")
+        store.add_artifact(sid, "summary", "the summary")
+        store.add_artifact(sid, "transcript", "first needle")
+        store.add_artifact(sid, "transcript", "second needle")
         fetched = store.get_artifact(sid, "transcript")
-        self.assertEqual(fetched["content"], "second")
+        self.assertEqual(fetched["content"], "second needle")
+        self.assertEqual(store.get_artifact(sid, "summary")["content"],
+                         "the summary")
+        with store._tx() as conn:
+            rows = conn.execute(
+                "SELECT COUNT(*) FROM artifacts WHERE session_id = ? "
+                "AND kind = 'transcript'", (sid,)).fetchone()[0]
+            hits = conn.execute(
+                "SELECT body FROM artifacts_fts WHERE artifacts_fts "
+                "MATCH 'needle'").fetchall()
+        self.assertEqual(rows, 1)
+        self.assertEqual([h[0] for h in hits], ["second needle"])
