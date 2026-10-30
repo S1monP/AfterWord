@@ -10,7 +10,9 @@ deadlines, and a calendar.
   AAC-LC, 22050 Hz mono, 64 kbps (ADTS), the same format the device records.
 - **AI:** OpenRouter for both models. Transcription:
   `microsoft/mai-transcribe-2` (with speaker labels). Text: `minimax/minimax-m3`.
-  Both can be changed in `.env`.
+  Both can be changed in `.env`, and the text model can be called on any
+  OpenAI-compatible API instead (`LR_TEXT_BASE_URL`), e.g. with a MiniMax
+  subscription.
 - **Times:** stored in UTC, shown in local time (`LR_TIMEZONE`, default
   Europe/London).
 
@@ -75,6 +77,7 @@ Relative paths are taken from the `Server` folder.
 | `LR_TEXT_API_KEY` | — | OpenRouter key for the text model |
 | `LR_TRANSCRIPTION_MODEL` | `microsoft/mai-transcribe-2` | Speaker labels need `verbose_json` support |
 | `LR_TEXT_MODEL` | `minimax/minimax-m3` | Classification, summaries, extraction |
+| `LR_TEXT_BASE_URL` | OpenRouter | Text model API, e.g. `https://api.minimax.io/v1` (then `LR_TEXT_MODEL=MiniMax-M3`) |
 | `LR_TRANSCRIBE_SPEAKERS` | `1` | `0` = plain transcript without speaker lines |
 | `LR_TRANSCRIBE_CHUNK_SECONDS` | `1500` | Long recordings are sent in pieces this long |
 | `LR_TRANSCRIBE_PROVIDER_OPTIONS` | Azure diarization on | JSON passed as `provider.options` |
