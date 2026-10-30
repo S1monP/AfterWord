@@ -53,8 +53,8 @@
                 <span class="lr-todo__title" tabindex="0">{{ t.title }}</span>
                 {% if t.due_at %}
                   <span class="lr-todo__due lr-badge {% if overdue %}lr-badge--danger{% elif due_today %}lr-badge--warning{% else %}lr-badge--info{% endif %}"
-                        title="{{ t.due_at }}">
-                    {% if overdue %}overdue&middot;{% elif due_today %}today&middot;{% endif %}{{ t.due_at[:10] }}
+                        title="{{ t.due_at|iso_local }}">
+                    {% if overdue %}overdue&middot;{% elif due_today %}today&middot;{% endif %}{{ t.due_at|local_date }}
                   </span>
                 {% endif %}
                 <span class="lr-todo__priority lr-badge lr-badge--{{ t.priority }}">{{ t.priority }}</span>
@@ -120,8 +120,8 @@
                   <span class="lr-todo__title" tabindex="0">{{ d.title }}</span>
                 {% endif %}
                 <span class="lr-todo__due lr-badge {% if d_overdue %}lr-badge--danger{% elif d_due_today %}lr-badge--warning{% else %}lr-badge--info{% endif %}"
-                      title="{{ d.due_at }}">
-                  {% if d_overdue %}overdue&middot;{% elif d_due_today %}today&middot;{% endif %}{{ d.due_at[:10] }}
+                      title="{{ d.due_at|iso_local }}">
+                  {% if d_overdue %}overdue&middot;{% elif d_due_today %}today&middot;{% endif %}{{ d.due_at|local_date }}
                 </span>
                 <span class="lr-todo__priority lr-badge lr-badge--{{ d.priority }}">{{ d.priority }}</span>
                 <button class="lr-todo__del" type="button" aria-label="Delete">&times;</button>

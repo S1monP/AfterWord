@@ -23,7 +23,7 @@
               {% for e in events_today %}
                 <li>
                   <a href="{{ url_for('ui_calendar') }}">{{ e.title }}</a>
-                  <span class="lr-dash-list__meta lr-mono">{{ e.starts_at[11:16] }}</span>
+                  <span class="lr-dash-list__meta lr-mono">{{ e.starts_at|local_time }}</span>
                 </li>
               {% endfor %}
             </ul>
@@ -41,13 +41,13 @@
               {% for e in events_week %}
                 <li>
                   <a href="{{ url_for('ui_calendar') }}">{{ e.title }}</a>
-                  <span class="lr-dash-list__meta lr-mono">{{ e.starts_at[:10] }}</span>
+                  <span class="lr-dash-list__meta lr-mono">{{ e.starts_at|local_date }}</span>
                 </li>
               {% endfor %}
               {% for d in week_deadlines %}
                 <li>
                   <a href="{{ url_for('ui_todos') }}">{{ d.title }}</a>
-                  <span class="lr-dash-list__meta lr-mono">{{ d.due_at[:10] }}</span>
+                  <span class="lr-dash-list__meta lr-mono">{{ d.due_at|local_date }}</span>
                 </li>
               {% endfor %}
             </ul>
@@ -82,7 +82,7 @@
           </header>
           <div class="lr-card__body">
             {% if recent_notes %}
-              <ul class="lr-list lr-list--compact">{% for n in recent_notes %}<li class="lr-list__row"><a class="lr-list__title" href="{{ url_for('ui_note_detail', note_id=n.id) }}">{{ n.title }}</a><span class="lr-list__meta lr-mono" title="{{ n.updated_at }}">{{ n.updated_at }}</span></li>{% endfor %}</ul>
+              <ul class="lr-list lr-list--compact">{% for n in recent_notes %}<li class="lr-list__row"><a class="lr-list__title" href="{{ url_for('ui_note_detail', note_id=n.id) }}">{{ n.title }}</a><span class="lr-list__meta lr-mono" title="{{ n.updated_at|iso_local }}">{{ n.updated_at }}</span></li>{% endfor %}</ul>
             {% else %}
               <div class="lr-empty-card">
                 <div class="lr-empty-card__title">No notes yet</div>
@@ -107,7 +107,7 @@
                 {% for s in recent_lectures %}
                   <li>
                     <a href="{{ url_for('ui_lectures', session=s.id) }}">{{ s.title or '(untitled)' }}</a>
-                    <span class="lr-dash-list__meta lr-mono">{{ s.started_at[:10] }}</span>
+                    <span class="lr-dash-list__meta lr-mono">{{ s.started_at|local_date }}</span>
                   </li>
                 {% endfor %}
               </ul>
@@ -135,7 +135,7 @@
                 {% for s in recent_meetings %}
                   <li>
                     <a href="{{ url_for('ui_meetings', session=s.id) }}">{{ s.title or '(untitled)' }}</a>
-                    <span class="lr-dash-list__meta lr-mono">{{ s.started_at[:10] }}</span>
+                    <span class="lr-dash-list__meta lr-mono">{{ s.started_at|local_date }}</span>
                   </li>
                 {% endfor %}
               </ul>
@@ -167,7 +167,7 @@
                 <li class="lr-todo lr-deadline {% if is_overdue(d.due_at, now_iso) %}is-overdue{% endif %}" data-todo-id="{{ d.id }}">
                   <input class="lr-todo__check" type="checkbox" aria-label="Mark as done">
                   <span class="lr-todo__title">{{ d.title }}</span>
-                  <span class="lr-todo__due lr-badge {% if is_overdue(d.due_at, now_iso) %}lr-badge--danger{% elif is_due_today(d.due_at, now_iso) %}lr-badge--warning{% else %}lr-badge--info{% endif %}" title="{{ d.due_at }}">{{ d.due_at[:10] }}</span>
+                  <span class="lr-todo__due lr-badge {% if is_overdue(d.due_at, now_iso) %}lr-badge--danger{% elif is_due_today(d.due_at, now_iso) %}lr-badge--warning{% else %}lr-badge--info{% endif %}" title="{{ d.due_at|iso_local }}">{{ d.due_at|local_date }}</span>
                   <span class="lr-todo__priority lr-badge lr-badge--{{ d.priority }}">{{ d.priority }}</span>
                   <button class="lr-todo__del" type="button" aria-label="Delete">&times;</button>
                 </li>
@@ -199,7 +199,7 @@
                   <input class="lr-todo__check" type="checkbox" aria-label="Mark as done">
                   <span class="lr-todo__title">{{ t.title }}</span>
                   {% if t.due_at %}
-                    <span class="lr-todo__due lr-badge {% if is_overdue(t.due_at, now_iso) %}lr-badge--danger{% elif is_due_today(t.due_at, now_iso) %}lr-badge--warning{% else %}lr-badge--info{% endif %}" title="{{ t.due_at }}">{{ t.due_at[:10] }}</span>
+                    <span class="lr-todo__due lr-badge {% if is_overdue(t.due_at, now_iso) %}lr-badge--danger{% elif is_due_today(t.due_at, now_iso) %}lr-badge--warning{% else %}lr-badge--info{% endif %}" title="{{ t.due_at|iso_local }}">{{ t.due_at|local_date }}</span>
                   {% endif %}
                   <span class="lr-todo__priority lr-badge lr-badge--{{ t.priority }}">{{ t.priority }}</span>
                   <button class="lr-todo__del" type="button" aria-label="Delete">&times;</button>

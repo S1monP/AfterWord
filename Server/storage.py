@@ -35,6 +35,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator, Optional, Union
 
+import timeutil
 from config import Config
 
 
@@ -671,9 +672,35 @@ class Storage:
             # The todos/deadlines -> tasks merge only runs on databases
             # that pre-date the merged schema. It's a one-shot upgrade.
             self._migrate_todos_to_tasks(conn)
+            self._migrate_naive_started_at(conn)
             conn.commit()
         self._log(f"data dir: {self._data_dir}")
         self._log(f"DB ready: {self._db_path}")
+
+    def _migrate_naive_started_at(self, conn: sqlite3.Connection) -> None:
+        """Rewrite ``started_at`` stored without an offset as UTC.
+
+        Device sessions announced before the server normalised
+        ``started_at`` kept the device's local wall-clock string
+        (e.g. ``2026-10-30T01:11:00``). Read it as local time, like the
+        announce endpoint now does. Idempotent: normalised rows end in Z.
+        """
+        rows = conn.execute(
+            "SELECT id, started_at FROM sessions "
+            "WHERE started_at NOT LIKE '%Z'"
+        ).fetchall()
+        for row in rows:
+            try:
+                fixed = timeutil.to_utc_iso(row[1])
+            except (TypeError, ValueError):
+                continue
+            if fixed != row[1]:
+                conn.execute(
+                    "UPDATE sessions SET started_at = ? WHERE id = ?",
+                    (fixed, row[0]),
+                )
+        if rows:
+            self._log(f"normalised started_at of {len(rows)} session(s) to UTC")
 
     def _migrate_todos_to_tasks(self, conn: sqlite3.Connection) -> None:
         """One-shot migration: copy ``todos`` rows into ``tasks`` with

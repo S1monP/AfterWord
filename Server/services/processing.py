@@ -47,6 +47,7 @@ from storage import (
     Storage,
 )
 
+import timeutil
 from services.events import EventsService
 from services.llm import LLMError, LLMProvider
 
@@ -516,15 +517,17 @@ def _event_title_for_session(
         s.id != session.id and s.title == title
         for s in storage.list_sessions()
     )
-    if taken and session.started_at:
-        title = f"{title} · {session.started_at[11:16]}"
+    started = timeutil.to_local(session.started_at)
+    if taken and started is not None:
+        title = f"{title} · {started:%H:%M}"
     return title
 
 
 def _fmt_event_date(iso_ts: str) -> str:
-    """Format an ISO-8601 timestamp as a human date ("15 Oct 2026")."""
-    import datetime as _dt
-    dt = _dt.datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))
+    """Format an ISO-8601 timestamp as a local date ("15 Oct 2026")."""
+    dt = timeutil.to_local(iso_ts)
+    if dt is None:
+        raise ValueError(f"not a timestamp: {iso_ts!r}")
     return dt.strftime("%d %b %Y")
 
 

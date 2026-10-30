@@ -28,6 +28,7 @@ import uuid
 from typing import Any, Optional
 
 import storage
+import timeutil
 from storage import Event, Storage
 
 
@@ -59,13 +60,13 @@ _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 # --- ISO timestamp helpers --------------------------------------------------
 
 # Accept anything that ``datetime.fromisoformat`` can parse, then
-# normalise to a UTC ISO-8601 string with a trailing ``Z``. This
-# covers the three input shapes:
+# normalise to a UTC ISO-8601 string with a trailing ``Z``. Values
+# without an offset are local time (``timeutil``; Europe/London):
 #
-#   "2027-03-15"                       → "2027-03-15T00:00:00Z" (date-only)
-#   "2027-03-15T14:30"                → "2027-03-15T14:30:00Z" (naive)
-#   "2027-03-15T14:30:00Z"             → pass-through
-#   "2027-03-15T14:30:00+01:00"        → converted to UTC then Z
+#   "2027-03-15"                  -> local midnight, in UTC (date-only)
+#   "2027-07-15T14:30"            -> "2027-07-15T13:30:00Z" (naive, BST)
+#   "2027-03-15T14:30:00Z"        -> pass-through
+#   "2027-03-15T14:30:00+01:00"   -> converted to UTC then Z
 #
 # The :class:`datetime` module's ``fromisoformat`` is permissive enough
 # in Python 3.11+ to accept all of these without a third-party parser.
@@ -79,26 +80,18 @@ def _normalise_iso(value: object, *, field: str) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError(f"{field} must be a non-empty ISO-8601 string")
     try:
-        dt = _dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return timeutil.to_utc_iso(value)
     except ValueError as exc:
         raise ValueError(
             f"{field} must be ISO-8601 (e.g. '2027-03-15' or "
             f"'2027-03-15T14:30:00Z'); got {value!r}"
         ) from exc
-    if dt.tzinfo is None:
-        # Naive: assume UTC. This is the right default for a personal
-        # server where the user does not bother to type a timezone.
-        dt = dt.replace(tzinfo=_dt.timezone.utc)
-    else:
-        dt = dt.astimezone(_dt.timezone.utc)
-    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _parse_iso(ts: str) -> _dt.datetime:
-    """Parse an ISO-8601 string into an aware UTC datetime."""
-    return _dt.datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(
-        _dt.timezone.utc
-    )
+    """Parse an ISO-8601 string into an aware UTC datetime (naive =
+    local time)."""
+    return timeutil.parse(ts)
 
 
 def _fmt_iso(dt: _dt.datetime) -> str:
@@ -309,7 +302,9 @@ def compute_month_grid(
     by_date: dict[_dt.date, list[Event]] = {}
     for ev in events:
         try:
-            ev_date = _parse_iso(ev.starts_at).date()
+            ev_date = _parse_iso(ev.starts_at).astimezone(
+                timeutil.local_tz(),
+            ).date()
         except (ValueError, AttributeError):
             continue
         if grid_start <= ev_date <= grid_start + _dt.timedelta(days=41):
@@ -473,28 +468,35 @@ class EventsService:
             weeks = 1
         else:
             until_date = _dt.date.fromisoformat(until_norm)
-            if until_date < starts_dt.date():
+            start_day = starts_dt.astimezone(timeutil.local_tz()).date()
+            if until_date < start_day:
                 raise ValueError(
                     "repeat_until must be on or after the event's "
                     "start date"
                 )
-            weeks = (until_date - starts_dt.date()).days // 7 + 1
+            weeks = (until_date - start_day).days // 7 + 1
             if weeks > MAX_REPEAT_OCCURRENCES:
                 raise ValueError(
                     f"a weekly series until {until_norm} would create "
                     f"{weeks} events; the maximum is "
                     f"{MAX_REPEAT_OCCURRENCES}"
                 )
-        ends_dt = _parse_iso(ends_norm) if ends_norm else None
+        # Step in local wall-clock time: aware arithmetic on a zoneinfo
+        # datetime keeps the time of day, so a 10:00 lecture stays at
+        # 10:00 across a clock change (7 x 24 h in UTC would not).
+        tz = timeutil.local_tz()
+        start_local = starts_dt.astimezone(tz)
+        end_local = _parse_iso(ends_norm).astimezone(tz) if ends_norm else None
         first: Optional[Event] = None
         for k in range(weeks):
+            step = _dt.timedelta(days=7 * k)
             ev = self.create(
                 title=title,
                 kind=kind,
-                starts_at=_fmt_iso(starts_dt + _dt.timedelta(days=7 * k)),
+                starts_at=_fmt_iso(start_local + step),
                 ends_at=(
-                    _fmt_iso(ends_dt + _dt.timedelta(days=7 * k))
-                    if ends_dt
+                    _fmt_iso(end_local + step)
+                    if end_local
                     else None
                 ),
                 description=description,
@@ -653,15 +655,16 @@ class EventsService:
                 if isinstance(dtstart_dt, _dt.date) and not isinstance(
                     dtstart_dt, _dt.datetime,
                 ):
-                    # All-day event with no time component: noon UTC.
+                    # All-day event with no time component: local noon.
                     dtstart_dt = _dt.datetime.combine(
                         dtstart_dt, _dt.time(12, 0),
-                        tzinfo=_dt.timezone.utc,
+                        tzinfo=timeutil.local_tz(),
                     )
                 elif isinstance(dtstart_dt, _dt.datetime):
                     if dtstart_dt.tzinfo is None:
+                        # ICS "floating" time: local wall clock.
                         dtstart_dt = dtstart_dt.replace(
-                            tzinfo=_dt.timezone.utc,
+                            tzinfo=timeutil.local_tz(),
                         )
                     dtstart_dt = dtstart_dt.astimezone(_dt.timezone.utc)
                 starts_at = dtstart_dt.strftime(
@@ -690,18 +693,18 @@ class EventsService:
                             dtend_dt = _dt.datetime.combine(
                                 dtend_dt,
                                 _dt.time(23, 59, 59),
-                                tzinfo=_dt.timezone.utc,
+                                tzinfo=timeutil.local_tz(),
                             )
                         else:
                             dtend_dt = _dt.datetime.combine(
                                 dtend_dt,
                                 _dt.time(12, 0),
-                                tzinfo=_dt.timezone.utc,
+                                tzinfo=timeutil.local_tz(),
                             )
                     elif isinstance(dtend_dt, _dt.datetime):
                         if dtend_dt.tzinfo is None:
                             dtend_dt = dtend_dt.replace(
-                                tzinfo=_dt.timezone.utc,
+                                tzinfo=timeutil.local_tz(),
                             )
                         dtend_dt = dtend_dt.astimezone(
                             _dt.timezone.utc,

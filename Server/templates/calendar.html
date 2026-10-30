@@ -160,7 +160,7 @@
             <a class="lr-cal__chip lr-cal__chip--{{ ev.kind }}"
                href="{{ url_for('ui_event_edit', event_id=ev.id) }}"
                title="{{ ev.title }}">
-              <strong>{{ ev.starts_at[11:16] }}</strong>
+              <strong>{{ ev.starts_at|local_time }}</strong>
               {{ ev.title }}
             </a>
           {% endfor %}
@@ -175,7 +175,7 @@
                     <a class="lr-cal__chip lr-cal__chip--{{ ev.kind }}"
                        href="{{ url_for('ui_event_edit', event_id=ev.id) }}"
                        title="{{ ev.title }}">
-                      <strong>{{ ev.starts_at[11:16] }}</strong>
+                      <strong>{{ ev.starts_at|local_time }}</strong>
                       {{ ev.title }}
                     </a>
                   </li>

@@ -14,11 +14,13 @@ so it can be tested without a Flask app.
 """
 from __future__ import annotations
 
+import datetime as _dt
 import re
 import uuid
 from typing import Any, Optional
 
 import storage
+import timeutil
 from storage import Task
 
 
@@ -173,9 +175,8 @@ def _validate_due_at(due_at: object) -> Optional[str]:
     ``YYYY-MM-DDTHH:MM:SSZ`` form so the storage always sees a
     consistent shape.
 
-    No timezone is assumed on input; we treat naive datetimes as
-    UTC. This is a personal-use app, so being strict about TZ
-    semantics isn't worth the friction.
+    A value without an offset (what a ``date`` input sends) is local
+    time, see ``timeutil``; a date alone is local midnight.
     """
     if due_at is None or due_at == "":
         return None
@@ -183,33 +184,42 @@ def _validate_due_at(due_at: object) -> Optional[str]:
         raise ValueError("due_at must be a string")
     if len(due_at) > 64:
         raise ValueError("due_at is too long")
-    from datetime import datetime
     try:
-        cleaned = due_at
-        if cleaned.endswith("Z"):
-            cleaned = cleaned[:-1]
-        parsed = datetime.fromisoformat(cleaned)
+        return timeutil.to_utc_iso(due_at)
     except (TypeError, ValueError) as exc:
         raise ValueError(
             f"due_at is not a valid ISO-8601 timestamp: {due_at!r}"
         ) from exc
-    return parsed.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def is_overdue(task_due_at: Optional[str], now_iso: str) -> bool:
-    """True iff the task has a due_at strictly before the supplied
-    'now' timestamp (string comparison is fine because both are
-    ISO-8601 in UTC, same lexicographic and chronological order)."""
+    """True iff the task is past due at ``now_iso``.
+
+    A due time of local midnight is a due *date* (that is what the
+    date picker sends): the task is overdue once that local day is
+    over, not from its first minute. Any other time is a deadline
+    that passes at that instant.
+    """
     if not task_due_at:
         return False
-    return task_due_at < now_iso
+    due = timeutil.to_local(task_due_at)
+    now = timeutil.to_local(now_iso)
+    if due is None or now is None:
+        return task_due_at < now_iso
+    if due.time() == _dt.time(0, 0):
+        return due.date() < now.date()
+    return due < now
 
 
 def is_due_today(task_due_at: Optional[str], now_iso: str) -> bool:
-    """True iff the task's due_at is on the same UTC date as now."""
+    """True iff the task is due on the same local date as now."""
     if not task_due_at:
         return False
-    return task_due_at[:10] == now_iso[:10]
+    due = timeutil.to_local(task_due_at)
+    now = timeutil.to_local(now_iso)
+    if due is None or now is None:
+        return task_due_at[:10] == now_iso[:10]
+    return due.date() == now.date()
 
 
 # --- Service ----------------------------------------------------------------

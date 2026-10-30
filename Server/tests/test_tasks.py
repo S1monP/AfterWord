@@ -572,7 +572,8 @@ class TasksDueAtAPITests(LRTestCase):
             content_type="application/json",
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.get_json()["task"]["due_at"], "2027-06-15T00:00:00Z")
+        # A date is local midnight: 15 June in BST is 23:00 UTC the day before.
+        self.assertEqual(resp.get_json()["task"]["due_at"], "2027-06-14T23:00:00Z")
 
     def test_api_update_due_at_null_clears(self):
         create = self._create(title="A", due_at="2027-06-15").get_json()
@@ -595,7 +596,7 @@ class TasksDueAtAPITests(LRTestCase):
         self.assertEqual(resp.status_code, 200)
         body = resp.get_json()["task"]
         self.assertEqual(body["title"], "B")
-        self.assertEqual(body["due_at"], "2027-06-15T00:00:00Z")
+        self.assertEqual(body["due_at"], "2027-06-14T23:00:00Z")
 
     def test_api_quick_add_with_priority_and_due_at(self):
         resp = self.client.post(

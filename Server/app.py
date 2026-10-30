@@ -37,6 +37,7 @@ import services.classification  # noqa: F401  (exposes ClassificationService, VA
 import services.courses  # noqa: F401  (exposes CoursesService)
 import services.llm  # noqa: F401  (exposes LLMProvider, default_providers)
 import storage
+import timeutil
 from services import processing, transcode
 
 
@@ -445,11 +446,23 @@ def _register_filters(app: Flask) -> None:
             return f"{h}:{m:02d}:{sec:02d}"
         return f"{m}:{sec:02d}"
 
+    # Stored times are UTC; pages show local time (timeutil).
     @app.template_filter("iso_local")
     def _iso_local(iso: Optional[str]) -> str:
-        if not iso:
-            return "â€”"
-        return iso.replace("T", " ").rstrip("Z")
+        dt = timeutil.to_local(iso)
+        if dt is None:
+            return iso or "\u2014"
+        return dt.strftime("%Y-%m-%d %H:%M")
+
+    @app.template_filter("local_date")
+    def _local_date(iso: Optional[str]) -> str:
+        dt = timeutil.to_local(iso)
+        return dt.strftime("%Y-%m-%d") if dt else (iso or "")[:10]
+
+    @app.template_filter("local_time")
+    def _local_time(iso: Optional[str]) -> str:
+        dt = timeutil.to_local(iso)
+        return dt.strftime("%H:%M") if dt else (iso or "")[11:16]
 
 
 # ---------------------------------------------------------------------------
@@ -517,26 +530,18 @@ def _register_routes(app: Flask) -> None:
         * Deadlines / Tasks: the 5 most recent open items.
         """
         import datetime as _dt
-        now = storage.now_iso()
-        now_dt = _dt.datetime.strptime(now, "%Y-%m-%dT%H:%M:%SZ")
-        day_start = _dt.datetime(
-            now_dt.year, now_dt.month, now_dt.day,
-            tzinfo=_dt.timezone.utc,
-        )
+        today = timeutil.local_today()
 
-        def _iso(dt: _dt.datetime) -> str:
-            return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        def _day(n: int) -> str:
+            """Start of local day ``today + n``, as stored (UTC)."""
+            return timeutil.local_midnight_utc(today + _dt.timedelta(days=n))
 
         events_service = current_app_events_service()
         events_today, _ = events_service.list(
-            starts_after=_iso(day_start),
-            starts_before=_iso(day_start + _dt.timedelta(days=1)),
-            limit=4,
+            starts_after=_day(0), starts_before=_day(1), limit=4,
         )
         events_week, _ = events_service.list(
-            starts_after=_iso(day_start + _dt.timedelta(days=1)),
-            starts_before=_iso(day_start + _dt.timedelta(days=7)),
-            limit=4,
+            starts_after=_day(1), starts_before=_day(7), limit=4,
         )
         # Open deadlines due within the week, soonest first.
         week_deadlines = sorted(
@@ -545,7 +550,7 @@ def _register_routes(app: Flask) -> None:
                     kind="deadline", status="open", limit=50,
                 )[0]
                 if d.due_at
-                and d.due_at <= _iso(day_start + _dt.timedelta(days=7))
+                and d.due_at <= _day(7)
             ),
             key=lambda d: d.due_at,
         )[:4]
@@ -831,8 +836,7 @@ def _register_routes(app: Flask) -> None:
         """Month-grid calendar. Defaults to the current month if
         ``?year=&month=`` are missing or invalid."""
         import datetime as _dt
-        now = storage.now_iso()
-        cur = _dt.datetime.strptime(now, "%Y-%m-%dT%H:%M:%SZ")
+        cur = timeutil.local_today()
         try:
             year = int(request.args.get("year", str(cur.year)))
             month = int(request.args.get("month", str(cur.month)))
@@ -847,14 +851,11 @@ def _register_routes(app: Flask) -> None:
         first_of_month = _dt.date(year, month, 1)
         leading = first_of_month.weekday()
         grid_start = first_of_month - _dt.timedelta(days=leading)
-        window_lo = _dt.datetime.combine(
-            grid_start, _dt.time(0, 0), tzinfo=_dt.timezone.utc,
-        ).strftime("%Y-%m-%dT%H:%M:%SZ")
-        window_hi = _dt.datetime.combine(
-            grid_start + _dt.timedelta(days=42),
-            _dt.time(23, 59, 59),
-            tzinfo=_dt.timezone.utc,
-        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        # Local days, as stored (UTC).
+        window_lo = timeutil.local_midnight_utc(grid_start)
+        window_hi = timeutil.local_midnight_utc(
+            grid_start + _dt.timedelta(days=43),
+        )
         events, _ = current_app_events_service().list(
             starts_after=window_lo, starts_before=window_hi,
             limit=500,
@@ -875,7 +876,7 @@ def _register_routes(app: Flask) -> None:
             month_name=_dt.date(year, month, 1).strftime("%B"),
             prev_year=prev_year, prev_month=prev_month,
             next_year=next_year, next_month=next_month,
-            today_iso=now[:10],
+            today_iso=cur.isoformat(),
             is_current_month=(
                 year == cur.year and month == cur.month
             ),
@@ -887,17 +888,13 @@ def _register_routes(app: Flask) -> None:
         noon on that day. Without ``?date=`` we default to today noon."""
         import datetime as _dt
         date_str = request.args.get("date", "").strip()
-        if date_str:
-            try:
-                d = _dt.date.fromisoformat(date_str)
-            except ValueError:
-                d = _dt.datetime.strptime(
-                    storage.now_iso(), "%Y-%m-%dT%H:%M:%SZ",
-                ).date()
-        else:
-            d = _dt.datetime.strptime(
-                storage.now_iso(), "%Y-%m-%dT%H:%M:%SZ",
-            ).date()
+        try:
+            d = (
+                _dt.date.fromisoformat(date_str)
+                if date_str else timeutil.local_today()
+            )
+        except ValueError:
+            d = timeutil.local_today()
         starts_at_default = _dt.datetime.combine(
             d, _dt.time(12, 0),
         ).strftime("%Y-%m-%dT%H:%M")
@@ -914,12 +911,11 @@ def _register_routes(app: Flask) -> None:
         ev = current_app_events_service().get(event_id)
         if ev is None:
             abort(404)
-        # datetime-local inputs need "YYYY-MM-DDTHH:MM" (no seconds,
-        # no Z). Strip the trailing ":00Z" if present.
+        # datetime-local inputs take local "YYYY-MM-DDTHH:MM"; the form
+        # posts it back without an offset, which reads as local again.
         def _strip(iso):
-            if not iso:
-                return ""
-            return iso.rstrip("Z")[:16]
+            dt = timeutil.to_local(iso)
+            return dt.strftime("%Y-%m-%dT%H:%M") if dt else ""
         return render_template(
             "event_form.html",
             mode="edit", event=ev,
@@ -1066,7 +1062,15 @@ def _register_routes(app: Flask) -> None:
             bits_per_sample = int(payload.get("bits_per_sample", 32))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid_audio_format"}), 400
+        # The device sends local wall-clock time without an offset.
         started_at = payload.get("started_at") or storage.now_iso()
+        try:
+            started_at = timeutil.to_utc_iso(str(started_at))
+        except ValueError:
+            return jsonify({
+                "error": "invalid_payload",
+                "detail": "started_at must be ISO-8601",
+            }), 400
         title = payload.get("title")
 
         try:
@@ -2220,7 +2224,11 @@ def _normalise_title(raw: str) -> Optional[str]:
 
 
 def _default_title_from_iso(iso_ts: str) -> str:
-    """Convert ISO-8601 '2026-10-03T14:30:00Z' to 'rec_2026-10-03T1430'."""
+    """'2026-07-03T14:30:00Z' -> 'rec_2026-07-03T1530': local time, like
+    the device's folder names."""
+    local = timeutil.to_local(iso_ts)
+    if local is not None:
+        return local.strftime("rec_%Y-%m-%dT%H%M")
     core = iso_ts.replace("Z", "").replace("z", "")
     if "T" in core:
         date, time_str = core.split("T", 1)

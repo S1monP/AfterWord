@@ -320,9 +320,11 @@ class TranscodeUnitTests(unittest.TestCase):
 
     def test_default_title_format(self) -> None:
         from app import _default_title_from_iso
+        # Titles use local time like the device's folder names:
+        # 14:30 UTC on 3 Oct is 15:30 BST; a naive time is already local.
         self.assertEqual(
             _default_title_from_iso("2026-10-03T14:30:00Z"),
-            "rec_2026-10-03T1430",
+            "rec_2026-10-03T1530",
         )
         self.assertEqual(
             _default_title_from_iso("2026-10-03T14:30:00"),
