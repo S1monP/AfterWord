@@ -4,7 +4,8 @@ A small Flask server for the lecture recorder in [`../Hardware`](../Hardware).
 The device uploads each recording in AAC chunks; the server stitches them,
 then transcribes, classifies, summarises and extracts tasks in the
 background, and serves a web UI for lectures, meetings, notes (with voice
-memos), other recordings, tasks and deadlines, and a calendar.
+memos), other recordings, tasks and deadlines, and a calendar, with
+one search box across all of it.
 
 - **Storage:** SQLite plus one folder per recording under `data/`. Audio is
   AAC-LC, 22050 Hz mono, 64 kbps (ADTS), the same format the device records.
@@ -98,7 +99,7 @@ for the two keys.
 ## Tests
 
 ```powershell
-.venv\Scripts\python.exe -m unittest discover -s tests       # 525 tests
+.venv\Scripts\python.exe -m unittest discover -s tests       # 574 tests
 .venv\Scripts\python.exe -m unittest tests.test_tasks        # one module
 .venv\Scripts\python.exe scripts\run_tests.py                # same, output to test.log
 .venv\Scripts\python.exe scripts\e2e_check.py [--live]       # device protocol end to end
@@ -118,13 +119,14 @@ Server/
 ├── auth.py           device token, web login, session key
 ├── timeutil.py       UTC storage / local display rules
 ├── storage.py        SQLite + files: sessions, chunks, stitching, artifacts
-├── search.py         search (stub: returns nothing yet, see below)
+├── search.py         search index and queries (see Search)
 ├── services/         processing (AI pipeline), llm (OpenRouter), transcode
 │                     (ffmpeg), notes, tasks, events (+ ICS), courses,
 │                     classification
 ├── web/              routes as blueprints
 │   ├── pages.py          HTML pages
-│   ├── api_sessions.py   device protocol, sessions, audio, pipeline, search
+│   ├── api_sessions.py   device protocol, sessions, audio, pipeline
+│   ├── api_search.py     the dashboard's search box
 │   ├── api_notes.py, api_tasks.py, api_events.py, api_courses.py
 │   ├── common.py         accessors, template filters, helpers
 │   └── pipeline.py       background worker and boot sweep
@@ -205,6 +207,28 @@ from there), **Export (.md)** (name, summary, items, transcript),
 **Download audio**, and **Delete** (`DELETE /api/v1/sessions/<id>`; the
 items it filed stay, unlinked).
 
+## Search
+
+The search box on the dashboard searches recordings (names, summaries,
+transcripts), notes, to-dos and deadlines, and calendar events. Matches
+drop down as you type, grouped; Enter or a click opens one, and `/`
+jumps to the box.
+
+- **Word forms:** words are matched by their stems (snowballstemmer,
+  Russian or English rules by alphabet), so "лекция" finds "лекции" and
+  "meeting" finds "meetings". The word being typed matches by its
+  beginning too. All words must be in one piece (a transcript line, a
+  summary paragraph, a line of a note).
+- **Recordings** show the first line that mentions the words and the
+  times of the other mentions; each opens the recording there, with the
+  matched words marked (`?hl=`) and the audio cued (`?t=` in ms).
+  "Command" recordings are not searched.
+- **Index:** `search_rows` / `search_fts` in the database, kept up to
+  date before every search: anything added, changed or deleted since
+  the last search is re-indexed then (`search.sync`), so nothing else
+  has to remember to update it.
+- **API:** `GET /api/v1/search?q=...` returns the groups with links.
+
 ## Data
 
 ```
@@ -229,5 +253,3 @@ Deleting `data/` resets the server.
 - **`404 ... unavailable for free`:** the text model's free tier was
   withdrawn; set `LR_TEXT_MODEL`.
 - **Port 8000 in use:** set `LR_PORT`.
-- **Search finds nothing:** not built yet. Artifacts are indexed into the
-  `artifacts_fts` table as they are written, but `search.py` is a stub.
