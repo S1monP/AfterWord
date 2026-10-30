@@ -5,7 +5,7 @@ AAC by the server), starts the dev server in a background thread,
 POSTs it as multipart to /api/v1/uploads/audio, and verifies the
 result. Requires ffmpeg on the host (uploads are transcoded to AAC).
 
-Run: ``python upload_smoke.py``.
+Run: ``python scripts/upload_smoke.py``.
 """
 from __future__ import annotations
 
@@ -19,6 +19,9 @@ import shutil
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+
+# The server modules (config, app, ...) live one folder up.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 FFMPEG = shutil.which("ffmpeg") or "ffmpeg-nonexistent-test-binary"
 
@@ -78,7 +81,7 @@ def main() -> int:
     tmp = Path(tempfile.mkdtemp(prefix="lr-upload-smoke-"))
     cfg = config_mod.Config(
         data_dir=tmp, host="127.0.0.1", port=0,
-        openrouter_api_key="", minimax_api_key="",
+        transcription_api_key="", text_api_key="",
         ffmpeg_path=FFMPEG,
         max_upload_bytes=10 * 1024 * 1024,
     )

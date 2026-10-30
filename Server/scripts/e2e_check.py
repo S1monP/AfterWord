@@ -4,7 +4,7 @@ Default: uses Flask's test client (no network roundtrip; instant).
 ``--live``: starts the dev server in a background thread, then runs
 real HTTP requests against it.
 
-Run: ``python e2e_check.py`` or ``python e2e_check.py --live``.
+Run: ``python scripts/e2e_check.py`` (add ``--live`` for real HTTP).
 """
 from __future__ import annotations
 
@@ -18,6 +18,9 @@ import shutil
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+
+# The server modules (config, app, ...) live one folder up.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 FFMPEG = shutil.which("ffmpeg") or "ffmpeg-nonexistent-test-binary"
 
@@ -56,8 +59,8 @@ def make_aac(payload: bytes) -> bytes:
 
 
 def run_checks(req) -> int:
-    # 1. Empty state
-    s, b, _ = req("GET", "/")
+    # 1. Empty state (the recordings list; "/" is the dashboard)
+    s, b, _ = req("GET", "/recordings")
     assert s == 200 and b"No recordings yet" in b, (s, b[:80])
     print("1. Empty state OK")
 
@@ -110,10 +113,10 @@ def run_checks(req) -> int:
     assert len(b) == len(aac1b) + len(aac2) and b"X" in b and b"B" in b
     print(f"7. Audio OK, size={len(b)}")
 
-    # 8. UI index
-    s, b, _ = req("GET", "/")
+    # 8. UI recordings list
+    s, b, _ = req("GET", "/recordings")
     assert s == 200 and b"E2E Test" in b
-    print("8. UI index OK")
+    print("8. UI recordings list OK")
 
     # 9. UI session page
     s, b, _ = req("GET", f"/sessions/{sid}")
@@ -149,7 +152,7 @@ def main() -> int:
     tmp = Path(tempfile.mkdtemp(prefix="lr-e2e-"))
     cfg = config_mod.Config(
         data_dir=tmp, host="127.0.0.1", port=0,
-        openrouter_api_key="", minimax_api_key="",
+        transcription_api_key="", text_api_key="",
         ffmpeg_path=FFMPEG,
         max_upload_bytes=10 * 1024 * 1024,
     )
