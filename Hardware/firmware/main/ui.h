@@ -22,7 +22,7 @@ typedef enum {
 
 typedef enum {
     BTN_SHORT,      // released within 1 s
-    BTN_LONG,       // held >= 1 s, then released
+    BTN_LONG,       // sent once the hold reaches 1 s, while still held
 } btn_event_t;
 
 // Initialise LED + button and start the UI task.  Samples the button first,
@@ -30,6 +30,9 @@ typedef enum {
 void ui_init(void);
 
 bool ui_button_held_at_boot(void);
+
+// Raw button state right now (not debounced).
+bool ui_button_down(void);
 
 // Queue of btn_event_t.  A press that was already held at boot is swallowed.
 QueueHandle_t ui_button_queue(void);

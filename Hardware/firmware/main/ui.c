@@ -13,8 +13,9 @@
 static const char *TAG = "ui";
 
 #define UI_TICK_MS          10
-#define BTN_DEBOUNCE_MS     30
-#define BTN_SHORT_MIN_MS    50
+#define BTN_PRESS_MS        30      // closed this long = pressed
+#define BTN_RELEASE_MS      100     // open this long = released; shorter is a
+                                    // contact flicker mid-hold, not a release
 #define BTN_LONG_MS         1000
 #define LED_BRIGHTNESS      40      // 0-255, scales every colour
 
@@ -72,11 +73,7 @@ static uint32_t led_colour(int64_t t_ms) {
     return RGB_OFF;
 }
 
-static void emit_release(int64_t held_ms) {
-    btn_event_t ev;
-    if (held_ms >= BTN_LONG_MS) ev = BTN_LONG;
-    else if (held_ms >= BTN_SHORT_MIN_MS) ev = BTN_SHORT;
-    else return;                            // contact bounce, not a press
+static void emit(btn_event_t ev) {
     if (xQueueSend(s_btn_q, &ev, 0) != pdTRUE) {
         ESP_LOGW(TAG, "button event dropped (queue full)");
     }
@@ -87,6 +84,7 @@ static void ui_task(void *arg) {
     bool last_raw = stable;
     int64_t last_change = now_ms();
     int64_t press_start = now_ms();
+    bool long_sent = false;
     // A press already in progress at boot (the portal gesture) must be
     // released before any event fires.
     bool armed = !stable;
@@ -96,15 +94,23 @@ static void ui_task(void *arg) {
 
         bool raw = button_pressed();
         if (raw != last_raw) { last_raw = raw; last_change = t; }
-        if (raw != stable && t - last_change >= BTN_DEBOUNCE_MS) {
+        if (raw != stable &&
+            t - last_change >= (raw ? BTN_PRESS_MS : BTN_RELEASE_MS)) {
             stable = raw;
             if (stable) {
                 press_start = t;
+                long_sent = false;
             } else if (!armed) {
                 armed = true;               // end of the boot-time hold
-            } else {
-                emit_release(t - press_start);
+            } else if (!long_sent) {
+                emit(BTN_SHORT);
             }
+        }
+        // Long fires as soon as the hold reaches BTN_LONG_MS, so the LED
+        // answers while the button is still down; the release is ignored.
+        if (stable && armed && !long_sent && t - press_start >= BTN_LONG_MS) {
+            long_sent = true;
+            emit(BTN_LONG);
         }
 
         led_show(led_colour(t));
@@ -141,6 +147,7 @@ void ui_init(void) {
 }
 
 bool ui_button_held_at_boot(void) { return s_held_at_boot; }
+bool ui_button_down(void) { return button_pressed(); }
 QueueHandle_t ui_button_queue(void) { return s_btn_q; }
 void ui_set_mode(ui_mode_t mode) { s_mode = mode; }
 void ui_set_syncing(bool syncing) { s_syncing = syncing; }

@@ -159,7 +159,13 @@ static void handle_button(btn_event_t ev) {
         }
         break;
     case ST_ERROR:
-        if (ev == BTN_LONG) esp_restart();
+        if (ev == BTN_LONG) {
+            // BTN_LONG arrives while the button is still held; restarting
+            // now would read the hold as the setup-portal gesture.
+            while (ui_button_down()) vTaskDelay(pdMS_TO_TICKS(20));
+            vTaskDelay(pdMS_TO_TICKS(100));
+            esp_restart();
+        }
         break;
     }
 }
