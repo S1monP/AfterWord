@@ -164,12 +164,25 @@ The firmware deletes a session from the SD card only after a `200` finish.
 ## AI pipeline
 
 After finish, a single background worker processes sessions one at a time:
-transcribe → classify (lecture, meeting, …) → summarise → extract items
-(topics, facts, action items; stored with the recording), and matches the
-recording to a calendar event by start time.
+transcribe → classify (lecture, meeting, voice memo, command, other) →
+summarise → extract items → file them, and matches the recording to a
+calendar event by start time.
 
 - Each piece is sent to the transcription API as 16 kHz mono MP3: the
   Azure-hosted model rejects AAC.
+- **Names:** the summary includes a short title in the recording's
+  language; a recording matched to a calendar event is "<course or
+  event>: <topic>". Pages show the date, time and length under the name.
+  A name given by hand (the pencil) is never replaced.
+- **Filing** (`services/filing.py`): deadlines, to-dos and dated events
+  from lectures and meetings go into Deadlines, Todos and the Calendar,
+  linked to the moment in the recording; the detail pane lists them.
+  Duplicates of open items and dates before the recording are skipped;
+  re-processing replaces only items never touched. Voice memos and
+  "other" recordings (including videos playing) file nothing.
+- **Command** recordings ("remind me to call the dentist tomorrow") only
+  file their request, without a link, and are not shown on any page
+  except `/recordings`.
 - Summaries are sized to the transcript (a few sentences for a short memo,
   headed sections for an hour-long lecture) and structured by kind. They
   are written in the recording's language if it is in
@@ -186,6 +199,11 @@ recording to a calendar event by start time.
 - A failed session (API error) stays failed and is listed on the Other
   page; **Retry** on the session page
   (`POST /api/v1/sessions/<id>/transcribe`) runs it again.
+
+Each recording's pane also has: clickable transcript timestamps (play
+from there), **Export (.md)** (name, summary, items, transcript),
+**Download audio**, and **Delete** (`DELETE /api/v1/sessions/<id>`; the
+items it filed stay, unlinked).
 
 ## Data
 
