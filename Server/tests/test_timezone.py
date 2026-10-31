@@ -112,8 +112,8 @@ class SessionTimezoneTests(LRTestCase):
 
     def test_pages_show_local_time(self):
         self._announce("2027-07-10T14:00:00")
-        page = self.client.get("/sessions/tz_session_1").get_data(as_text=True)
-        self.assertIn("2027-07-10 14:00", page)
+        page = self.client.get("/other?session=tz_session_1").get_data(as_text=True)
+        self.assertIn("10 Jul 2027, 14:00", page)
         self.assertNotIn("â€”", page)    # the old mojibake dash
 
     def test_old_naive_started_at_is_migrated(self):

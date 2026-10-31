@@ -939,37 +939,6 @@ class Storage:
             ).fetchall()
             return [self._row_to_session(conn, r) for r in rows]
 
-    def list_unclassified_sessions(
-        self, *, limit: int = 100, offset: int = 0,
-    ) -> tuple[list[Session], int]:
-        """List sessions that need classifying: ``kind IS NULL`` and
-        ``status = 'ready'``. Newest first.
-
-        Returns ``(sessions, total)``. ``total`` is the count of
-        matches BEFORE limit/offset are applied so the UI can render
-        pagination.
-        """
-        if limit < 1:
-            raise ValueError("limit must be >= 1")
-        if offset < 0:
-            raise ValueError("offset must be >= 0")
-        with self._tx() as conn:
-            total = conn.execute(
-                "SELECT COUNT(*) AS c FROM sessions "
-                "WHERE kind IS NULL AND status = ?",
-                (STATUS_READY,),
-            ).fetchone()["c"]
-            rows = conn.execute(
-                "SELECT * FROM sessions "
-                "WHERE kind IS NULL AND status = ? "
-                "ORDER BY created_at DESC, id DESC "
-                "LIMIT ? OFFSET ?",
-                (STATUS_READY, limit, offset),
-            ).fetchall()
-        return (
-            [self._row_to_session(conn, r) for r in rows],
-            int(total),
-        )
 
     def _row_to_session(
         self, conn: sqlite3.Connection, row: sqlite3.Row

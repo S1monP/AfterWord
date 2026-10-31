@@ -8,8 +8,7 @@ from flask import Blueprint, jsonify, request, url_for
 
 import search
 import timeutil
-from web.common import _KIND_LABEL, current_app_storage, rec_title
-from web.pages import _KIND_PAGES, _is_other
+from web.common import _KIND_LABEL, current_app_storage, rec_title, recording_url
 
 bp = Blueprint("search_api", __name__)
 
@@ -72,16 +71,11 @@ def _recording(store, hit, query, raw) -> Optional[dict]:
     sess = store.get_session(hit.item_id)
     if sess is None:
         return None
-    page = _KIND_PAGES.get(sess.kind or ("other" if _is_other(sess) else ""))
-
     def url(at_ms: Optional[int] = None) -> str:
         args: dict[str, Any] = {"hl": raw}
         if at_ms is not None:
             args["t"] = at_ms
-        if page is None:  # still being processed
-            return url_for("pages.ui_session", session_id=sess.id, **args)
-        endpoint, param = page
-        return url_for(endpoint, **{param: sess.id}, **args)
+        return recording_url(sess, **args)
 
     best_at = hit.best["at_ms"] if hit.best else None
     meta = _KIND_LABEL.get(sess.kind or "", "Recording")

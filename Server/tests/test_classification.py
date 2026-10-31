@@ -1,4 +1,4 @@
-"""Tests for the ClassificationService and the /unsorted page.
+"""Tests for the ClassificationService and the Other page.
 
 The LLM path is a stub (Milestone 6), so the corresponding
 ``classify_session`` tests assert the stub contract (always returns
@@ -149,53 +149,7 @@ class ClassificationServiceTests(LRTestCase):
         with self.assertRaises(ValueError):
             self._service().classify_session("")
 
-    def test_bulk_classify_returns_dict_of_nones(self):
-        a = _make_session(self)
-        b = _make_session(self)
-        out = self._service().bulk_classify([a, b])
-        self.assertEqual(set(out.keys()), {a, b})
-        for v in out.values():
-            self.assertIsNone(v)
 
-    def test_bulk_classify_omits_unknown_ids(self):
-        a = _make_session(self)
-        out = self._service().bulk_classify([a, "nope", ""])
-        self.assertEqual(list(out.keys()), [a])
-
-    def test_bulk_classify_rejects_non_list(self):
-        with self.assertRaises(ValueError):
-            self._service().bulk_classify("not a list")  # type: ignore
-
-    def test_list_unclassified_filters_by_status_and_kind(self):
-        # Only sessions with status='ready' AND kind=NULL should
-        # appear. Classified ones (kind set) and not-yet-ready ones
-        # (status='receiving') are excluded.
-        ready_no_kind_a = _make_session(self, status="ready")
-        ready_no_kind_b = _make_session(self, status="ready")
-        ready_with_kind = _make_session(
-            self, status="ready", kind="lecture",
-        )
-        receiving_no_kind = _make_session(self, status="receiving")
-        sessions, total = self._service().list_unclassified()
-        self.assertEqual(total, 2)
-        ids = {s.id for s in sessions}
-        self.assertIn(ready_no_kind_a, ids)
-        self.assertIn(ready_no_kind_b, ids)
-        self.assertNotIn(ready_with_kind, ids)
-        self.assertNotIn(receiving_no_kind, ids)
-
-    def test_list_unclassified_respects_limit(self):
-        for _ in range(3):
-            _make_session(self)
-        sessions, total = self._service().list_unclassified(limit=2)
-        self.assertEqual(total, 3)
-        self.assertEqual(len(sessions), 2)
-
-    def test_list_unclassified_validates_inputs(self):
-        with self.assertRaises(ValueError):
-            self._service().list_unclassified(limit=0)
-        with self.assertRaises(ValueError):
-            self._service().list_unclassified(offset=-1)
 # ---------------------------------------------------------------------------
 # API HTTP surface
 # ---------------------------------------------------------------------------
@@ -276,145 +230,22 @@ class ClassificationApiTests(LRTestCase):
         resp = self.client.post("/api/v1/sessions/nope/classify")
         self.assertEqual(resp.status_code, 404)
 
-    def test_api_bulk_classify_returns_results_dict(self):
-        a = self._make()
-        b = self._make()
-        resp = self.client.post(
-            "/api/v1/classifications/bulk",
-            data=json.dumps({"session_ids": [a, b, "nope"]}),
-            content_type="application/json",
-        )
-        self.assertEqual(resp.status_code, 200)
-        body = resp.get_json()
-        self.assertIn("results", body)
-        self.assertIn(a, body["results"])
-        self.assertIn(b, body["results"])
-        self.assertNotIn("nope", body["results"])
-        # No transcripts → no-op classifier returns None → reason
-        # is the placeholder.
-        self.assertIsNone(body["results"][a]["kind"])
-        self.assertEqual(
-            body["results"][a]["reason"], "llm_not_implemented",
-        )
-
-    def test_api_bulk_classify_uses_stub_classifier(self):
-        """Inject a stub classifier + transcripts → bulk returns
-        real shapes for the sessions with transcripts."""
-        from services.llm import Classification, LLMProvider
-
-        class StubClassifier(LLMProvider):
-            name = "stub"
-
-            def classify(self, transcript):
-                return Classification(
-                    kind="lecture", confidence=0.9,
-                )
-
-        a = self._make()
-        b = self._make()
-        # Only 'a' has a transcript.
-        self.app.config["LR_STORAGE"].add_artifact(
-            a, "transcript", "lecture content",
-        )
-        original = self.app.config["LR_LLM_PROVIDERS"]["text"]
-        self.app.config["LR_LLM_PROVIDERS"]["text"] = (
-            StubClassifier()
-        )
-        try:
-            resp = self.client.post(
-                "/api/v1/classifications/bulk",
-                data=json.dumps({"session_ids": [a, b]}),
-                content_type="application/json",
-            )
-        finally:
-            self.app.config["LR_LLM_PROVIDERS"]["text"] = original
-        self.assertEqual(resp.status_code, 200)
-        body = resp.get_json()
-        # 'a' has a transcript → classified
-        self.assertEqual(body["results"][a]["kind"], "lecture")
-        self.assertEqual(body["results"][a]["confidence"], 0.9)
-        self.assertEqual(body["results"][a]["reason"], "classified")
-        # 'b' has no transcript → placeholder
-        self.assertIsNone(body["results"][b]["kind"])
-        self.assertEqual(
-            body["results"][b]["reason"], "llm_not_implemented",
-        )
-
-    def test_api_bulk_classify_requires_list(self):
-        resp = self.client.post(
-            "/api/v1/classifications/bulk",
-            data=json.dumps({"session_ids": "not-a-list"}),
-            content_type="application/json",
-        )
-        self.assertEqual(resp.status_code, 400)
-
-    def test_api_bulk_classify_empty_list(self):
-        resp = self.client.post(
-            "/api/v1/classifications/bulk",
-            data=json.dumps({"session_ids": []}),
-            content_type="application/json",
-        )
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.get_json()["results"], {})
-
 
 # ---------------------------------------------------------------------------
-# /unsorted page
+# Other page: everything that is not a lecture, meeting or voice memo
 # ---------------------------------------------------------------------------
 
 
-class UnsortedPageTests(LRTestCase):
-    def test_unsorted_lists_only_unclassified_ready_sessions(self):
+class OtherPageTests(LRTestCase):
+    def test_other_lists_unsorted_and_unfinished_recordings(self):
         unclassified = _make_session(self, status="ready")
-        classified = _make_session(self, status="ready", kind="lecture")
         receiving = _make_session(self, status="receiving")
-        resp = self.client.get("/unsorted")
-        self.assertEqual(resp.status_code, 200)
-        body = resp.get_data(as_text=True)
-        # Only the unclassified session appears as a row.
-        self.assertIn('data-session-id="' + unclassified + '"', body)
-        self.assertNotIn(
-            'data-session-id="' + classified + '"', body,
-            "Classified sessions should not appear on /unsorted",
-        )
-        self.assertNotIn(
-            'data-session-id="' + receiving + '"', body,
-            "Receiving sessions should not appear on /unsorted",
-        )
-
-    def test_unsorted_dropdown_options_present(self):
-        _make_session(self)
-        resp = self.client.get("/unsorted")
-        body = resp.get_data(as_text=True)
-        for kind in ("lecture", "voice_memo", "meeting", "other"):
-            self.assertIn(f'value="{kind}"', body)
-
-    def test_unsorted_renders_empty_state_when_all_sorted(self):
-        _make_session(self, status="ready", kind="lecture")
-        resp = self.client.get("/unsorted")
-        self.assertEqual(resp.status_code, 200)
-        body = resp.get_data(as_text=True)
-        self.assertIn("All recordings are sorted", body)
-
-    def test_unsorted_count_in_subheading(self):
-        for _ in range(3):
-            _make_session(self)
-        resp = self.client.get("/unsorted")
-        body = resp.get_data(as_text=True)
-        self.assertIn("3 unclassified", body)
-
-    def test_unsorted_renders_save_button_per_row(self):
-        _make_session(self)
-        _make_session(self)
-        resp = self.client.get("/unsorted")
-        body = resp.get_data(as_text=True)
-        self.assertEqual(body.count("lr-sort__save"), 2)
-
-    def test_unsorted_renders_bulk_classify_button(self):
-        _make_session(self)
-        resp = self.client.get("/unsorted")
-        body = resp.get_data(as_text=True)
-        self.assertIn("Classify all with AI", body)
+        other = _make_session(self, status="done", kind="other")
+        lecture = _make_session(self, status="done", kind="lecture")
+        body = self.client.get("/other").get_data(as_text=True)
+        for sid in (unclassified, receiving, other):
+            self.assertIn(sid, body)
+        self.assertNotIn(lecture, body)
 
 
 class ClassificationServiceIsRealTests(unittest.TestCase):

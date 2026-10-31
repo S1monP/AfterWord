@@ -367,7 +367,7 @@ class NotesWebUITests(LRTestCase):
         self.assertNotIn("Apples", body)
 
     def test_notes_new_renders_editor(self):
-        resp = self.client.get("/notes/new", follow_redirects=True)
+        resp = self.client.get("/notes?new=1")
         self.assertEqual(resp.status_code, 200)
         body = resp.get_data(as_text=True)
         # The embedded editor renders in create mode.
@@ -377,25 +377,13 @@ class NotesWebUITests(LRTestCase):
     def test_note_detail_renders_editor_prefilled(self):
         create = self._create(title="Hello", body_md="**world**").get_json()
         note_id = create["note"]["id"]
-        # The legacy deep-link redirects to the notes page with the
-        # editor prefilled.
-        resp = self.client.get(f"/notes/{note_id}", follow_redirects=True)
+        resp = self.client.get(f"/notes?note_id={note_id}")
         self.assertEqual(resp.status_code, 200)
         body = resp.get_data(as_text=True)
         self.assertIn("Hello", body)
         self.assertIn("**world**", body)
     def test_note_detail_404(self):
-        self.assertEqual(self.client.get("/notes/zzz").status_code, 404)
-
-    def test_note_edit_renders_editor_prefilled(self):
-        create = self._create(title="Hello", body_md="**world**").get_json()
-        note_id = create["note"]["id"]
-        resp = self.client.get(
-            f"/notes/{note_id}/edit", follow_redirects=True,
-        )
-        self.assertEqual(resp.status_code, 200)
-        body = resp.get_data(as_text=True)
-        self.assertIn("**world**", body)
+        self.assertEqual(self.client.get("/notes?note_id=zzz").status_code, 404)
 
     def test_notes_page_renders_selected_note_editor(self):
         create = self._create(title="Hello", body_md="body text").get_json()
@@ -406,9 +394,5 @@ class NotesWebUITests(LRTestCase):
         self.assertIn("lr-note-editor", body)
         self.assertIn("Hello", body)
         self.assertIn("body text", body)
-    def test_note_edit_404(self):
-        self.assertEqual(self.client.get("/notes/zzz/edit").status_code, 404)
-
-
 if __name__ == "__main__":
     unittest.main()

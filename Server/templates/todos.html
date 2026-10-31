@@ -50,9 +50,10 @@
                 <input class="lr-todo__check" type="checkbox"
                        {% if t.status == 'done' %}checked{% endif %}
                        aria-label="Mark as done">
-                {% if t.source_ref %}
+                {% set rec = recording_url(t.source_ref, t=t.source_offset_ms or 0) if t.source_ref else None %}
+                {% if rec %}
                   <a class="lr-todo__title lr-todo__title--linked"
-                     href="{{ url_for('pages.ui_session', session_id=t.source_ref) }}?t={{ t.source_offset_ms or 0 }}"
+                     href="{{ rec }}"
                      title="Jump to this moment in the recording">{{ t.title }}</a>
                 {% else %}
                   <span class="lr-todo__title" tabindex="0">{{ t.title }}</span>
@@ -117,10 +118,10 @@
                 <input class="lr-todo__check" type="checkbox"
                        {% if d.status == 'done' %}checked{% endif %}
                        aria-label="Mark as done">
-                {% if d.source_ref %}
-                  {% set offset_ms = d.source_offset_ms or 0 %}
+                {% set rec = recording_url(d.source_ref, t=d.source_offset_ms or 0) if d.source_ref else None %}
+                {% if rec %}
                   <a class="lr-todo__title lr-todo__title--linked"
-                     href="{{ url_for('pages.ui_session', session_id=d.source_ref) }}?t={{ offset_ms }}"
+                     href="{{ rec }}"
                      title="Jump to this moment in the recording">{{ d.title }}</a>
                 {% else %}
                   <span class="lr-todo__title" tabindex="0">{{ d.title }}</span>

@@ -29,7 +29,7 @@ import config as config_mod
 import storage
 from services import transcode
 import web
-from web.common import current_app_storage, register_filters
+from web.common import register_filters
 from web.pipeline import _start_pipeline_worker, sweep_stranded_sessions
 
 # Re-exported: tests and scripts import these from ``app``.
@@ -140,20 +140,10 @@ def create_app(config: Optional[config_mod.Config] = None) -> Flask:
 
     @app.context_processor
     def _inject_globals():
-        # Pass the count of unclassified sessions to every template so
-        # the top-bar badge can render. Capped at 99 in the display.
-        try:
-            count = sum(
-                1 for s in current_app_storage().list_sessions()
-                if s.kind is None and s.status == storage.STATUS_READY
-            )
-        except Exception:
-            count = 0
         # Helpers for task date rendering. Available in every template.
         from services.tasks import is_due_today as _is_due_today
         from services.tasks import is_overdue as _is_overdue
         return {
-            "unsorted_count": min(count, 99),
             "now_iso": storage.now_iso(),
             "is_overdue": _is_overdue,
             "is_due_today": _is_due_today,

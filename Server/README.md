@@ -183,8 +183,9 @@ calendar event by start time.
   re-processing replaces only items never touched. Voice memos and
   "other" recordings (including videos playing) file nothing.
 - **Command** recordings ("remind me to call the dentist tomorrow") only
-  file their request, without a link, and are not shown on any page
-  except `/recordings`.
+  file their request, without a link, and are then deleted: the
+  recording is not kept. One that filed nothing (probably misheard)
+  moves to Other instead.
 - Summaries are sized to the transcript (a few sentences for a short memo,
   headed sections for an hour-long lecture) and structured by kind. They
   are written in the recording's language if it is in
@@ -199,8 +200,13 @@ calendar event by start time.
 - After a server restart, sessions stranded mid-pipeline are requeued;
   finished steps are not repeated.
 - A failed session (API error) stays failed and is listed on the Other
-  page; **Retry** on the session page
-  (`POST /api/v1/sessions/<id>/transcribe`) runs it again.
+  page; **Retry** there (`POST /api/v1/sessions/<id>/transcribe`) runs it
+  again. Other also lists recordings with no kind yet (still being
+  processed) and is where they are sorted by hand.
+
+Every recording is read on one page: Lectures, Meetings, Notes (voice
+memos) or Other (everything else). Links to a recording (search results,
+"Said in" on to-dos) open it there (`web.common.recording_url`).
 
 Each recording's pane also has: clickable transcript timestamps (play
 from there), **Export (.md)** (name, summary, items, transcript),

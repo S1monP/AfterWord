@@ -137,46 +137,8 @@ class ClassificationService:
             return None
         return (result.kind, result.confidence)
 
-    def bulk_classify(
-        self, session_ids: list[str],
-    ) -> dict[str, Optional[tuple[str, float]]]:
-        """Classify many sessions in one call. Returns a dict
-        mapping ``session_id`` to the same shape as
-        :meth:`classify_session`. Sessions that don't exist are
-        omitted from the result (rather than raising).
-
-        **Currently a stub** (Milestone 6): every value is
-        ``None``.
-        """
-        if not isinstance(session_ids, list):
-            raise ValueError("session_ids must be a list")
-        out: dict[str, Optional[tuple[str, float]]] = {}
-        for sid in session_ids:
-            try:
-                out[sid] = self.classify_session(sid)
-            except (KeyError, ValueError):
-                continue
-        return out
 
     # -- convenience for the /unsorted page -----------------------------
-
-    def list_unclassified(
-        self, *, limit: int = 100, offset: int = 0,
-    ) -> tuple[list[Session], int]:
-        """List sessions that need classifying: ``kind IS NULL`` and
-        ``status = 'ready'``. Newest first (by ``created_at``).
-
-        Returns ``(sessions, total)``. ``total`` is the count of
-        matches BEFORE limit/offset are applied so the UI can render
-        pagination.
-        """
-        if limit < 1:
-            raise ValueError("limit must be >= 1")
-        if offset < 0:
-            raise ValueError("offset must be >= 0")
-        return self._store.list_unclassified_sessions(
-            limit=limit, offset=offset,
-        )
 
 
 __all__ = [

@@ -189,4 +189,4 @@ class FilingTests(LRTestCase):
         self.assertIn("Submit essay", body)
         self.assertIn("Midterm exam", body)
         todos = self.client.get("/todos").get_data(as_text=True)
-        self.assertIn(f"/sessions/{sid}?t=0", todos)
+        self.assertIn(f"/lectures?session={sid}&amp;t=0", todos)

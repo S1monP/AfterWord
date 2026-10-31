@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-from flask import current_app, Flask, g, has_request_context, request
+from flask import current_app, Flask, g, has_request_context, request, url_for
 from markupsafe import escape, Markup
 
 import services
@@ -193,6 +193,7 @@ def register_filters(app: Flask) -> None:
 
     app.template_filter("rec_title")(rec_title)
     app.template_filter("rec_when")(rec_when)
+    app.add_template_global(recording_url)
 
     # A page opened from a search result (?hl=<query>) marks the
     # matched words, in every word form (search.highlight).
@@ -226,6 +227,37 @@ _KIND_LABEL = {
     "command": "Request",
     "other": "Recording",
 }
+
+
+# The page each kind of recording is read on, and the query parameter
+# that opens one there. Everything else (kind 'other', no kind yet,
+# still being processed) is read on Other.
+KIND_PAGES = {
+    "lecture": ("pages.ui_lectures", "session"),
+    "meeting": ("pages.ui_meetings", "session"),
+    "voice_memo": ("pages.ui_notes", "memo"),
+}
+
+
+def is_other(sess: storage.Session) -> bool:
+    """Read on the Other page: not a lecture, meeting or voice memo."""
+    return sess.kind not in KIND_PAGES
+
+
+def recording_url(
+    sess: "storage.Session | str | None", **args: Any,
+) -> Optional[str]:
+    """Where a recording opens: its page, with it selected. ``sess``
+    may be a session or its id; ``args`` go on the URL (``t`` in ms,
+    ``hl`` for search marks). None for an unknown recording."""
+    if isinstance(sess, str):
+        sess = current_app_storage().get_session(sess)
+    if sess is None:
+        return None
+    endpoint, param = KIND_PAGES.get(
+        sess.kind or "", ("pages.ui_other", "session"),
+    )
+    return url_for(endpoint, **{param: sess.id}, **args)
 
 
 def rec_title(sess: storage.Session) -> str:

@@ -700,19 +700,25 @@ class DeadlinesDeepLinkTests(LRTestCase):
         return resp.get_json()["task"]
 
     def test_deadline_with_source_ref_renders_as_link(self):
+        self.app.config["LR_STORAGE"].upsert_session(
+            "abcdef1234567890", title="t", expected_count=1, sample_rate=22050,
+            channels=1, bits_per_sample=32, started_at="2026-01-15T10:00:00Z",
+        )
         self._create_deadline(
             source_ref="abcdef1234567890",
             source_offset_ms=42000,
         )
-        # The deadlines page was merged into /todos.
-        resp = self.client.get("/todos")
-        self.assertEqual(resp.status_code, 200)
-        body = resp.get_data(as_text=True)
-        # Title should be a link to the session page with ?t=<ms>.
+        body = self.client.get("/todos").get_data(as_text=True)
+        # The title links to the recording, where it is read, at ?t=<ms>.
         self.assertIn(
-            'href="/sessions/abcdef1234567890?t=42000"', body,
+            'href="/other?session=abcdef1234567890&amp;t=42000"', body,
         )
         self.assertIn("lr-todo__title--linked", body)
+
+    def test_deadline_from_a_missing_recording_is_not_a_link(self):
+        self._create_deadline(source_ref="gone000000000000")
+        body = self.client.get("/todos").get_data(as_text=True)
+        self.assertNotIn("lr-todo__title--linked", body)
 
     def test_deadline_without_source_ref_renders_as_plain_span(self):
         self._create_deadline()
@@ -752,13 +758,3 @@ class DeadlinesDeepLinkTests(LRTestCase):
         )
         self.assertEqual(deadline["priority"], "medium")
         self.assertEqual(deadline["course_id"], c["id"])
-
-    def test_session_page_ignores_missing_t_param(self):
-        """The session page must render fine with no ``?t=`` param."""
-        sess = self._create_deadline()  # any DB row exists; not used here
-        # We just want to render the /sessions page; 404 is acceptable
-        # for unknown ids, but the page itself must not crash on the
-        # JS snippet.
-        resp = self.client.get("/sessions/nonexistent", follow_redirects=False)
-        # 404 is fine — the point is the route is reachable.
-        self.assertIn(resp.status_code, (200, 404))

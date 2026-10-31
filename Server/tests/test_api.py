@@ -412,22 +412,6 @@ class TranscribeRouteTests(LRTestCase):
 
 class WebUITests(LRTestCase):
 
-    def test_index_empty(self) -> None:
-        r = self.client.get("/recordings")
-        self.assertEqual(r.status_code, 200)
-        self.assertIn(b"No recordings yet", r.get_data())
-
-    def test_index_shows_session(self) -> None:
-        self._upload_complete_session()
-        r = self.client.get("/recordings")
-        self.assertEqual(r.status_code, 200)
-        body = r.get_data()
-        self.assertIn(b"Test", body)
-        # After M8, the no-op pipeline completes successfully and
-        # the session ends at status='done' (rendered as "Done"
-        # in the page). Real LLM keys would also land on 'done'.
-        self.assertIn(b"Done", body)
-
     def test_dashboard_renders(self) -> None:
         """The home page (/) is the bento dashboard."""
         r = self.client.get("/")
@@ -522,17 +506,13 @@ class WebUITests(LRTestCase):
         self.assertIn(".lr-page--full", layout)
         self.assertIn("var(--lr-pad-edge)", layout)
 
-    def test_session_page_contains_audio(self) -> None:
+    def test_recording_opens_on_its_page_with_audio(self) -> None:
         self._upload_complete_session()
-        r = self.client.get("/sessions/abcdef1234567890")
+        r = self.client.get("/other?session=abcdef1234567890")
         self.assertEqual(r.status_code, 200)
         body = r.get_data()
         self.assertIn(b"<audio", body)
         self.assertIn(b"/api/v1/sessions/abcdef1234567890/audio", body)
-
-    def test_session_page_404_for_unknown(self) -> None:
-        r = self.client.get("/sessions/missing")
-        self.assertEqual(r.status_code, 404)
 
     def test_todos_renders(self) -> None:
         r = self.client.get("/todos")
@@ -547,11 +527,6 @@ class WebUITests(LRTestCase):
         r = self.client.get("/calendar")
         self.assertEqual(r.status_code, 200)
         self.assertIn(b"Calendar", r.get_data())
-
-    def test_unsorted_renders(self) -> None:
-        r = self.client.get("/unsorted")
-        self.assertEqual(r.status_code, 200)
-        self.assertIn(b"Sort recordings", r.get_data())
 
     def test_lectures_filter_works_end_to_end(self) -> None:
         """Set a session's kind to 'lecture' and verify it shows on

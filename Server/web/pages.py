@@ -15,15 +15,14 @@ from services import transcode
 from auth import _safe_next
 from web.pipeline import set_kind_by_hand
 from web.common import (
-    _STATUS_LABEL,
-    _estimate_duration_seconds,
     _selected_session_context,
-    current_app_classification_service,
     current_app_courses_service,
     current_app_events_service,
     current_app_notes_service,
     current_app_storage,
     current_app_tasks_service,
+    is_other,
+    recording_url,
 )
 
 
@@ -105,22 +104,6 @@ def ui_dashboard() -> Any:
         lecture_total=lecture_total,
         recent_meetings=recent_meetings,
         meeting_total=meeting_total,
-    )
-
-
-@bp.get("/recordings")
-def ui_index() -> Any:
-    """All-sessions list (legacy). Kept for backwards compatibility
-    and for users who want everything on one page."""
-    all_sessions = current_app_storage().list_sessions()
-    return render_template(
-        "index.html",
-        sessions=all_sessions,
-        page_title="Recordings",
-        page_sub="Newest first. Click a row to open.",
-        kind_filter=None,
-        status_label=_STATUS_LABEL,
-        duration_for=_estimate_duration_seconds,
     )
 
 
@@ -207,20 +190,12 @@ def ui_meetings() -> Any:
     )
 
 
-def _is_other(sess) -> bool:
-    """Shown on the Other page: kind 'other', or finished without a
-    kind (no speech, or processing failed)."""
-    return sess.kind == "other" or (
-        sess.kind is None and sess.status in ("done", "failed")
-    )
-
-
 @bp.get("/other")
 def ui_other() -> Any:
     """Two-pane page for recordings that are not lectures, meetings
     or voice memos, with a control to classify each by hand."""
     store = current_app_storage()
-    recordings = [s for s in store.list_sessions() if _is_other(s)]
+    recordings = [s for s in store.list_sessions() if is_other(s)]
     selected_id = request.args.get("session", "").strip()
     right_ctx = (_selected_session_context(selected_id)
                  if selected_id else {
@@ -240,15 +215,6 @@ def ui_other() -> Any:
         selected_id=selected_id,
         **right_ctx,
     )
-
-
-# Where a session lives once it has this kind.
-_KIND_PAGES = {
-    "lecture": ("pages.ui_lectures", "session"),
-    "meeting": ("pages.ui_meetings", "session"),
-    "voice_memo": ("pages.ui_notes", "memo"),
-    "other": ("pages.ui_other", "session"),
-}
 
 
 @bp.get("/sessions/<session_id>/export.md")
@@ -289,11 +255,10 @@ def ui_set_kind(session_id: str) -> Any:
     if current_app_storage().get_session(session_id) is None:
         abort(404)
     kind = request.form.get("kind", "").strip()
-    if kind not in _KIND_PAGES:
+    if kind not in services.classification.SELECTABLE_KINDS:
         abort(400)
-    set_kind_by_hand(current_app._get_current_object(), session_id, kind)
-    endpoint, param = _KIND_PAGES[kind]
-    return redirect(url_for(endpoint, **{param: session_id}))
+    sess = set_kind_by_hand(current_app._get_current_object(), session_id, kind)
+    return redirect(recording_url(sess))
 
 
 @bp.get("/notes")
@@ -356,28 +321,6 @@ def ui_notes() -> Any:
         note=note,
         **memo_ctx,
     )
-
-
-@bp.get("/notes/new")
-def ui_notes_new() -> Any:
-    """Legacy URL: the editor now lives on the notes page."""
-    return redirect(url_for("pages.ui_notes", new=1))
-
-
-@bp.get("/notes/<note_id>")
-def ui_note_detail(note_id: str) -> Any:
-    """Legacy deep-link: lands on the embedded editor."""
-    if current_app_notes_service().get(note_id) is None:
-        abort(404)
-    return redirect(url_for("pages.ui_notes", note_id=note_id))
-
-
-@bp.get("/notes/<note_id>/edit")
-def ui_note_edit(note_id: str) -> Any:
-    """Legacy URL: the editor now lives on the notes page."""
-    if current_app_notes_service().get(note_id) is None:
-        abort(404)
-    return redirect(url_for("pages.ui_notes", note_id=note_id))
 
 
 @bp.get("/todos")
@@ -648,36 +591,6 @@ def delete_event_action(event_id: str) -> Any:
     if not deleted:
         abort(404)
     return redirect(url_for("pages.ui_calendar"))
-
-
-@bp.get("/unsorted")
-def ui_unsorted() -> Any:
-    """Bulk-sort page: list ready sessions whose ``kind`` is
-    still NULL, with a dropdown + Save button per row to
-    manually assign a kind.
-    """
-    sessions, total = current_app_classification_service(
-    ).list_unclassified(limit=100, offset=0)
-    return render_template(
-        "unsorted.html",
-        sessions=sessions,
-        total=total,
-        kinds=sorted(services.classification.VALID_KINDS),
-    )
-
-
-@bp.get("/sessions/<session_id>")
-def ui_session(session_id: str) -> Any:
-    sess = current_app_storage().get_session(session_id)
-    if sess is None:
-        abort(404)
-    return render_template(
-        "session.html",
-        session=sess,
-        status_label=_STATUS_LABEL,
-        duration_for=_estimate_duration_seconds,
-        **_selected_session_context(session_id),
-    )
 
 
 @bp.get("/upload")

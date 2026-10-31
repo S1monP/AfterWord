@@ -40,12 +40,6 @@
         <a href="{{ url_for('pages.ui_calendar') }}"
            class="{% if request.endpoint == 'pages.ui_calendar' %}is-active{% endif %}">Calendar</a>
         <a class="lr-topbar__upload" href="{{ url_for('pages.ui_upload') }}">↑ Upload</a>
-        {% if unsorted_count and unsorted_count > 0 %}
-          <a class="lr-topbar__unsorted" href="{{ url_for('pages.ui_unsorted') }}" title="Recordings needing classification">
-            <span class="lr-topbar__unsorted-dot"></span>
-            <span class="lr-num">{{ unsorted_count }}</span>
-          </a>
-        {% endif %}
         {% if auth_enabled %}
           <form class="lr-topbar__logout" method="post" action="{{ url_for('auth.logout') }}">
             <button class="lr-btn lr-btn--ghost" type="submit">Log out</button>

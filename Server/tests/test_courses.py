@@ -711,15 +711,14 @@ class ClickableTranscriptTests(LRTestCase):
         self.assertIn('<span class="lr-tline__who">Speaker 2</span>', body)
         self.assertIn("a line without a marker", body)
 
-    def test_session_page_has_the_transcript_and_player(self):
+    def test_recording_page_has_the_transcript_and_player(self):
         store = self.app.config["LR_STORAGE"]
         sid = _seed_session(self, status="done", kind="meeting")
         store.full_audio_path(sid).write_bytes(self.make_wav(b"\x00" * 256))
         store.add_artifact(sid, "transcript", self.TRANSCRIPT)
-        body = self.client.get(f"/sessions/{sid}?t=5000").get_data(as_text=True)
+        body = self.client.get(f"/meetings?session={sid}&t=5000").get_data(as_text=True)
         self.assertEqual(body.count("<audio"), 1)
         self.assertIn('data-t="5"', body)
-        self.assertIn("Re-run AI processing", body)
 
 
 class DeleteExportTests(LRTestCase):

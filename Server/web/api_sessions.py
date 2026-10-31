@@ -409,51 +409,6 @@ def api_classify_session(session_id: str) -> Any:
     })
 
 
-@bp.post("/api/v1/classifications/bulk")
-def api_bulk_classify() -> Any:
-    """Bulk classify a list of session ids.
-
-    Body: ``{"session_ids": [...]}``. Returns
-    ``{"results": {session_id: {kind, confidence, reason} | null}}``.
-    Unknown session ids are silently omitted. Each session
-    is classified independently using the configured LLM
-    provider; on success the kind is persisted via
-    ``set_kind``.
-    """
-    payload = request.get_json(silent=True) or {}
-    session_ids = payload.get("session_ids")
-    if not isinstance(session_ids, list):
-        return jsonify({
-            "error": "invalid_payload",
-            "detail": "'session_ids' must be a list",
-        }), 400
-    svc = current_app_classification_service()
-    store = current_app_storage()
-    classifier = current_app_text_provider()
-    results: dict[str, Any] = {}
-    for sid in session_ids:
-        if not isinstance(sid, str) or not sid:
-            continue
-        if store.get_session(sid) is None:
-            continue
-        outcome = svc.classify_session(sid, classifier=classifier)
-        if outcome is None:
-            results[sid] = {
-                "kind": None,
-                "confidence": None,
-                "reason": services.classification.LLM_NOT_IMPLEMENTED,
-            }
-        else:
-            k, c = outcome
-            sess = store.set_kind(sid, k, confidence=c)
-            results[sid] = {
-                "kind": sess.kind,
-                "confidence": sess.kind_confidence,
-                "reason": "classified",
-            }
-    return jsonify({"results": results})
-
-
 @bp.post("/api/v1/sessions/<session_id>/course")
 def api_assign_course(session_id: str) -> Any:
     """Assign or unassign a course on a session.
