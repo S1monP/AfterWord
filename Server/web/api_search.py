@@ -8,7 +8,9 @@ from flask import Blueprint, jsonify, request, url_for
 
 import search
 import timeutil
-from web.common import _KIND_LABEL, current_app_storage, rec_title, recording_url
+from web.common import (
+    _KIND_LABEL, course_cls, current_app_storage, rec_title, recording_url,
+)
 
 bp = Blueprint("search_api", __name__)
 
@@ -29,8 +31,10 @@ _GROUP_LABELS = {
 def api_search() -> Any:
     """``?q=`` -> ``{"query", "groups": [{"type", "label", "total",
     "items": [{"title", "meta", "snippet", "at", "url", "moments",
-    "more"}]}]}``. ``title`` and ``snippet`` are ``[[text, matched],
-    ...]`` so the page can mark the matched words."""
+    "more", "icon", "cc"}]}]}``. ``title`` and ``snippet`` are
+    ``[[text, matched], ...]`` so the page can mark the matched words;
+    ``icon`` names the type (lecture, meeting, note, other, todo,
+    deadline, event) and ``cc`` is the course colour class."""
     raw = request.args.get("q", "")
     query = search.parse_query(raw)
     store = current_app_storage()
@@ -63,6 +67,13 @@ def _clock(ms: int) -> str:
     return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
 
+def _course(store, course_id: Optional[str]):
+    return store.get_course(course_id) if course_id else None
+
+
+_KIND_ICON = {"lecture": "lecture", "meeting": "meeting", "voice_memo": "note"}
+
+
 def _snippet(hit: search.Hit, query: search.Query) -> Optional[list]:
     return search.snippet(hit.best["text"], query) if hit.best else None
 
@@ -78,7 +89,11 @@ def _recording(store, hit, query, raw) -> Optional[dict]:
         return recording_url(sess, **args)
 
     best_at = hit.best["at_ms"] if hit.best else None
-    meta = _KIND_LABEL.get(sess.kind or "", "Recording")
+    course = _course(store, sess.course_id)
+    meta = " · ".join(filter(None, [
+        _KIND_LABEL.get(sess.kind or "", "Recording"),
+        course.name if course else "",
+    ]))
     when = _when(sess.started_at)
     moments = hit.moments if len(hit.moments) > 1 else []
     return {
@@ -90,6 +105,8 @@ def _recording(store, hit, query, raw) -> Optional[dict]:
         "moments": [{"label": _clock(ms), "url": url(ms)}
                     for ms in moments[:_MOMENTS]],
         "more": max(0, len(moments) - _MOMENTS),
+        "icon": _KIND_ICON.get(sess.kind or "", "other"),
+        "cc": course_cls(course.color if course else None),
     }
 
 
@@ -102,6 +119,8 @@ def _note(store, hit, query, raw) -> Optional[dict]:
         "meta": "Note · edited " + _when(note.updated_at, "%d %b %Y"),
         "snippet": _snippet(hit, query),
         "url": url_for("pages.ui_notes", note_id=note.id),
+        "icon": "note",
+        "cc": "cc-0",
     }
 
 
@@ -119,6 +138,8 @@ def _task(store, hit, query, raw) -> Optional[dict]:
         "meta": meta,
         "snippet": _snippet(hit, query),
         "url": url_for("pages.ui_todos") + f"#todo-{task.id}",
+        "icon": "deadline" if task.kind == "deadline" else "todo",
+        "cc": course_cls(getattr(_course(store, task.course_id), "color", None)),
     }
 
 
@@ -134,6 +155,8 @@ def _event(store, hit, query, raw) -> Optional[dict]:
         "meta": meta,
         "snippet": _snippet(hit, query),
         "url": url_for("pages.ui_event_edit", event_id=event.id),
+        "icon": "event",
+        "cc": course_cls(getattr(_course(store, event.course_id), "color", None)),
     }
 
 

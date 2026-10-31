@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% set legacy = true %}
 
 {% block title %}Tasks &middot; Lecture Recorder{% endblock %}
 
@@ -153,5 +154,5 @@
   </div>
 </div>
 
-<script src="{{ url_for('static', filename='js/todos.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/legacy/todos.js') }}" defer></script>
 {% endblock %}

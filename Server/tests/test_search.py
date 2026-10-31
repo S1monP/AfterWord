@@ -194,5 +194,5 @@ class SearchApiTests(_Base):
     def test_dashboard_box(self):
         body = self.client.get("/?q=lens").get_data(as_text=True)
         self.assertIn('id="lr-search-results"', body)
-        self.assertIn("js/search.js", body)
+        self.assertIn("search.js", body)
         self.assertIn('value="lens"', body)

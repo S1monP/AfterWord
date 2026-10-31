@@ -1,78 +1,64 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+{% from "_icons.html" import icon %}
+<html lang="en" data-theme="{{ ui_settings.theme if ui_settings else 'auto' }}" data-scheme="{{ ui_settings.scheme if ui_settings else 'violet' }}">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Lecture Recorder{% endblock %}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark light">
+  <title>{% block title %}AfterWord{% endblock %}</title>
+  <script>try { if (localStorage.getItem("aw-rail") === "open") document.documentElement.dataset.rail = "open"; } catch (e) {}</script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/fonts.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/tokens.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/layout.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/components.css') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/pages.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/shell.css') }}">
+  {% if legacy %}
+    {# Pages not rebuilt yet keep their old look inside the new frame. #}
+    {% for f in ["tokens", "base", "layout", "components", "pages"] %}
+      <link rel="stylesheet" href="{{ url_for('static', filename='css/legacy/' ~ f ~ '.css') }}">
+    {% endfor %}
+    <script defer src="{{ url_for('static', filename='js/legacy/app.js') }}"></script>
+  {% else %}
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/pages.css') }}">
+  {% endif %}
   {% block extrahead %}{% endblock %}
-  <script defer src="{{ url_for('static', filename='js/app.js') }}"></script>
+  <script defer src="{{ url_for('static', filename='js/shell.js') }}"></script>
+  <script defer src="{{ url_for('static', filename='js/search.js') }}"></script>
   {% block extrascripts %}{% endblock %}
 </head>
 <body>
-  <header class="lr-topbar">
-    <div class="lr-topbar__inner">
-      <a class="lr-topbar__brand" href="{{ url_for('pages.ui_dashboard') }}">
-        <span class="lr-topbar__brand-dot"></span>
-        Lecture Recorder
-      </a>
+{% if not bare %}
+<div class="app">
+  {% include "_nav.html" %}
+  <div class="app__main">
+    {% block pbar %}
+      <header class="pbar">
+        <button type="button" class="icon-btn" data-open-nav aria-label="Menu" aria-controls="nav">{{ icon("menu", 22) }}</button>
+        <h1 class="pbar__title">{% block pbar_title %}{% endblock %}</h1>
+        <button type="button" class="icon-btn" data-open-search aria-label="Search">{{ icon("search", 21) }}</button>
+      </header>
+    {% endblock %}
+    <main class="page" id="main">
+{% endif %}
+{% block content %}{% endblock %}
+{% if not bare %}
+    </main>
+  </div>
+</div>
 
-      <div class="lr-topbar__datetime" id="lr-datetime" aria-live="off">
-        <span class="lr-num">—</span>
-      </div>
-
-      {% if request.endpoint != 'auth.login' %}
-      <nav class="lr-topbar__nav" aria-label="Primary">
-        <a href="{{ url_for('pages.ui_lectures') }}"
-           class="{% if request.endpoint == 'pages.ui_lectures' %}is-active{% endif %}">Lectures</a>
-        <a href="{{ url_for('pages.ui_meetings') }}"
-           class="{% if request.endpoint == 'pages.ui_meetings' %}is-active{% endif %}">Meetings</a>
-        <a href="{{ url_for('pages.ui_notes') }}"
-           class="{% if request.endpoint == 'pages.ui_notes' %}is-active{% endif %}">Notes</a>
-        <a href="{{ url_for('pages.ui_other') }}"
-           class="{% if request.endpoint == 'pages.ui_other' %}is-active{% endif %}">Other</a>
-        <a href="{{ url_for('pages.ui_todos') }}"
-           class="{% if request.endpoint == 'pages.ui_todos' %}is-active{% endif %}">Todos</a>
-        <a href="{{ url_for('pages.ui_calendar') }}"
-           class="{% if request.endpoint == 'pages.ui_calendar' %}is-active{% endif %}">Calendar</a>
-        <a class="lr-topbar__upload" href="{{ url_for('pages.ui_upload') }}">↑ Upload</a>
-        {% if auth_enabled %}
-          <form class="lr-topbar__logout" method="post" action="{{ url_for('auth.logout') }}">
-            <button class="lr-btn lr-btn--ghost" type="submit">Log out</button>
-          </form>
-        {% endif %}
-      </nav>
-      {% endif %}
-    </div>
-  </header>
-
-  <main>
-    {% block content %}{% endblock %}
-  </main>
-
-  <script>
-    // Live-updating local date/time in the top bar.
-    (function () {
-      var el = document.getElementById("lr-datetime");
-      if (!el) return;
-      function fmt() {
-        var d = new Date();
-        var day = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.getDay()];
-        var hh = String(d.getHours()).padStart(2, "0");
-        var mm = String(d.getMinutes()).padStart(2, "0");
-        var dom = d.getDate();
-        var mon = ["Jan","Feb","Mar","Apr","May","Jun",
-                   "Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()];
-        return day + " " + hh + ":" + mm + " \u00b7 " + dom + " " + mon;
-      }
-      function tick() { el.textContent = fmt(); }
-      tick();
-      setInterval(tick, 30 * 1000);
-    })();
-  </script>
+<div class="search" id="search" role="dialog" aria-modal="true" aria-label="Search" hidden>
+  <div class="search__box">
+    <form class="search__head" role="search" data-search-form>
+      <button type="button" class="icon-btn search__back" data-close-search aria-label="Close search">{{ icon("back", 22) }}</button>
+      {{ icon("search", 17, cls="ic-search") }}
+      <label class="sr-only" for="search-input">Search everything</label>
+      <input class="search__input" id="search-input" type="search" autocomplete="off" spellcheck="false"
+             placeholder="Search lectures, transcripts, notes, to-dos…" data-search-input
+             role="combobox" aria-autocomplete="list" aria-controls="search-results" aria-expanded="false">
+    </form>
+    <div class="sres" id="search-results" role="listbox" aria-label="Search results" data-search-results></div>
+  </div>
+</div>
+{% endif %}
 </body>
 </html>

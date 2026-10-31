@@ -171,6 +171,12 @@ def _chunk_filename(index: int) -> str:
 
 SCHEMA_STATEMENTS: tuple[str, ...] = (
     """
+    CREATE TABLE IF NOT EXISTS settings (
+        key         TEXT PRIMARY KEY,
+        value       TEXT NOT NULL
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS courses (
         id          TEXT PRIMARY KEY,
         name        TEXT NOT NULL,
@@ -1163,6 +1169,22 @@ class Storage:
                 (course_id, name, code, color, int(sort_order), now),
             )
         return self.get_course(course_id)  # type: ignore[return-value]
+
+    # --- settings (the web UI's theme and colour scheme) ------------------
+
+    def get_settings(self) -> dict[str, str]:
+        """Every stored setting, as ``{key: value}``."""
+        with self._tx() as conn:
+            rows = conn.execute("SELECT key, value FROM settings").fetchall()
+        return {row[0]: row[1] for row in rows}
+
+    def set_setting(self, key: str, value: str) -> None:
+        with self._tx() as conn:
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, value),
+            )
 
     def get_course(self, course_id: str) -> Optional[Course]:
         with self._tx() as conn:

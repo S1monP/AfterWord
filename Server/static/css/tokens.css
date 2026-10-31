@@ -1,130 +1,36 @@
-/* Design tokens. Every component CSS reads from these.
- *
- * Two themes:
- *   - Dark (default): primary usage. Deep, warm-tinted neutrals.
- *   - Light: opt-in via [data-theme="light"] on <html>.
- *
- * Type pairing:
- *   - Manrope: display + UI text. Slightly geometric, slightly warm.
- *   - IBM Plex Sans: body + dense data. Engineered, very legible.
- *   - IBM Plex Mono: numbers, timestamps, code. Same family.
- *
- * Accent: lavender #a78bfa. Always means "you can act here".
- */
+/* AfterWord design tokens (Design/REDESIGN.md, section 11).
 
-:root {
-  /* ---- Colour, dark theme (default) ---- */
-  --lr-bg:            #0e0f12;
-  --lr-bg-elevated:   #17181d;
-  --lr-bg-card:       #17181d;
-  --lr-bg-card-hi:    #1f2128;
-  --lr-border:        #2a2c34;
-  --lr-border-hi:     #3a3d47;
+   Four colour schemes (html[data-scheme]) x light/dark (html[data-theme]:
+   auto | light | dark; auto follows the device). The page arrives with
+   both attributes set from the server's settings, so it never flashes.
 
-  --lr-text:          #e7e6ee;
-  --lr-text-muted:    #8b8a98;
-  --lr-text-faint:    #5a5965;
+   --cc1 .. --cc12 are the course colours (services/palette.py), drawn
+   in each scheme's own tones. Generated; edit the values in one place.
+*/
 
-  --lr-accent:        #a78bfa;
-  --lr-accent-hover:  #c4b3fd;
-  --lr-accent-press:  #8a6fdb;
-  --lr-accent-text:   #0b0a14;
+/* violet */
+html,html[data-scheme="violet"]{--bg:#0b0d10;--side:#0f1215;--panel:#121519;--hi:#191d23;--seam:#242a33;--text:#e6e8ee;--muted:#a3a9b8;--faint:#878ea0;--accent:#9488e8;--on-accent:#0b0d10;--soft:rgba(148,136,232,.14);--ok:#57c785;--busy:#e8b04a;--danger:#f08a8a;--none:#878ea0;--cc1:#6aa7ff;--cc2:#f08a6c;--cc3:#3cc7b0;--cc4:#e676a8;--cc5:#5abfd8;--cc6:#a8d161;--cc7:#b15ed4;--cc8:#d8bf5a;--cc9:#66cc85;--cc10:#d161bb;--cc11:#be9b74;--cc12:#8395af;color-scheme:dark;--shadow:0 14px 40px rgba(0,0,0,.45)}
+html[data-theme="light"],html[data-scheme="violet"][data-theme="light"]{--bg:#e6e9ef;--side:#f6f7f9;--panel:#ffffff;--hi:#f3f5f8;--seam:#dde1e8;--text:#141821;--muted:#4b5263;--faint:#5d6576;--accent:#5b4bc4;--on-accent:#ffffff;--soft:rgba(91,75,196,.10);--ok:#1d7f45;--busy:#9a5800;--danger:#b42323;--none:#5d6576;--cc1:#2463d6;--cc2:#c2410c;--cc3:#0f766e;--cc4:#be185d;--cc5:#237e95;--cc6:#5e7e25;--cc7:#842da9;--cc8:#887320;--cc9:#2b8245;--cc10:#a6308e;--cc11:#926e45;--cc12:#546783;color-scheme:light;--shadow:0 14px 40px rgba(20,24,33,.16)}
+@media (prefers-color-scheme: light){html[data-theme="auto"],html[data-scheme="violet"][data-theme="auto"]{--bg:#e6e9ef;--side:#f6f7f9;--panel:#ffffff;--hi:#f3f5f8;--seam:#dde1e8;--text:#141821;--muted:#4b5263;--faint:#5d6576;--accent:#5b4bc4;--on-accent:#ffffff;--soft:rgba(91,75,196,.10);--ok:#1d7f45;--busy:#9a5800;--danger:#b42323;--none:#5d6576;--cc1:#2463d6;--cc2:#c2410c;--cc3:#0f766e;--cc4:#be185d;--cc5:#237e95;--cc6:#5e7e25;--cc7:#842da9;--cc8:#887320;--cc9:#2b8245;--cc10:#a6308e;--cc11:#926e45;--cc12:#546783;color-scheme:light;--shadow:0 14px 40px rgba(20,24,33,.16)}}
+/* honey */
+html[data-scheme="honey"]{--bg:#0e0c09;--side:#14110d;--panel:#1a1611;--hi:#231e17;--seam:#30291f;--text:#f3ede3;--muted:#bcb09e;--faint:#9e927f;--accent:#e9b949;--on-accent:#1c1400;--soft:rgba(233,185,73,.15);--ok:#86d39a;--busy:#7cc0ff;--danger:#f08a8a;--none:#9e927f;--cc1:#a59cf5;--cc2:#f2867a;--cc3:#5fd0b8;--cc4:#e48ac0;--cc5:#5abfd8;--cc6:#a8d161;--cc7:#b15ed4;--cc8:#b47ea0;--cc9:#66cc85;--cc10:#d161bb;--cc11:#be9b74;--cc12:#8395af;color-scheme:dark;--shadow:0 14px 40px rgba(0,0,0,.45)}
+html[data-scheme="honey"][data-theme="light"]{--bg:#f0ece4;--side:#faf8f3;--panel:#ffffff;--hi:#f7f3ea;--seam:#e6dfd2;--text:#1d1810;--muted:#5a5040;--faint:#6d6250;--accent:#9a6a00;--on-accent:#ffffff;--soft:rgba(154,106,0,.10);--ok:#2f7d3f;--busy:#1d64b8;--danger:#b42323;--none:#6d6250;--cc1:#5b46c9;--cc2:#b8402f;--cc3:#0d7a68;--cc4:#b02a73;--cc5:#237e95;--cc6:#5e7e25;--cc7:#842da9;--cc8:#874f73;--cc9:#2b8245;--cc10:#a6308e;--cc11:#926e45;--cc12:#546783;color-scheme:light;--shadow:0 14px 40px rgba(20,24,33,.16)}
+@media (prefers-color-scheme: light){html[data-scheme="honey"][data-theme="auto"]{--bg:#f0ece4;--side:#faf8f3;--panel:#ffffff;--hi:#f7f3ea;--seam:#e6dfd2;--text:#1d1810;--muted:#5a5040;--faint:#6d6250;--accent:#9a6a00;--on-accent:#ffffff;--soft:rgba(154,106,0,.10);--ok:#2f7d3f;--busy:#1d64b8;--danger:#b42323;--none:#6d6250;--cc1:#5b46c9;--cc2:#b8402f;--cc3:#0d7a68;--cc4:#b02a73;--cc5:#237e95;--cc6:#5e7e25;--cc7:#842da9;--cc8:#874f73;--cc9:#2b8245;--cc10:#a6308e;--cc11:#926e45;--cc12:#546783;color-scheme:light;--shadow:0 14px 40px rgba(20,24,33,.16)}}
+/* wine */
+html[data-scheme="wine"]{--bg:#0f0b0b;--side:#151010;--panel:#1b1514;--hi:#241c1b;--seam:#332826;--text:#f3eae7;--muted:#bfaea9;--faint:#a08f8a;--accent:#d98aa8;--on-accent:#1f0a12;--soft:rgba(217,138,168,.15);--ok:#8fd19e;--busy:#e8c547;--danger:#f08a8a;--none:#a08f8a;--cc1:#8fb8ff;--cc2:#f0a868;--cc3:#6fd0b5;--cc4:#c9a7ff;--cc5:#5abfd8;--cc6:#a8d161;--cc7:#b15ed4;--cc8:#d8bf5a;--cc9:#66cc85;--cc10:#d161bb;--cc11:#be9b74;--cc12:#8395af;color-scheme:dark;--shadow:0 14px 40px rgba(0,0,0,.45)}
+html[data-scheme="wine"][data-theme="light"]{--bg:#f1ebe9;--side:#fbf8f7;--panel:#ffffff;--hi:#f7f1ef;--seam:#e7dcd9;--text:#1e1514;--muted:#5b4a46;--faint:#6e5d58;--accent:#9c3a62;--on-accent:#ffffff;--soft:rgba(156,58,98,.10);--ok:#2f7d3f;--busy:#8a6400;--danger:#b42323;--none:#6e5d58;--cc1:#1f5fbf;--cc2:#b45309;--cc3:#0d7a68;--cc4:#6d46c9;--cc5:#237e95;--cc6:#5e7e25;--cc7:#842da9;--cc8:#887320;--cc9:#2b8245;--cc10:#a6308e;--cc11:#926e45;--cc12:#546783;color-scheme:light;--shadow:0 14px 40px rgba(20,24,33,.16)}
+@media (prefers-color-scheme: light){html[data-scheme="wine"][data-theme="auto"]{--bg:#f1ebe9;--side:#fbf8f7;--panel:#ffffff;--hi:#f7f1ef;--seam:#e7dcd9;--text:#1e1514;--muted:#5b4a46;--faint:#6e5d58;--accent:#9c3a62;--on-accent:#ffffff;--soft:rgba(156,58,98,.10);--ok:#2f7d3f;--busy:#8a6400;--danger:#b42323;--none:#6e5d58;--cc1:#1f5fbf;--cc2:#b45309;--cc3:#0d7a68;--cc4:#6d46c9;--cc5:#237e95;--cc6:#5e7e25;--cc7:#842da9;--cc8:#887320;--cc9:#2b8245;--cc10:#a6308e;--cc11:#926e45;--cc12:#546783;color-scheme:light;--shadow:0 14px 40px rgba(20,24,33,.16)}}
+/* copper */
+html[data-scheme="copper"]{--bg:#0d0b0a;--side:#131110;--panel:#191614;--hi:#221e1b;--seam:#2e2925;--text:#f2ece6;--muted:#b8ada3;--faint:#9a8f85;--accent:#f0915e;--on-accent:#1f0d03;--soft:rgba(240,145,94,.15);--ok:#7fcf8f;--busy:#e8c547;--danger:#f08a8a;--none:#9a8f85;--cc1:#7fb4ff;--cc2:#f2867a;--cc3:#5fd0b8;--cc4:#d9a0f0;--cc5:#5abfd8;--cc6:#a8d161;--cc7:#757bd7;--cc8:#d8bf5a;--cc9:#66cc85;--cc10:#d161bb;--cc11:#be9b74;--cc12:#8395af;color-scheme:dark;--shadow:0 14px 40px rgba(0,0,0,.45)}
+html[data-scheme="copper"][data-theme="light"]{--bg:#efebe7;--side:#faf8f6;--panel:#ffffff;--hi:#f6f2ee;--seam:#e5ded7;--text:#1c1714;--muted:#574d45;--faint:#6b6058;--accent:#b4541e;--on-accent:#ffffff;--soft:rgba(180,84,30,.10);--ok:#2f7d3f;--busy:#8a6400;--danger:#b42323;--none:#6b6058;--cc1:#1f5fbf;--cc2:#b8402f;--cc3:#0d7a68;--cc4:#8b3bb0;--cc5:#237e95;--cc6:#5e7e25;--cc7:#3038a6;--cc8:#887320;--cc9:#2b8245;--cc10:#a6308e;--cc11:#926e45;--cc12:#546783;color-scheme:light;--shadow:0 14px 40px rgba(20,24,33,.16)}
+@media (prefers-color-scheme: light){html[data-scheme="copper"][data-theme="auto"]{--bg:#efebe7;--side:#faf8f6;--panel:#ffffff;--hi:#f6f2ee;--seam:#e5ded7;--text:#1c1714;--muted:#574d45;--faint:#6b6058;--accent:#b4541e;--on-accent:#ffffff;--soft:rgba(180,84,30,.10);--ok:#2f7d3f;--busy:#8a6400;--danger:#b42323;--none:#6b6058;--cc1:#1f5fbf;--cc2:#b8402f;--cc3:#0d7a68;--cc4:#8b3bb0;--cc5:#237e95;--cc6:#5e7e25;--cc7:#3038a6;--cc8:#887320;--cc9:#2b8245;--cc10:#a6308e;--cc11:#926e45;--cc12:#546783;color-scheme:light;--shadow:0 14px 40px rgba(20,24,33,.16)}}
 
-  --lr-success:       #7dd3a0;
-  --lr-warning:       #e8b86d;
-  --lr-danger:        #e88282;
-  --lr-info:          #82b8e8;
-
-  /* Surfaces: aliases over the background scale. Defined once here
-     so hover/active tints adapt to both themes automatically. */
-  --lr-surface:       var(--lr-bg-card);
-  --lr-surface-2:     var(--lr-bg-card-hi);
-  --lr-surface-hover: color-mix(in srgb, var(--lr-text) 6%, transparent);
-
-  /* ---- Type ---- */
-  --lr-font-display:  "Manrope", -apple-system, BlinkMacSystemFont,
-                       "Segoe UI", Roboto, sans-serif;
-  --lr-font-body:     "IBM Plex Sans", -apple-system, BlinkMacSystemFont,
-                       "Segoe UI", Roboto, sans-serif;
-  --lr-font-mono:     "IBM Plex Mono", ui-monospace, SFMono-Regular,
-                       Menlo, Consolas, monospace;
-
-  /* Type scale, 1.25 minor-third */
-  --lr-fs-xs:   12px;
-  --lr-fs-sm:   13px;
-  --lr-fs-md:   15px;
-  --lr-fs-lg:   17px;
-  --lr-fs-xl:   19px;
-  --lr-fs-2xl:  24px;
-  --lr-fs-3xl:  30px;
-  --lr-fs-4xl:  38px;
-
-  --lr-fh-tight:  1.2;
-  --lr-fh-normal: 1.45;
-
-  --lr-fw-regular:  400;
-  --lr-fw-medium:   500;
-  --lr-fw-semibold: 600;
-  --lr-fw-bold:     700;
-
-  /* ---- Spacing scale ---- */
-  --lr-s-1:   4px;
-  --lr-s-2:   8px;
-  --lr-s-3:  12px;
-  --lr-s-4:  16px;
-  --lr-s-5:  20px;
-  --lr-s-7:  28px;
-  --lr-s-10: 40px;
-  --lr-s-14: 56px;
-
-  /* ---- Shape ---- */
-  --lr-r-sm:   6px;
-  --lr-r-md:   8px;
-  --lr-r-lg:  14px;
-  --lr-r-pill: 999px;
-
-  /* ---- Shadows ---- */
-  --lr-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.20);
-  --lr-shadow-md: 0 4px 14px rgba(0, 0, 0, 0.30);
-  --lr-shadow-glow: 0 0 0 2px rgba(167, 139, 250, 0.35);
-
-  /* ---- Motion ---- */
-  --lr-t-fast:   100ms ease-out;
-  --lr-t-base:   180ms ease-out;
-  --lr-t-slow:   280ms cubic-bezier(0.4, 0, 0.2, 1);
-
-  /* ---- Top bar (square corners, special-cased) ---- */
-  --lr-topbar-h:  56px;
-
-  /* ---- Layout ---- */
-  --lr-container-max: 1280px;
-  --lr-gap-card:   24px;
-  --lr-pad-card:   20px;
-  --lr-pad-page:   32px;
-  /* Edge gap for full-width pages (dashboard). Keeps content
-     a fixed distance from the viewport edges regardless of size. */
-  --lr-pad-edge:  24px;
-  /* Generous top gap for the dashboard. ~1/8 of the viewport,
-     capped at 112px on large screens. */
-  --lr-pad-page-top: min(12vh, 112px);
-}
-
-/* ---- Light theme, opt-in via [data-theme="light"] on <html> ---- */
-[data-theme="light"] {
-  --lr-bg:           #fafaf7;
-  --lr-bg-elevated:  #ffffff;
-  --lr-bg-card:      #ffffff;
-  --lr-bg-card-hi:   #f3f3ef;
-  --lr-border:       #e6e5df;
-  --lr-border-hi:    #d4d3cd;
-
-  --lr-text:         #1a1b1f;
-  --lr-text-muted:   #5a5b62;
-  --lr-text-faint:   #8b8a92;
-
-  --lr-accent-text:  #ffffff;
-
-  --lr-shadow-sm:   0 1px 2px rgba(0, 0, 0, 0.06);
-  --lr-shadow-md:   0 4px 14px rgba(0, 0, 0, 0.10);
-  --lr-shadow-glow: 0 0 0 2px rgba(167, 139, 250, 0.45);
+/* Not colour */
+:root{
+  --font:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"Cascadia Mono",Consolas,monospace;
+  --r-sm:6px;--r-md:9px;--r-lg:12px;--r-xl:16px;
+  --rail:60px;--sidebar:236px;--list:340px;
+  --topbar:60px;
+  --ease:cubic-bezier(.2,.7,.2,1);
 }

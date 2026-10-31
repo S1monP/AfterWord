@@ -1,10 +1,11 @@
 {% extends "base.html" %}
+{% set legacy = true %}
 
 {% block title %}Home &middot; Lecture Recorder{% endblock %}
 
 {% block extrascripts %}
-<script src="{{ url_for('static', filename='js/todos.js') }}" defer></script>
-<script src="{{ url_for('static', filename='js/search.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/legacy/todos.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/legacy/search.js') }}" defer></script>
 {% endblock %}
 
 {% block content %}

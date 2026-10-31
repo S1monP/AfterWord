@@ -1,0 +1,93 @@
+{# The navigation (REDESIGN.md sections 2 and 14). One markup for:
+   the full sidebar on Home (.nav--home), the icon rail on other pages
+   (.nav--rail, can be pinned open), and the phone's full-screen menu
+   (.nav.is-open, opened by the menu button or Home's logo). #}
+{% from "_icons.html" import icon, logo %}
+{% set ep = request.endpoint %}
+{% set is_home = ep == 'pages.ui_dashboard' %}
+{% macro item(endpoint, label, icon_name, count=None, cls='') -%}
+  {% set current = ep == endpoint %}
+  <a class="nav__item {{ cls }}" href="{{ url_for(endpoint) }}" {% if current %}aria-current="page"{% endif %}>
+    {{ icon(icon_name, 19) }}<span class="nav__label">{{ label }}</span>
+    {% if count is not none %}<span class="nav__count">{{ count }}</span>{% endif %}
+    <span class="nav__tip">{{ label }}{% if count is not none %} · {{ count }}{% endif %}</span>
+  </a>
+{%- endmacro %}
+{% macro theme_controls() -%}
+  <div class="seg" role="group" aria-label="Theme">
+    {% for value, label in [("auto", "Auto"), ("light", "Light"), ("dark", "Dark")] %}
+      <button type="button" data-set-theme="{{ value }}" aria-pressed="{{ 'true' if ui_settings.theme == value else 'false' }}">{{ label }}</button>
+    {% endfor %}
+  </div>
+  <div class="dots" role="group" aria-label="Colour scheme">
+    <span class="dots__label" data-scheme-name>{{ {"violet": "Violet, refined", "honey": "Honey amber", "wine": "Wine & Walnut", "copper": "Warm Copper"}[ui_settings.scheme] }}</span>
+    {% for value, label in [("violet", "Violet, refined"), ("honey", "Honey amber"), ("wine", "Wine & Walnut"), ("copper", "Warm Copper")] %}
+      <button type="button" class="dot-btn dot-btn--{{ value }}" data-set-scheme="{{ value }}" data-label="{{ label }}" aria-label="{{ label }}" title="{{ label }}" aria-pressed="{{ 'true' if ui_settings.scheme == value else 'false' }}"><i></i></button>
+    {% endfor %}
+  </div>
+{%- endmacro %}
+
+<aside class="nav {{ 'nav--home' if is_home else 'nav--rail' }}" id="nav" aria-label="Main">
+  <div class="nav__top">
+    <button type="button" class="icon-btn" data-close-nav aria-label="Close the menu">{{ icon("close", 22) }}</button>
+    <a class="nav__top-brand" href="{{ url_for('pages.ui_dashboard') }}">{{ logo(26) }}AfterWord</a>
+    <span class="spacer"></span>
+  </div>
+
+  <a class="nav__brand" href="{{ url_for('pages.ui_dashboard') }}">
+    {{ logo() }}<span class="nav__brand-name">AfterWord</span><span class="nav__tip">AfterWord · Home</span>
+  </a>
+
+  {{ item('pages.ui_dashboard', 'Home', 'home', cls='nav__item--home') }}
+  <button type="button" class="nav__item nav__item--search" data-open-search>
+    {{ icon("search", 19) }}<span class="nav__label">Search</span><span class="nav__tip">Search · /</span>
+  </button>
+  <button type="button" class="nav__searchfield" data-open-search>{{ icon("search", 19) }}Search everything</button>
+
+  {% if nav %}
+    {{ item('pages.ui_lectures', 'Lectures', 'lecture', nav.lectures) }}
+    {{ item('pages.ui_meetings', 'Meetings', 'meeting', nav.meetings) }}
+    {{ item('pages.ui_notes', 'Notes', 'note', nav.notes) }}
+    {{ item('pages.ui_other', 'Other', 'other', nav.other) }}
+    {{ item('pages.ui_todos', 'To-dos', 'todo', nav.todos) }}
+  {% else %}
+    {{ item('pages.ui_lectures', 'Lectures', 'lecture') }}
+    {{ item('pages.ui_meetings', 'Meetings', 'meeting') }}
+    {{ item('pages.ui_notes', 'Notes', 'note') }}
+    {{ item('pages.ui_other', 'Other', 'other') }}
+    {{ item('pages.ui_todos', 'To-dos', 'todo') }}
+  {% endif %}
+  {{ item('pages.ui_calendar', 'Calendar', 'calendar') }}
+
+  {% if nav and nav.courses %}
+    <section class="nav__courses" aria-label="Courses">
+      <h2 class="nav__heading">Courses</h2>
+      {% for c in nav.courses %}
+        <a class="nav__course {{ course_cls(c.course.color) }}" href="{{ url_for('pages.ui_lectures', course=c.course.id) }}">
+          <span class="sq"></span><span class="nav__label">{{ c.course.name }}</span><span class="nav__count">{{ c.lectures }}</span>
+        </a>
+      {% endfor %}
+    </section>
+  {% endif %}
+
+  <div class="nav__foot">
+    <a class="btn btn--fill nav__upload nav__upload-wide" href="{{ url_for('pages.ui_upload') }}">{{ icon("upload", 16, 2.1) }}Upload recording</a>
+    <a class="nav__item nav__upload-rail" href="{{ url_for('pages.ui_upload') }}" {% if ep == 'pages.ui_upload' %}aria-current="page"{% endif %}>
+      {{ icon("upload", 19) }}<span class="nav__label">Upload recording</span><span class="nav__tip">Upload recording</span>
+    </a>
+    <div class="nav__theme">{{ theme_controls() }}</div>
+    <button type="button" class="nav__item nav__sun" data-theme-menu aria-haspopup="true" aria-expanded="false">
+      {{ icon("sun", 19) }}<span class="nav__label">Theme and colours</span><span class="nav__tip">Theme and colours</span>
+    </button>
+    {% if auth_enabled %}
+      <form method="post" action="{{ url_for('auth.logout') }}">
+        <button type="submit" class="nav__item">{{ icon("logout", 19) }}<span class="nav__label">Log out</span><span class="nav__tip">Log out</span></button>
+      </form>
+    {% endif %}
+    <button type="button" class="nav__item nav__pin" data-pin-rail>
+      {{ icon("pin-open", 19) }}<span class="nav__label">Collapse</span><span class="nav__tip">Keep the sidebar open</span>
+    </button>
+  </div>
+</aside>
+
+<div class="menu theme-pop" id="theme-pop" role="dialog" aria-label="Theme and colours" hidden>{{ theme_controls() }}</div>

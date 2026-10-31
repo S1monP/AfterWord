@@ -29,7 +29,7 @@ import config as config_mod
 import storage
 from services import transcode
 import web
-from web.common import register_filters
+from web.common import nav_context, register_filters
 from web.pipeline import _start_pipeline_worker, sweep_stranded_sessions
 
 # Re-exported: tests and scripts import these from ``app``.
@@ -143,7 +143,14 @@ def create_app(config: Optional[config_mod.Config] = None) -> Flask:
         # Helpers for task date rendering. Available in every template.
         from services.tasks import is_due_today as _is_due_today
         from services.tasks import is_overdue as _is_overdue
+        from web.api_settings import ui_settings
+        try:
+            nav = nav_context()
+        except Exception:  # pragma: no cover  (a page still renders)
+            nav = None
         return {
+            "ui_settings": ui_settings(),
+            "nav": nav,
             "now_iso": storage.now_iso(),
             "is_overdue": _is_overdue,
             "is_due_today": _is_due_today,

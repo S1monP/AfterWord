@@ -490,22 +490,6 @@ class WebUITests(LRTestCase):
         self.assertNotIn(b"No meetings recorded", body)
         self.assertNotIn(b"No events", body)
 
-    def test_dashboard_gap_token_defined(self) -> None:
-        """The dashboard's top-gap token is defined in tokens.css and
-        used by the layout. Static check so the visual stays consistent
-        if someone refactors."""
-        from pathlib import Path
-        css_root = Path(__file__).resolve().parent.parent / "static" / "css"
-        tokens = (css_root / "tokens.css").read_text(encoding="utf-8")
-        layout = (css_root / "layout.css").read_text(encoding="utf-8")
-        self.assertIn("--lr-pad-page-top:", tokens)
-        self.assertIn("min(12vh, 112px)", tokens)
-        self.assertIn("var(--lr-pad-page-top)", layout)
-        # The full-width modifier and its edge token.
-        self.assertIn("--lr-pad-edge:", tokens)
-        self.assertIn(".lr-page--full", layout)
-        self.assertIn("var(--lr-pad-edge)", layout)
-
     def test_recording_opens_on_its_page_with_audio(self) -> None:
         self._upload_complete_session()
         r = self.client.get("/other?session=abcdef1234567890")
@@ -518,7 +502,7 @@ class WebUITests(LRTestCase):
         r = self.client.get("/todos")
         self.assertEqual(r.status_code, 200)
         body = r.get_data()
-        self.assertIn(b"Todos", body)
+        self.assertIn(b"To-dos", body)
         # Both sub-sections visible.
         self.assertIn(b"Tasks", body)
         self.assertIn(b"Deadlines", body)

@@ -1,0 +1,63 @@
+{# Drawn icons: one stroke weight (1.8), 24px grid, currentColor.
+   {% from "_icons.html" import icon %} ... {{ icon("search", 16) }} #}
+{% set _paths = {
+  "home": "M4 11l8-6 8 6v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z",
+  "lecture": "M3 7l9-4 9 4-9 4zM7 9v5c0 1.5 2.5 3 5 3s5-1.5 5-3V9",
+  "meeting": "M8 12a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM16 12a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3 19c0-3 2.5-5 5-5s5 2 5 5M11 19c0-3 2.5-5 5-5s5 2 5 5",
+  "note": "M6 3h9l4 4v14H6zM9 11h7M9 15h7",
+  "other": "M5 12h.01M12 12h.01M19 12h.01",
+  "todo": "M4 6l2 2 3-3M4 13l2 2 3-3M12 7h8M12 14h8M12 20h8",
+  "calendar": "M4 5h16v15H4zM4 10h16M9 3v4M15 3v4",
+  "upload": "M12 16V4M6 10l6-6 6 6M4 20h16",
+  "search": "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-4-4",
+  "menu": "M4 7h16M4 12h16M4 17h16",
+  "close": "M6 6l12 12M18 6L6 18",
+  "back": "M15 5l-7 7 7 7",
+  "right": "M9 6l6 6-6 6",
+  "down": "M6 9l6 6 6-6",
+  "up": "M6 15l6-6 6 6",
+  "sun": "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M5 19l1.5-1.5M17.5 6.5L19 5",
+  "pin-open": "M9 6l6 6-6 6",
+  "pin-close": "M15 6l-6 6 6 6",
+  "pencil": "M4 20h4L19 9l-4-4L4 16zM14 6l4 4",
+  "export": "M6 3h9l4 4v14H6zM12 10v6M9 13l3 3 3-3",
+  "download": "M12 4v11M7 10l5 5 5-5M5 20h14",
+  "move": "M3 6h6l2 2h10v11H3zM11 14h6M15 12l2 2-2 2",
+  "tag": "M3 12V4h8l10 10-8 8zM7.5 7.5h.01",
+  "trash": "M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13",
+  "check": "M5 12l5 5 9-10",
+  "plus": "M12 5v14M5 12h14",
+  "compose": "M12 4H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M18 3l3 3-9 9H9v-3z",
+  "back10": "M4 12a8 8 0 1 0 2.3-5.6M4 4v4h4",
+  "fwd10": "M20 12a8 8 0 1 1-2.3-5.6M20 4v4h-4",
+  "heading": "M6 4v16M18 4v16M6 12h12",
+  "bold": "M7 4h6a4 4 0 0 1 0 8H7zM7 12h7a4 4 0 0 1 0 8H7z",
+  "italic": "M19 4h-9M14 20H5M15 4L9 20",
+  "list": "M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01",
+  "checklist": "M3 6l2 2 3-3M3 14l2 2 3-3M12 7h9M12 15h9",
+  "link": "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1",
+  "flag": "M5 21V4h11l-2 4 2 4H5",
+  "swap": "M7 7h13l-3-3M17 17H4l3 3",
+  "arrow": "M5 12h14M13 6l6 6-6 6",
+  "import": "M12 3v12M7 10l5 5 5-5M4 15v5h16v-5",
+  "gear": "M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z",
+  "deadline": "M5 21V4h11l-2 4 2 4H5",
+  "event": "M4 5h16v15H4zM4 10h16M9 3v4M15 3v4",
+  "retry": "M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7",
+  "mic": "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5 11a7 7 0 0 0 14 0M12 18v3",
+  "wave": "M4 12h2M8 8v8M12 5v14M16 9v6M20 11v2",
+  "kebab": "M5 12h.01M12 12h.01M19 12h.01",
+  "logout": "M15 4h4v16h-4M10 8l-4 4 4 4M6 12h11",
+} %}
+{% macro icon(name, size=18, stroke=1.8, cls="") -%}
+<svg class="ic {{ cls }}" aria-hidden="true" width="{{ size }}" height="{{ size }}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="{{ stroke }}" stroke-linecap="round" stroke-linejoin="round"><path d="{{ _paths[name] }}"/></svg>
+{%- endmacro %}
+{% macro kebab(size=18) -%}
+<svg class="ic" aria-hidden="true" width="{{ size }}" height="{{ size }}" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></svg>
+{%- endmacro %}
+{% macro play(size=20) -%}
+<svg class="ic" aria-hidden="true" width="{{ size }}" height="{{ size }}" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+{%- endmacro %}
+{% macro logo(size=28) -%}
+<span class="logo" style="width: {{ size }}px; height: {{ size }}px">{{ icon("wave", (size * 0.57)|round|int, 2.3) }}</span>
+{%- endmacro %}

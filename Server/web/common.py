@@ -195,6 +195,7 @@ def register_filters(app: Flask) -> None:
     app.template_filter("rec_when")(rec_when)
     app.add_template_global(recording_url)
     app.add_template_global(course_color)
+    app.add_template_global(course_cls)
 
     # A page opened from a search result (?hl=<query>) marks the
     # matched words, in every word form (search.highlight).
@@ -259,6 +260,41 @@ def recording_url(
         sess.kind or "", ("pages.ui_other", "session"),
     )
     return url_for(endpoint, **{param: sess.id}, **args)
+
+
+def nav_context() -> dict[str, Any]:
+    """What the navigation shows on every page: counts per page and the
+    courses with their number of lectures."""
+    store = current_app_storage()
+    counts = {"lecture": 0, "meeting": 0, "voice_memo": 0, "other": 0}
+    by_course: dict[str, int] = {}
+    for sess in store.list_sessions():
+        key = sess.kind if sess.kind in KIND_PAGES else "other"
+        counts[key] += 1
+        if sess.kind == "lecture" and sess.course_id:
+            by_course[sess.course_id] = by_course.get(sess.course_id, 0) + 1
+    _, note_total = current_app_notes_service().list(limit=1)
+    _, open_todos = current_app_tasks_service().list(kind="task", status="open", limit=1)
+    courses, _ = current_app_courses_service().list()
+    return {
+        "lectures": counts["lecture"],
+        "meetings": counts["meeting"],
+        "notes": note_total + counts["voice_memo"],
+        "other": counts["other"],
+        "todos": open_todos,
+        "courses": [
+            {"course": c, "lectures": by_course.get(c.id, 0)} for c in courses
+        ],
+    }
+
+
+def course_cls(slot: "str | int | None") -> str:
+    """CSS class giving an element its course colour (``--cc``)."""
+    try:
+        n = int(slot or 0)
+    except (TypeError, ValueError):
+        n = 0
+    return f"cc-{n}" if 1 <= n <= 12 else "cc-0"
 
 
 def course_color(slot: "str | int | None") -> str:

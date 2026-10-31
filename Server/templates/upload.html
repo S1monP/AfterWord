@@ -1,11 +1,12 @@
 {% extends "base.html" %}
+{% set legacy = true %}
 
 {% block extrahead %}
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/upload.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/legacy/upload.css') }}">
 {% endblock %}
 
 {% block extrascripts %}
-  <script defer src="{{ url_for('static', filename='js/upload.js') }}"></script>
+  <script defer src="{{ url_for('static', filename='js/legacy/upload.js') }}"></script>
 {% endblock %}
 
 {% block title %}Upload &middot; Lecture Recorder{% endblock %}
