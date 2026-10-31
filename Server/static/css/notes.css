@@ -105,3 +105,4 @@
   .ned__hint { display: none; }
   .ned__done { display: block; margin-left: auto; height: 42px; padding: 0 12px; color: var(--accent); font-size: 16px; font-weight: 600; }
 }
+::highlight(aw-found) { background-color: color-mix(in srgb, var(--accent) 32%, transparent); color: var(--text); }

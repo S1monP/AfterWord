@@ -2,6 +2,7 @@
 matches, grouped, with where each one opens."""
 from __future__ import annotations
 
+import re
 from typing import Any, Optional
 
 from flask import Blueprint, jsonify, request, url_for
@@ -60,6 +61,14 @@ def _when(iso: Optional[str], fmt: str = "%a %d %b %Y, %H:%M") -> str:
     return dt.strftime(fmt) if dt else ""
 
 
+def _due(iso: Optional[str]) -> str:
+    """A due date: "Tue 03 Nov 2026", with ", 23:59" unless it is all day."""
+    dt = timeutil.to_local(iso)
+    if dt is None:
+        return ""
+    return dt.strftime("%a %d %b %Y" if (dt.hour, dt.minute) == (0, 0) else "%a %d %b %Y, %H:%M")
+
+
 def _clock(ms: int) -> str:
     """754000 -> "12:34"; past an hour "1:02:03"."""
     h, rem = divmod(ms // 1000, 3600)
@@ -74,8 +83,22 @@ def _course(store, course_id: Optional[str]):
 _KIND_ICON = {"lecture": "lecture", "meeting": "meeting", "voice_memo": "note"}
 
 
-def _snippet(hit: search.Hit, query: search.Query) -> Optional[list]:
-    return search.snippet(hit.best["text"], query) if hit.best else None
+_MD_LINE = re.compile(r"^\s*(?:#{1,6}\s+|[-*+]\s+(?:\[[ xX]\]\s+)?|\[[ xX]\]\s+|\d+[.)]\s+|>\s*)")
+_MD_INLINE = re.compile(r"\*\*|__|(?<!\w)[*_](?=\S)|(?<=\S)[*_](?!\w)|`")
+_MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+
+
+def _plain(line: str) -> str:
+    """A note's Markdown line as it reads: no list marks, checkboxes,
+    heading hashes, emphasis or link targets."""
+    return _MD_INLINE.sub("", _MD_LINK.sub(r"\1", _MD_LINE.sub("", line))).strip()
+
+
+def _snippet(hit: search.Hit, query: search.Query, markdown: bool = False) -> Optional[list]:
+    if not hit.best:
+        return None
+    text = _plain(hit.best["text"]) if markdown else hit.best["text"]
+    return search.snippet(text, query)
 
 
 def _recording(store, hit, query, raw) -> Optional[dict]:
@@ -114,13 +137,20 @@ def _note(store, hit, query, raw) -> Optional[dict]:
     note = store.get_note(hit.item_id)
     if note is None:
         return None
+    course = _course(store, note.course_id)
+    meta = " · ".join(filter(None, [
+        "Voice memo" if note.source == "voice_memo" else "Note",
+        course.name if course else "",
+        "edited " + _when(note.updated_at, "%d %b %Y"),
+    ]))
     return {
         "title": search.highlight(note.title, query),
-        "meta": "Note · edited " + _when(note.updated_at, "%d %b %Y"),
-        "snippet": _snippet(hit, query),
-        "url": url_for("pages.ui_notes", note_id=note.id),
+        "meta": meta,
+        "snippet": _snippet(hit, query, markdown=True),
+        # The note opens with the words marked.
+        "url": url_for("pages.ui_notes", note_id=note.id, hl=raw),
         "icon": "note",
-        "cc": "cc-0",
+        "cc": course_cls(course.color if course else None),
     }
 
 
@@ -128,18 +158,20 @@ def _task(store, hit, query, raw) -> Optional[dict]:
     task = store.get_task(hit.item_id)
     if task is None:
         return None
-    meta = "Deadline" if task.kind == "deadline" else "To-do"
-    if task.due_at:
-        meta += " · due " + _when(task.due_at, "%a %d %b %Y, %H:%M")
-    if task.status != "open":
-        meta += f" · {task.status}"
+    course = _course(store, task.course_id)
+    meta = " · ".join(filter(None, [
+        "Deadline" if task.kind == "deadline" else "To-do",
+        course.name if course else "",
+        "due " + _due(task.due_at) if task.due_at else "",
+        task.status if task.status != "open" else "",
+    ]))
     return {
         "title": search.highlight(task.title, query),
         "meta": meta,
         "snippet": _snippet(hit, query),
         "url": url_for("pages.ui_todos") + f"#todo-{task.id}",
         "icon": "deadline" if task.kind == "deadline" else "todo",
-        "cc": course_cls(getattr(_course(store, task.course_id), "color", None)),
+        "cc": course_cls(course.color if course else None),
     }
 
 
@@ -147,16 +179,20 @@ def _event(store, hit, query, raw) -> Optional[dict]:
     event = store.get_event(hit.item_id)
     if event is None:
         return None
-    meta = _when(event.starts_at)
-    if event.location:
-        meta += f" · {event.location}"
+    course = _course(store, event.course_id)
+    start = timeutil.to_local(event.starts_at)
+    meta = " · ".join(filter(None, [
+        "Event", course.name if course else "", _when(event.starts_at), event.location or "",
+    ]))
+    day = start.date().isoformat() if start else None
     return {
         "title": search.highlight(event.title, query),
         "meta": meta,
         "snippet": _snippet(hit, query),
-        "url": url_for("pages.ui_event_edit", event_id=event.id),
+        # Its day in the calendar.
+        "url": url_for("pages.ui_calendar", date=day, day=day),
         "icon": "event",
-        "cc": course_cls(getattr(_course(store, event.course_id), "color", None)),
+        "cc": course_cls(course.color if course else None),
     }
 
 

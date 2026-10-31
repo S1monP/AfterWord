@@ -327,3 +327,34 @@
 
   AW.notesMarkdown = { toHtml: mdToHtml, toMd: htmlToMd };
 })();
+
+/* Opened from search: ?hl= marks the words in the note, without changing
+   its text (the CSS Custom Highlight API); typing clears the marks. */
+(function () {
+  "use strict";
+  var hl = new URLSearchParams(location.search).get("hl");
+  var body = document.querySelector("[data-body]");
+  if (!hl || !body || !window.CSS || !CSS.highlights || typeof Highlight === "undefined") return;
+  // Word starts, so "lens" finds "lenses" and "telescopes" finds "telescope".
+  var stems = hl.toLowerCase().split(/\s+/).filter(function (w) { return w.length > 1; })
+    .map(function (w) { return w.slice(0, Math.max(3, Math.ceil(w.length * 0.75))); });
+  var ranges = [];
+  var walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+  for (var node = walker.nextNode(); node; node = walker.nextNode()) {
+    var re = /[\p{L}\p{N}]+/gu, m;
+    while ((m = re.exec(node.data))) {
+      var word = m[0].toLowerCase();
+      if (stems.some(function (s) { return word.indexOf(s) === 0; })) {
+        var r = new Range(); r.setStart(node, m.index); r.setEnd(node, m.index + m[0].length);
+        ranges.push(r);
+      }
+    }
+  }
+  if (!ranges.length) return;
+  var found = new Highlight();
+  ranges.forEach(function (r) { found.add(r); });
+  CSS.highlights.set("aw-found", found);
+  var first = ranges[0].startContainer.parentElement;
+  if (first) first.scrollIntoView({ block: "center" });
+  body.addEventListener("input", function () { CSS.highlights.delete("aw-found"); }, { once: true });
+})();

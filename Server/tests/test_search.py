@@ -168,9 +168,11 @@ class SearchApiTests(_Base):
                          {"session": [sid], "hl": ["lens"], "t": ["5000"]})
         self.assertEqual([m["label"] for m in rec["moments"]], ["0:05", "2:00"])
         self.assertEqual(groups["task"]["items"][0]["url"], f"/todos#todo-{task.id}")
-        self.assertIn("Deadline · due Tue 20 Jan 2026", groups["task"]["items"][0]["meta"])
+        self.assertEqual("Deadline · due Tue 20 Jan 2026, 17:00", groups["task"]["items"][0]["meta"])
+        # An event opens its day in the calendar.
         self.assertEqual(groups["event"]["items"][0]["url"],
-                         f"/events/{event.id}/edit")
+                         "/calendar?date=2026-01-21&day=2026-01-21")
+        self.assertEqual(groups["event"]["items"][0]["meta"], "Event · Wed 21 Jan 2026, 09:00")
 
     def test_memos_open_in_notes(self):
         sid = self._recording(kind="voice_memo",
@@ -179,7 +181,16 @@ class SearchApiTests(_Base):
         note = ensure_memo_note(self.app.config["LR_STORAGE"], sid)
         groups = self.client.get("/api/v1/search?q=plumber").get_json()["groups"]
         self.assertEqual([g["type"] for g in groups], ["note"])     # once, as its note
-        self.assertEqual(groups[0]["items"][0]["url"], f"/notes?note_id={note.id}")
+        item = groups[0]["items"][0]
+        self.assertEqual(item["url"], f"/notes?note_id={note.id}&hl=plumber")
+        self.assertTrue(item["meta"].startswith("Voice memo · edited"))
+
+    def test_note_snippets_read_without_markdown(self):
+        NotesService(self.store).create(
+            title="Sources", body_md="- [x] The **policy** on [recording](http://x.y) lectures")
+        item = self.client.get("/api/v1/search?q=policy").get_json()["groups"][0]["items"][0]
+        self.assertEqual("".join(part for part, _ in item["snippet"]),
+                         "The policy on recording lectures")
 
     def test_empty_query(self):
         body = self.client.get("/api/v1/search?q=").get_json()
