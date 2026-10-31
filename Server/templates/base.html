@@ -12,15 +12,7 @@
   <link rel="stylesheet" href="{{ asset('css/base.css') }}">
   <link rel="stylesheet" href="{{ asset('css/components.css') }}">
   <link rel="stylesheet" href="{{ asset('css/shell.css') }}">
-  {% if legacy %}
-    {# Pages not rebuilt yet keep their old look inside the new frame. #}
-    {% for f in ["tokens", "base", "layout", "components", "pages"] %}
-      <link rel="stylesheet" href="{{ asset('css/legacy/' ~ f ~ '.css') }}">
-    {% endfor %}
-    <script defer src="{{ asset('js/legacy/app.js') }}"></script>
-  {% else %}
-    <link rel="stylesheet" href="{{ asset('css/pages.css') }}">
-  {% endif %}
+  <link rel="stylesheet" href="{{ asset('css/pages.css') }}">
   {% block extrahead %}{% endblock %}
   <script defer src="{{ asset('js/shell.js') }}"></script>
   <script defer src="{{ asset('js/search.js') }}"></script>

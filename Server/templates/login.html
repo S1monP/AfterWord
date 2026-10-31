@@ -1,17 +1,20 @@
 {% extends "base.html" %}
+{% from "_icons.html" import logo %}
 {% set bare = true %}
-{% set legacy = true %}
-{% block title %}Log in · Lecture Recorder{% endblock %}
+{% block title %}Log in · AfterWord{% endblock %}
+{% block extrahead %}<link rel="stylesheet" href="{{ asset('css/settings.css') }}">{% endblock %}
 {% block content %}
-<section class="lr-login">
-  <form class="lr-card lr-login__card" method="post" action="{{ url_for('auth.login') }}">
-    <h1 class="lr-login__title">Log in</h1>
+<main class="login">
+  <form class="login__card" method="post" action="{{ url_for('auth.login') }}">
+    <div class="login__brand">{{ logo(32) }}<span>AfterWord</span></div>
     <input type="hidden" name="next" value="{{ next_url }}">
-    <label class="lr-login__label" for="lr-password">Password</label>
-    <input class="lr-input" id="lr-password" type="password" name="password"
-           autocomplete="current-password" required autofocus>
-    {% if error %}<p class="lr-login__error" role="alert">{{ error }}</p>{% endif %}
-    <button class="lr-btn lr-btn--primary" type="submit">Log in</button>
+    <label class="form-row">
+      <span>Password</span>
+      <input class="field" id="password" type="password" name="password" autocomplete="current-password" required autofocus
+             {% if error %}aria-invalid="true" aria-describedby="login-error"{% endif %}>
+    </label>
+    {% if error %}<p class="login__error" id="login-error" role="alert">{{ error }}</p>{% endif %}
+    <button class="btn btn--fill login__go" type="submit">Log in</button>
   </form>
-</section>
+</main>
 {% endblock %}

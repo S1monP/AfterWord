@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon, kebab %}
+{% block title %}Courses · AfterWord{% endblock %}
+{% block extrahead %}<link rel="stylesheet" href="{{ asset('css/settings.css') }}">{% endblock %}
+{% block extrascripts %}<script defer src="{{ asset('js/courses.js') }}"></script>{% endblock %}
+
+{% block pbar %}
+  <header class="pbar">
+    <a class="pbar__back" href="{{ url_for('pages.ui_lectures') }}">{{ icon("back", 22, 2) }}Lectures</a>
+    <h1 class="pbar__title">Courses</h1>
+    <span class="pbar__pad"></span>
+  </header>
+{% endblock %}
+
+{% block content %}
+<div class="spage">
+  <div class="spage__inner">
+    <a class="link spage__back" href="{{ url_for('pages.ui_lectures') }}">{{ icon("back", 14, 2) }}Lectures</a>
+    <h1 class="spage__heading">Courses</h1>
+    <p class="spage__sub">Each course has a colour from the palette; the colours follow the theme and colour scheme. Deleting a course keeps its lectures.</p>
+
+    {% if nav.courses %}
+      <ol class="clist">
+        {% for item in nav.courses %}
+          {% set c = item.course %}
+          <li class="crow {{ course_cls(c.color) }}" data-course="{{ c.id }}" data-name="{{ c.name }}" data-color="{{ c.color or '' }}">
+            <button type="button" class="crow__swatch" data-swatch aria-haspopup="true" aria-expanded="false" aria-label="Colour of {{ c.name }}"><i class="sq"></i></button>
+            <label class="sr-only" for="cn-{{ c.id }}">Name</label>
+            <input class="crow__name" id="cn-{{ c.id }}" data-field="name" value="{{ c.name }}" maxlength="200" required autocomplete="off">
+            <label class="sr-only" for="cc-{{ c.id }}">Code</label>
+            <input class="crow__code mono" id="cc-{{ c.id }}" data-field="code" value="{{ c.code or '' }}" maxlength="50" placeholder="Code" autocomplete="off">
+            <a class="crow__count" href="{{ url_for('pages.ui_lectures', course=c.id) }}">{{ item.lectures }} lecture{{ "" if item.lectures == 1 else "s" }}</a>
+            <button type="button" class="icon-btn crow__dots" data-course-menu aria-haspopup="menu" aria-expanded="false" aria-label="Actions for {{ c.name }}">{{ kebab(16) }}</button>
+          </li>
+        {% endfor %}
+      </ol>
+    {% else %}
+      <div class="empty">
+        <span class="empty__icon">{{ icon("lecture", 22) }}</span>
+        <p class="empty__title">No courses yet</p>
+        <p>Add the courses you take this semester; lectures are filed under them.</p>
+      </div>
+    {% endif %}
+
+    <form class="cadd" data-course-add autocomplete="off">
+      <label class="sr-only" for="cadd-name">Course name</label>
+      <input class="field field--dashed cadd__name" id="cadd-name" name="name" placeholder="Add a course, e.g. Linear Algebra" maxlength="200" required>
+      <label class="sr-only" for="cadd-code">Code (optional)</label>
+      <input class="field field--dashed cadd__code mono" id="cadd-code" name="code" placeholder="Code" maxlength="50">
+      <button type="submit" class="btn btn--fill">Add</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

@@ -30,7 +30,7 @@
       <h1>{{ page_title }} <span class="mono lcol__count">{{ total }}</span></h1>
       {% if page == "lectures" %}
         {# Course settings: used once a semester, so small and quiet; desktop only. #}
-        <a class="lcol__gear" href="{{ url_for('pages.ui_courses_admin') }}" title="Course settings" aria-label="Course settings">{{ icon("gear", 15) }}</a>
+        <a class="lcol__gear" href="{{ url_for('pages.ui_courses') }}" title="Course settings" aria-label="Course settings">{{ icon("gear", 15) }}</a>
       {% endif %}
     </div>
     <div class="lcol__tools">
@@ -114,6 +114,8 @@
           </div>
           <button type="button" class="btn" data-retry="{{ s.id }}">{{ icon("retry", 15) }}Retry</button>
         </div>
+      {% elif reader.no_speech %}
+        <div class="notice reader__notice"><div><span class="notice__title">No speech detected</span>The recording seems to be silence, or too quiet to transcribe. Play it to check; if it's empty, delete it from the actions menu.</div></div>
       {% elif s.status == "receiving" %}
         <div class="notice reader__notice"><div><span class="notice__title">Still uploading</span>The device is sending this recording; it will be processed when it is complete.</div></div>
       {% endif %}

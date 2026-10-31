@@ -1,75 +1,48 @@
 {% extends "base.html" %}
-{% set legacy = true %}
-
-{% block extrahead %}
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/legacy/upload.css') }}">
-{% endblock %}
-
-{% block extrascripts %}
-  <script defer src="{{ url_for('static', filename='js/legacy/upload.js') }}"></script>
-{% endblock %}
-
-{% block title %}Upload &middot; Lecture Recorder{% endblock %}
+{% from "_icons.html" import icon %}
+{% block title %}Upload · AfterWord{% endblock %}
+{% block extrahead %}<link rel="stylesheet" href="{{ asset('css/settings.css') }}">{% endblock %}
+{% block extrascripts %}<script defer src="{{ asset('js/upload.js') }}"></script>{% endblock %}
+{% block pbar_title %}Upload recording{% endblock %}
 
 {% block content %}
-<div class="lr-page">
-  <header class="lr-page__header">
-    <div>
-      <h1 class="lr-page__title">Upload recording</h1>
-      <div class="lr-page__sub">
-        Drop a single audio file below. The server turns it into the
-        canonical 22050 Hz mono 32-bit WAV the rest of the system uses.
-      </div>
-    </div>
-  </header>
+<div class="spage">
+  <div class="spage__inner">
+    <h1 class="spage__heading">Upload recording</h1>
+    <p class="spage__sub">A recording from your phone or computer. It is transcribed, sorted and summarised like the ones from the recorder.</p>
 
-  {% if not ffmpeg_available %}
-    <div class="lr-card" style="margin-bottom: var(--lr-gap-card);
-                                border-color: var(--lr-warning);">
-      <div class="lr-row" style="align-items: flex-start; gap: var(--lr-s-3);">
-        <div style="font-size: var(--lr-fs-lg); color: var(--lr-warning);">⚠</div>
-        <div>
-          <div class="lr-card__title" style="color: var(--lr-warning);">ffmpeg is not installed</div>
-          <p style="margin: var(--lr-s-2) 0 0; font-size: var(--lr-fs-sm);">
-            WAV files and any format your browser can decode natively (MP3, OGG,
-            WebM) will still work. M4A / AAC files from iPhone Voice Memos need
-            ffmpeg. Install it with
-            <code>winget install Gyan.FFmpeg</code> on Windows, or set the
-            <code>LR_FFMPEG_PATH</code> env var to your ffmpeg binary.
-          </p>
-        </div>
+    {% if not ffmpeg_available %}
+      <div class="notice upl__notice">
+        <span class="notice__title">M4A and AAC files can't be read yet</span>
+        iPhone Voice Memos need ffmpeg on the server. WAV, MP3, OGG and WebM work without it.
+        Install it with <code>winget install Gyan.FFmpeg</code>, or set <code>LR_FFMPEG_PATH</code>.
       </div>
-    </div>
-  {% endif %}
+    {% endif %}
 
-  <form id="upload-form" class="lr-card" enctype="multipart/form-data"
-        action="/api/v1/uploads/audio" method="post">
-    <div id="dropzone" class="lr-dropzone" tabindex="0" role="button"
-         aria-label="Drop or pick an audio file">
-      <input id="file-input" type="file" name="file" hidden
-             accept=".m4a,.mp4,.mp3,.wav,.ogg,.webm,.flac,audio/*">
-      <div class="lr-dropzone__icon">⬆</div>
-      <div class="lr-dropzone__text">
-        <strong>Drop a file here</strong> or click to browse
-      </div>
-      <div class="lr-mono" id="file-name">No file selected</div>
-    </div>
-
-    <div class="lr-field" style="margin-top: var(--lr-s-4);">
-      <label class="lr-label" for="title-input">
-        Title (optional — defaults to file's recording time)
+    <form class="upl" data-upload action="{{ url_for('sessions_api.api_upload_audio') }}" data-max="{{ max_upload_bytes }}">
+      <label class="upl__drop" data-drop>
+        <input type="file" name="file" class="sr-only" data-file
+               accept=".m4a,.mp4,.mp3,.wav,.ogg,.webm,.flac,.aac,audio/*">
+        <span class="upl__icon">{{ icon("upload", 22) }}</span>
+        <span class="upl__lead" data-file-name>Drop an audio file here, or <u>choose one</u></span>
+        <span class="upl__hint mono" data-file-size>M4A, MP3, WAV, OGG, WebM, FLAC · up to {{ (max_upload_bytes / 1024 / 1024)|int }} MB</span>
       </label>
-      <input id="title-input" type="text" name="title" maxlength="200"
-             placeholder="rec_2026-10-03T1430"
-             class="lr-input">
-    </div>
 
-    <div id="upload-status" class="lr-mono" style="margin-top: var(--lr-s-4); min-height: 1.5em;"></div>
+      <label class="form-row upl__title">
+        <span>Name <i class="eform__opt">optional; it's named for you after transcription</i></span>
+        <input class="field" type="text" name="title" maxlength="200" autocomplete="off" placeholder="Leave empty to name it automatically">
+      </label>
 
-    <div class="lr-row" style="margin-top: var(--lr-s-4); align-items: center;">
-      <button type="submit" id="submit-btn" class="lr-btn lr-btn--primary" disabled>Upload</button>
-      <span class="lr-mono">max {{ (max_upload_bytes / 1024 / 1024)|int }} MB</span>
-    </div>
-  </form>
+      <div class="upl__progress" data-progress hidden>
+        <div class="upl__bar"><i data-bar></i></div>
+        <span class="mono" data-progress-text>Uploading…</span>
+      </div>
+      <div class="notice notice--bad" data-error hidden role="alert"><span class="notice__title">Upload failed</span><span data-error-text></span></div>
+
+      <div class="upl__actions">
+        <button type="submit" class="btn btn--fill" data-submit disabled>{{ icon("upload", 15, 2) }}Upload</button>
+      </div>
+    </form>
+  </div>
 </div>
 {% endblock %}

@@ -52,8 +52,9 @@ class UploadPageTests(LRTestCase):
         r = self.client.get("/upload")
         self.assertEqual(r.status_code, 200)
         body = r.get_data()
-        self.assertIn(b"Drop a file here", body)
-        self.assertIn(b"id=\"dropzone\"", body)
+        self.assertIn(b"Drop an audio file here", body)
+        self.assertIn(b"data-drop", body)
+        self.assertIn(b'action="/api/v1/uploads/audio"', body)
 
     def test_upload_page_mentions_ffmpeg_status(self) -> None:
         # Check against the ffmpeg binary the app is actually
@@ -64,9 +65,9 @@ class UploadPageTests(LRTestCase):
         r = self.client.get("/upload")
         body = r.get_data()
         if transcode.ffmpeg_available(cfg.ffmpeg_path):
-            self.assertNotIn(b"ffmpeg is not installed", body)
+            self.assertNotIn(b"need ffmpeg on the server", body)
         else:
-            self.assertIn(b"ffmpeg is not installed", body)
+            self.assertIn(b"need ffmpeg on the server", body)
 
 
 class WavUploadTests(LRTestCase):
@@ -118,7 +119,8 @@ class WavUploadTests(LRTestCase):
                 break
             time.sleep(0.05)
         self.assertEqual(status, "done")
-        self.assertIsNotNone(body["redirect_url"])
+        self.assertEqual(body["redirect_url"], f"/other?session={sid}")
+        self.assertEqual(self.client.get(body["redirect_url"]).status_code, 200)
         audio = self.client.get(body["session"]["full_audio_url"])
         self.assertEqual(audio.status_code, 200)
         self.assertEqual(

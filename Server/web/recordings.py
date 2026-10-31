@@ -10,6 +10,7 @@ from typing import Any, Callable, Optional
 import storage
 import timeutil
 from services.llm import parse_transcript_lines
+from services.processing import NO_SPEECH_DETAIL
 from web.common import (
     _estimate_duration_seconds,
     _parse_summary_artifact,
@@ -179,6 +180,7 @@ def reader(listing: Listing, sess) -> dict[str, Any]:
         "points_label": "Decisions" if kind == "meeting" else "Key points",
         "processing": processing,
         "failed": sess.status == storage.STATUS_FAILED,
+        "no_speech": sess.status == storage.STATUS_DONE and sess.status_detail == NO_SPEECH_DETAIL,
         "note": (sess.status_detail or "").capitalize() if sess.status == storage.STATUS_DONE and not summary else "",
         "status_detail": sess.status_detail or "",
     }

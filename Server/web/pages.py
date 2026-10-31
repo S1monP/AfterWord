@@ -247,100 +247,16 @@ def ui_upload() -> Any:
     )
 
 
-# --- UI: courses admin (bookmark-only) ------------------------------
+# --- Course settings --------------------------------------------------
+@bp.get("/courses")
+def ui_courses() -> Any:
+    """Course settings: colours, names, order, adding and deleting
+    (all through the courses API). Reached only from the faint gear in
+    the desktop Lectures list; used about once a semester."""
+    return render_template("courses.html")
+
+
 @bp.get("/courses/admin")
 def ui_courses_admin() -> Any:
-    """Admin page for creating/editing/deleting courses. Not
-    linked from the top nav; bookmark this URL."""
-    courses, total = current_app_courses_service().list()
-    return render_template(
-        "courses_admin.html",
-        courses=courses,
-        total=total,
-    )
-
-
-@bp.get("/courses/new")
-def ui_course_new() -> Any:
-    return render_template(
-        "course_form.html", mode="new", course=None,
-        form_name="", form_code="", form_color="",
-        form_sort_order="0",
-    )
-
-
-@bp.get("/courses/<course_id>/edit")
-def ui_course_edit(course_id: str) -> Any:
-    course = current_app_courses_service().get(course_id)
-    if course is None:
-        abort(404)
-    return render_template(
-        "course_form.html", mode="edit", course=course,
-        form_name=course.name,
-        form_code=course.code or "",
-        form_color=course.color or "",
-        form_sort_order=str(course.sort_order),
-    )
-
-
-@bp.post("/courses/new")
-def create_course_action() -> Any:
-    payload = {
-        "name": (request.form.get("name") or "").strip(),
-        "code": (request.form.get("code") or "").strip() or None,
-        "color": (request.form.get("color") or "").strip() or None,
-        "sort_order": request.form.get("sort_order") or 0,
-    }
-    try:
-        current_app_courses_service().create(**payload)
-    except ValueError as exc:
-        return (
-            render_template(
-                "course_form.html",
-                mode="new", course=None,
-                form_name=payload["name"],
-                form_code=payload["code"] or "",
-                form_color=payload["color"] or "",
-                form_sort_order=str(payload["sort_order"]),
-                error=str(exc),
-            ),
-            400,
-        )
-    return redirect(url_for("pages.ui_courses_admin"))
-
-
-@bp.post("/courses/<course_id>/edit")
-def update_course_action(course_id: str) -> Any:
-    payload = {
-        "name": (request.form.get("name") or "").strip() or None,
-        "code": (request.form.get("code") or "").strip() or None,
-        "color": (request.form.get("color") or "").strip() or None,
-        "sort_order": request.form.get("sort_order") or None,
-    }
-    try:
-        current_app_courses_service().update(course_id, **payload)
-    except KeyError:
-        abort(404)
-    except ValueError as exc:
-        course = current_app_courses_service().get(course_id)
-        return (
-            render_template(
-                "course_form.html",
-                mode="edit", course=course,
-                form_name=payload.get("name") or "",
-                form_code=payload.get("code") or "",
-                form_color=payload.get("color") or "",
-                form_sort_order=str(payload.get("sort_order") or 0),
-                error=str(exc),
-            ),
-            400,
-        )
-    return redirect(url_for("pages.ui_courses_admin"))
-
-
-@bp.post("/courses/<course_id>/delete")
-def delete_course_action(course_id: str) -> Any:
-    deleted = current_app_courses_service().delete(course_id)
-    if not deleted:
-        abort(404)
-    return redirect(url_for("pages.ui_courses_admin"))
+    """The old address, kept for bookmarks."""
+    return redirect(url_for("pages.ui_courses"), code=301)

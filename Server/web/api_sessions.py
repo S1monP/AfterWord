@@ -22,6 +22,7 @@ from web.common import (
     current_app_storage,
     current_app_text_provider,
     current_app_transcript_provider,
+    recording_url,
 )
 from web.pipeline import (
     _PIPELINES_IN_FLIGHT,
@@ -601,5 +602,6 @@ def api_upload_audio() -> Any:
     return jsonify({
         "created": True,
         "session": sess.to_api_dict(),
-        "redirect_url": f"/sessions/{sess.id}",
+        # Where it opens (sorted later; Other until then).
+        "redirect_url": recording_url(sess),
     }), 201

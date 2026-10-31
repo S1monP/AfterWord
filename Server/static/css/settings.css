@@ -1,0 +1,87 @@
+/* Simple pages (REDESIGN.md section 10): course settings, upload and
+   login. One column on the panel colour. */
+.spage { flex: 1; min-height: 0; overflow-y: auto; background: var(--panel); }
+.spage__inner { max-width: 680px; padding: 22px 28px 48px; }
+.spage__back { margin-bottom: 10px; }
+.spage__heading { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -.01em; }
+.spage__sub { margin: 6px 0 20px; max-width: 60ch; color: var(--muted); font-size: 13px; }
+
+/* --- Courses -------------------------------------------------------------- */
+.clist { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--seam); }
+.crow { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 6px 4px; border-bottom: 1px solid var(--seam); }
+.crow__swatch { flex: none; width: 34px; height: 34px; border-radius: var(--r-md); display: inline-flex; align-items: center; justify-content: center; }
+.crow__swatch:hover, .crow__swatch[aria-expanded="true"] { background: var(--hi); }
+.crow__swatch .sq { width: 16px; height: 16px; border-radius: 4px; }
+.crow__name, .crow__code {
+  min-width: 0; height: 34px; padding: 0 8px; border: 1px solid transparent; border-radius: var(--r-sm);
+  background: transparent; color: var(--text);
+}
+.crow__name { flex: 1; font-weight: 600; }
+.crow__code { width: 110px; font-size: 13px; color: var(--muted); }
+.crow__name:hover, .crow__code:hover { border-color: var(--seam); }
+.crow__name:focus, .crow__code:focus { border-color: var(--accent); outline: none; background: var(--bg); }
+.crow__count { flex: none; width: 86px; text-align: right; font-size: 12px; color: var(--faint); }
+.crow__count:hover { color: var(--accent); }
+.crow__dots { flex: none; width: 30px; height: 30px; }
+.cadd { display: flex; gap: 8px; margin-top: 16px; }
+.cadd__name { flex: 1; min-width: 0; }
+.cadd__code { width: 120px; }
+
+/* The palette pop-up: the twelve course colours. */
+.palette {
+  position: fixed; z-index: 60; display: grid; grid-template-columns: repeat(6, 32px); gap: 6px; padding: 10px;
+  border-radius: var(--r-lg); background: var(--panel); border: 1px solid var(--seam); box-shadow: var(--shadow);
+}
+.palette button { width: 32px; height: 32px; border-radius: 8px; background: var(--cc); }
+.palette button:hover { transform: scale(1.08); }
+.palette button[aria-checked="true"] { box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--text); }
+
+@media (max-width: 899px) {
+  .spage { overflow: visible; }
+  .spage__inner { padding: 12px 16px 40px; }
+  .spage__back, .spage__heading { display: none; }
+  .spage__sub { font-size: 14px; }
+  .crow { gap: 6px; }
+  .crow__name { font-size: 16px; }
+  .crow__code { width: 80px; }
+  .crow__count { display: none; }
+  .crow__dots { width: 44px; height: 44px; }
+  .cadd { flex-wrap: wrap; }
+  .cadd__name { flex-basis: 100%; }
+  .cadd__code { flex: 1; }
+  .pbar__pad { width: 44px; flex: none; }
+}
+
+/* --- Upload --------------------------------------------------------------- */
+.upl { display: flex; flex-direction: column; gap: 16px; }
+.upl__notice { margin-bottom: 16px; font-size: 13px; }
+.upl__notice code { font-family: var(--mono); font-size: 12px; }
+.upl__drop {
+  display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 36px 20px; cursor: pointer; text-align: center;
+  border: 1.5px dashed var(--seam); border-radius: var(--r-xl); color: var(--muted); transition: border-color .15s, background .15s;
+}
+.upl__drop:hover, .upl__drop.is-over, .upl__drop:focus-within { border-color: var(--accent); background: var(--soft); }
+.upl__drop.has-file { border-style: solid; }
+.upl__icon { width: 44px; height: 44px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--hi); color: var(--accent); }
+.upl__lead { font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
+.upl__lead u { color: var(--accent); text-underline-offset: 3px; }
+.upl__hint { font-size: 12px; color: var(--faint); }
+.upl__progress { display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--muted); }
+.upl__bar { flex: 1; height: 6px; border-radius: 3px; background: var(--hi); overflow: hidden; }
+.upl__bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+.upl__actions { display: flex; justify-content: flex-end; }
+.eform__opt { font-style: normal; font-weight: 400; color: var(--faint); opacity: .8; margin-left: 4px; }
+@media (max-width: 899px) {
+  .upl__drop { padding: 28px 16px; }
+  .upl__actions .btn { width: 100%; justify-content: center; }
+}
+
+/* --- Login (on the VPS; off during development) -------------------------- */
+.login { min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 24px 16px; background: var(--bg); }
+.login__card {
+  width: 100%; max-width: 340px; display: flex; flex-direction: column; gap: 16px; padding: 28px 26px;
+  border-radius: var(--r-xl); background: var(--panel); border: 1px solid var(--seam); box-shadow: var(--shadow);
+}
+.login__brand { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; font-size: 18px; font-weight: 700; }
+.login__error { margin: -6px 0 0; font-size: 13px; color: var(--danger); }
+.login__go { justify-content: center; height: 40px; }

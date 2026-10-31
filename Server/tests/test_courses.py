@@ -410,7 +410,7 @@ class LecturesUiTests(LRTestCase):
         body = self.client.get("/lectures").get_data(as_text=True)
         self.assertIn('class="rpage', body)
         self.assertIn('class="lcol"', body)
-        self.assertIn("/courses/admin", body)               # the small gear
+        self.assertIn('href="/courses"', body)               # the small gear
         self.assertIn("No lectures yet", body)
 
     def test_lectures_are_grouped_by_course(self):
@@ -454,84 +454,26 @@ class MeetingsUiTests(LRTestCase):
         self.assertIn(f'data-reader="{sid}"', body)
 
 
-class CoursesAdminUiTests(LRTestCase):
-    def test_admin_lists_all_courses(self):
+class CoursesSettingsUiTests(LRTestCase):
+    def test_settings_lists_courses_with_colours(self):
         svc = self.app.config["LR_COURSES_SERVICE"]
-        svc.create(name="A")
-        svc.create(name="B")
+        svc.create(name="Algebra", code="MA101", color="3")
+        svc.create(name="Biology")
+        body = self.client.get("/courses").get_data(as_text=True)
+        self.assertIn('value="Algebra"', body)
+        self.assertIn('value="MA101"', body)
+        self.assertIn("crow cc-3", body)
+        self.assertIn("0 lectures", body)
+        self.assertIn("data-course-add", body)
+
+    def test_settings_empty(self):
+        body = self.client.get("/courses").get_data(as_text=True)
+        self.assertIn("No courses yet", body)
+
+    def test_old_address_redirects(self):
         resp = self.client.get("/courses/admin")
-        self.assertEqual(resp.status_code, 200)
-        body = resp.get_data(as_text=True)
-        self.assertIn("A", body)
-        self.assertIn("B", body)
-        self.assertIn("+ Add a course", body)
-
-    def test_new_course_form_renders(self):
-        resp = self.client.get("/courses/new")
-        self.assertEqual(resp.status_code, 200)
-        body = resp.get_data(as_text=True)
-        self.assertIn('name="name"', body)
-        self.assertIn('name="code"', body)
-        self.assertIn('name="color"', body)
-        self.assertIn('name="sort_order"', body)
-
-    def test_edit_form_renders_existing(self):
-        svc = self.app.config["LR_COURSES_SERVICE"]
-        c = svc.create(name="Calc II", code="MBX101", color="#ff0000")
-        resp = self.client.get(f"/courses/{c.id}/edit")
-        self.assertEqual(resp.status_code, 200)
-        body = resp.get_data(as_text=True)
-        self.assertIn("Calc II", body)
-        self.assertIn("MBX101", body)
-
-    def test_edit_unknown_returns_404(self):
-        resp = self.client.get("/courses/nope/edit")
-        self.assertEqual(resp.status_code, 404)
-
-    def test_admin_create_redirects(self):
-        resp = self.client.post(
-            "/courses/new",
-            data={"name": "X", "code": "", "color": "#888888",
-                  "sort_order": "0"},
-            follow_redirects=False,
-        )
-        self.assertEqual(resp.status_code, 302)
-        self.assertIn("/courses/admin", resp.headers["Location"])
-
-    def test_admin_create_invalid_returns_400(self):
-        resp = self.client.post(
-            "/courses/new",
-            data={"name": "", "color": "#888888", "sort_order": "0"},
-            follow_redirects=False,
-        )
-        self.assertEqual(resp.status_code, 400)
-        self.assertIn("name is required", resp.get_data(as_text=True))
-
-    def test_admin_update_redirects(self):
-        svc = self.app.config["LR_COURSES_SERVICE"]
-        c = svc.create(name="Old")
-        resp = self.client.post(
-            f"/courses/{c.id}/edit",
-            data={"name": "New", "code": "", "color": "#abcdef",
-                  "sort_order": "1"},
-            follow_redirects=False,
-        )
-        self.assertEqual(resp.status_code, 302)
-        again = self.client.get(f"/api/v1/courses/{c.id}").get_json()
-        self.assertEqual(again["course"]["name"], "New")
-
-    def test_admin_delete_redirects(self):
-        svc = self.app.config["LR_COURSES_SERVICE"]
-        c = svc.create(name="X")
-        resp = self.client.post(
-            f"/courses/{c.id}/delete",
-            follow_redirects=False,
-        )
-        self.assertEqual(resp.status_code, 302)
-        self.assertEqual(
-            self.client.get(f"/api/v1/courses/{c.id}").status_code,
-            404,
-        )
+        self.assertEqual(resp.status_code, 301)
+        self.assertTrue(resp.headers["Location"].endswith("/courses"))
 
 
 class CoursesServiceIsRealTests(unittest.TestCase):
