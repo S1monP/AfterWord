@@ -7,8 +7,6 @@ from typing import Any
 
 from flask import abort, Blueprint, current_app, redirect, render_template, request, send_file, url_for
 
-import services
-import services.events  # noqa: F401
 import timeutil
 from services import transcode
 from web.common import (
@@ -192,81 +190,81 @@ def ui_todos_deadline_quick() -> Any:
     return redirect(url_for("pages.ui_todos"))
 
 
+def _iso_date(raw: str | None):
+    import datetime as _dt
+    try:
+        return _dt.date.fromisoformat((raw or "").strip()[:10])
+    except ValueError:
+        return None
+
+
 @bp.get("/calendar")
 def ui_calendar() -> Any:
-    """Month-grid calendar. Defaults to the current month if
-    ``?year=&month=`` are missing or invalid."""
-    import datetime as _dt
-    cur = timeutil.local_today()
-    try:
-        year = int(request.args.get("year", str(cur.year)))
-        month = int(request.args.get("month", str(cur.month)))
-    except ValueError:
-        year, month = cur.year, cur.month
-    if not (1 <= month <= 12):
-        month = cur.month
-    if not (1970 <= year <= 2100):
-        year = cur.year
-    # Load a 42-day window starting at grid_start so the grid has
-    # every event it might display.
-    first_of_month = _dt.date(year, month, 1)
-    leading = first_of_month.weekday()
-    grid_start = first_of_month - _dt.timedelta(days=leading)
-    # Local days, as stored (UTC).
-    window_lo = timeutil.local_midnight_utc(grid_start)
-    window_hi = timeutil.local_midnight_utc(
-        grid_start + _dt.timedelta(days=43),
+    """Calendar (REDESIGN.md section 8; phone: section 14).
+    ``?view=month|week``, ``?date=`` the month or week shown (today by
+    default), ``?day=`` the chosen day: the day panel on desktop, the
+    full-screen day on the phone."""
+    from web.calendar_page import calendar_context
+    view = request.args.get("view", "month")
+    if view not in ("month", "week"):
+        view = "month"
+    day = _iso_date(request.args.get("day"))
+    anchor = _iso_date(request.args.get("date")) or day or timeutil.local_today()
+    return render_template("calendar.html", **calendar_context(view, anchor, day))
+
+
+def _back_to_day(starts_at: str | None) -> Any:
+    """After saving an event, go to its day in the calendar."""
+    start = timeutil.to_local(starts_at)
+    if start is None:
+        return redirect(url_for("pages.ui_calendar"))
+    d = start.date().isoformat()
+    return redirect(url_for("pages.ui_calendar", date=d, day=d))
+
+
+def _event_form(mode: str, event: Any, starts: str, ends: str, error: str = "") -> Any:
+    """The new / edit event page. ``starts`` and ``ends`` are local
+    "YYYY-MM-DDTHH:MM" for the datetime-local inputs; Back and Cancel go
+    to the event's day."""
+    day = _iso_date(starts)
+    back = url_for("pages.ui_calendar", date=day.isoformat(), day=day.isoformat()) if day else url_for("pages.ui_calendar")
+    page = render_template(
+        "event_form.html", mode=mode, event=event, error=error,
+        starts_at_default=starts, ends_at_default=ends, back_url=back,
+        courses=current_app_courses_service().list()[0],
     )
-    events, _ = current_app_events_service().list(
-        starts_after=window_lo, starts_before=window_hi,
-        limit=500,
-    )
-    grid = services.events.compute_month_grid(year, month, events)
-    if month == 1:
-        prev_year, prev_month = year - 1, 12
-    else:
-        prev_year, prev_month = year, month - 1
-    if month == 12:
-        next_year, next_month = year + 1, 1
-    else:
-        next_year, next_month = year, month + 1
-    return render_template(
-        "calendar.html",
-        year=year, month=month,
-        grid=grid,
-        month_name=_dt.date(year, month, 1).strftime("%B"),
-        prev_year=prev_year, prev_month=prev_month,
-        next_year=next_year, next_month=next_month,
-        today_iso=cur.isoformat(),
-        is_current_month=(
-            year == cur.year and month == cur.month
-        ),
-    )
+    return (page, 400) if error else page
+
+
+def _local_input(iso: str | None) -> str:
+    dt = timeutil.to_local(iso)
+    return dt.strftime("%Y-%m-%dT%H:%M") if dt else ""
+
+
+def _event_fields() -> dict[str, Any]:
+    form = request.form
+    return {
+        "title": (form.get("title") or "").strip(),
+        "kind": form.get("kind") or "lecture",
+        "starts_at": form.get("starts_at") or "",
+        "ends_at": form.get("ends_at") or None,
+        "description": (form.get("description") or "").strip() or None,
+        "location": (form.get("location") or "").strip() or None,
+        "course_id": (form.get("course_id") or "").strip() or None,
+    }
 
 
 @bp.get("/events/new")
 def ui_event_new() -> Any:
-    """New event form. ``?date=YYYY-MM-DD`` prefills starts_at to
-    noon on that day. Without ``?date=`` we default to today noon."""
+    """New event form. ``?date=YYYY-MM-DD`` (today by default) prefills
+    the start: the next whole hour today, otherwise 09:00."""
     import datetime as _dt
-    date_str = request.args.get("date", "").strip()
-    try:
-        d = (
-            _dt.date.fromisoformat(date_str)
-            if date_str else timeutil.local_today()
-        )
-    except ValueError:
-        d = timeutil.local_today()
-    starts_at_default = _dt.datetime.combine(
-        d, _dt.time(12, 0),
-    ).strftime("%Y-%m-%dT%H:%M")
-    return render_template(
-        "event_form.html",
-        mode="new", event=None,
-        starts_at_default=starts_at_default,
-        ends_at_default="",
-        courses=current_app_courses_service().list()[0],
-    )
+    d = _iso_date(request.args.get("date")) or timeutil.local_today()
+    now = timeutil.local_now()
+    hour = min(now.hour + 1, 23) if d == now.date() else 9
+    start = _dt.datetime.combine(d, _dt.time(hour))
+    end = start + _dt.timedelta(hours=1)
+    return _event_form("new", None, f"{start:%Y-%m-%dT%H:%M}", f"{end:%Y-%m-%dT%H:%M}" if end.date() == d else "")
 
 
 @bp.get("/events/<event_id>/edit")
@@ -276,104 +274,44 @@ def ui_event_edit(event_id: str) -> Any:
         abort(404)
     # datetime-local inputs take local "YYYY-MM-DDTHH:MM"; the form
     # posts it back without an offset, which reads as local again.
-    def _strip(iso):
-        dt = timeutil.to_local(iso)
-        return dt.strftime("%Y-%m-%dT%H:%M") if dt else ""
-    return render_template(
-        "event_form.html",
-        mode="edit", event=ev,
-        starts_at_default=_strip(ev.starts_at),
-        ends_at_default=_strip(ev.ends_at),
-        courses=current_app_courses_service().list()[0],
-    )
+    return _event_form("edit", ev, _local_input(ev.starts_at), _local_input(ev.ends_at))
 
 
 @bp.post("/events/new")
 def create_event_action() -> Any:
-    """HTML form action for the new-event page."""
-    payload = {
-        "title": (request.form.get("title") or "").strip(),
-        "kind": request.form.get("kind") or "lecture",
-        "starts_at": request.form.get("starts_at") or "",
-        "ends_at": request.form.get("ends_at") or None,
-        "description": (
-            request.form.get("description") or ""
-        ).strip() or None,
-        "location": (
-            request.form.get("location") or ""
-        ).strip() or None,
-        "course_id": (
-            request.form.get("course_id") or ""
-        ).strip() or None,
-    }
-    repeat_until = (
-        request.form.get("repeat_until") or ""
-    ).strip() or None
+    """HTML form action for the new-event page; "Repeats weekly" adds
+    one event a week until ``repeat_until``."""
+    payload = _event_fields()
+    repeat_until = (request.form.get("repeat_until") or "").strip() or None
     try:
         if repeat_until:
-            current_app_events_service().create_recurring(
-                **payload, repeat_until=repeat_until,
-            )
+            ev, _ = current_app_events_service().create_recurring(**payload, repeat_until=repeat_until)
         else:
-            current_app_events_service().create(**payload)
+            ev = current_app_events_service().create(**payload)
     except ValueError as exc:
-        return (
-            render_template(
-                "event_form.html",
-                mode="new", event=None,
-                starts_at_default=payload["starts_at"],
-                ends_at_default=payload.get("ends_at") or "",
-                error=str(exc),
-                courses=current_app_courses_service().list()[0],
-            ),
-            400,
-        )
-    return redirect(url_for("pages.ui_calendar"))
+        return _event_form("new", None, payload["starts_at"], payload["ends_at"] or "", str(exc))
+    return _back_to_day(ev.starts_at)
 
 
 @bp.post("/events/<event_id>/edit")
 def update_event_action(event_id: str) -> Any:
-    payload = {
-        "title": (request.form.get("title") or "").strip() or None,
-        "kind": request.form.get("kind") or None,
-        "starts_at": request.form.get("starts_at") or None,
-        "ends_at": request.form.get("ends_at") or None,
-        "description": (
-            request.form.get("description") or ""
-        ).strip() or None,
-        "location": (
-            request.form.get("location") or ""
-        ).strip() or None,
-        "course_id": (
-            request.form.get("course_id") or ""
-        ).strip() or None,
-    }
+    payload = _event_fields()
     try:
-        current_app_events_service().update(event_id, **payload)
+        ev = current_app_events_service().update(event_id, **payload)
     except KeyError:
         abort(404)
     except ValueError as exc:
-        ev = current_app_events_service().get(event_id)
-        return (
-            render_template(
-                "event_form.html",
-                mode="edit", event=ev,
-                starts_at_default=payload.get("starts_at") or "",
-                ends_at_default=payload.get("ends_at") or "",
-                error=str(exc),
-                courses=current_app_courses_service().list()[0],
-            ),
-            400,
-        )
-    return redirect(url_for("pages.ui_calendar"))
+        return _event_form("edit", current_app_events_service().get(event_id),
+                           payload["starts_at"], payload["ends_at"] or "", str(exc))
+    return _back_to_day(ev.starts_at)
 
 
 @bp.post("/events/<event_id>/delete")
 def delete_event_action(event_id: str) -> Any:
-    deleted = current_app_events_service().delete(event_id)
-    if not deleted:
+    ev = current_app_events_service().get(event_id)
+    if ev is None or not current_app_events_service().delete(event_id):
         abort(404)
-    return redirect(url_for("pages.ui_calendar"))
+    return _back_to_day(ev.starts_at)
 
 
 @bp.get("/upload")

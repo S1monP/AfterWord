@@ -1,156 +1,126 @@
 {% extends "base.html" %}
-{% set legacy = true %}
+{% from "_icons.html" import icon %}
+{% set heading = "New event" if mode == "new" else "Edit event" %}
+{% block title %}{{ heading }} · AfterWord{% endblock %}
+{% block extrahead %}<link rel="stylesheet" href="{{ asset('css/calendar.css') }}">{% endblock %}
 
-{% block title %}
-  {% if mode == 'new' %}New event{% else %}Edit event{% endif %}
-  &middot; Lecture Recorder
+{% block pbar %}
+  <header class="pbar">
+    <a class="pbar__back" href="{{ back_url }}">{{ icon("back", 22, 2) }}Calendar</a>
+    <h1 class="pbar__title">{{ heading }}</h1>
+    <span class="pbar__pad"></span>
+  </header>
 {% endblock %}
 
 {% block content %}
-<div class="lr-page">
-  <header class="lr-page__header">
-    <div>
-      <a class="lr-page__back" href="{{ url_for('pages.ui_calendar') }}">
-        &larr; Calendar
-      </a>
-    </div>
-  </header>
+<div class="eform">
+  <div class="eform__inner">
+    <a class="link eform__back" href="{{ back_url }}">{{ icon("back", 14, 2) }}Calendar</a>
+    <h1 class="eform__heading">{{ heading }}</h1>
 
-  <h1 class="lr-page__title">
-    {% if mode == 'new' %}New event{% else %}Edit event{% endif %}
-  </h1>
-  <div class="lr-page__sub">
-    {% if mode == 'new' %}
-      Fill in the details. Times are interpreted in your local timezone
-      by the browser; the server normalises everything to UTC.
-    {% else %}
-      Edit the event details and save.
+    {% if error %}
+      <div class="notice notice--bad" role="alert"><span class="notice__title">Not saved</span>{{ error }}</div>
     {% endif %}
-  </div>
 
-  {% if error %}
-    <div class="lr-card"
-         style="border-color: var(--lr-danger); margin-top: var(--lr-s-3);">
-      <div class="lr-card__body"
-           style="color: var(--lr-danger); font-size: var(--lr-fs-sm);">
-        {{ error }}
-      </div>
-    </div>
-  {% endif %}
-
-  <form method="post"
-        action="{% if mode == 'new' %}{{ url_for('pages.create_event_action') }}{% else %}{{ url_for('pages.update_event_action', event_id=event.id) }}{% endif %}"
-        class="lr-card lr-card--padded"
-        style="margin-top: var(--lr-s-4);">
-    <label class="lr-field">
-      <span class="lr-field__label">Title</span>
-      <input class="lr-input" type="text" name="title" required
-             maxlength="200" autocomplete="off"
-             value="{{ event.title if event else '' }}">
-    </label>
-
-    <div class="lr-row" style="gap: var(--lr-s-3); flex-wrap: wrap;">
-      <label class="lr-field" style="flex: 1 1 200px;">
-        <span class="lr-field__label">Kind</span>
-        <select class="lr-input" name="kind">
-          {% set k = (event.kind if event else 'lecture') %}
-          <option value="lecture" {% if k == 'lecture' %}selected{% endif %}>Lecture</option>
-          <option value="meeting" {% if k == 'meeting' %}selected{% endif %}>Meeting</option>
-          <option value="other"   {% if k == 'other'   %}selected{% endif %}>Other</option>
-        </select>
+    <form method="post" class="eform__form" id="event-form"
+          action="{{ url_for('pages.create_event_action') if mode == 'new' else url_for('pages.update_event_action', event_id=event.id) }}">
+      <label class="form-row">
+        <span>Title</span>
+        <input class="field eform__title" type="text" name="title" required maxlength="200" autocomplete="off"
+               placeholder="Linear Algebra · Lecture 9" value="{{ event.title if event else '' }}"{% if mode == 'new' %} autofocus{% endif %}>
       </label>
-      <label class="lr-field" style="flex: 1 1 200px;">
-        <span class="lr-field__label">Course (optional)</span>
-        <select class="lr-input" name="course_id">
-          {% set ec = (event.course_id if event else '') %}
-          <option value="">No course</option>
-          {% for c in courses %}
-            <option value="{{ c.id }}" {% if ec == c.id %}selected{% endif %}>{{ c.name }}{% if c.code %} ({{ c.code }}){% endif %}</option>
+
+      {% set k = event.kind if event else 'lecture' %}
+      <fieldset class="form-row eform__kind">
+        <legend class="form-label">Kind</legend>
+        <div class="seg">
+          {% for value, label in [("lecture", "Lecture"), ("meeting", "Meeting"), ("other", "Other")] %}
+            <label><input type="radio" name="kind" value="{{ value }}"{% if k == value %} checked{% endif %}><span>{{ label }}</span></label>
           {% endfor %}
-        </select>
-      </label>
-      <label class="lr-field" style="flex: 1 1 200px;">
-        <span class="lr-field__label">Location (optional)</span>
-        <input class="lr-input" type="text" name="location" maxlength="200"
-               autocomplete="off"
-               value="{{ event.location if event and event.location else '' }}">
-      </label>
-    </div>
+        </div>
+      </fieldset>
 
-    <div class="lr-row" style="gap: var(--lr-s-3); flex-wrap: wrap;">
-      <label class="lr-field" style="flex: 1 1 200px;">
-        <span class="lr-field__label">Starts at</span>
-        <input class="lr-input" type="datetime-local" name="starts_at"
-               required value="{{ starts_at_default }}">
-      </label>
-      <label class="lr-field" style="flex: 1 1 200px;">
-        <span class="lr-field__label">Ends at (optional)</span>
-        <input class="lr-input" type="datetime-local" name="ends_at"
-               value="{{ ends_at_default }}">
-      </label>
-    </div>
+      <div class="eform__two">
+        <label class="form-row">
+          <span>Starts</span>
+          <input class="field" type="datetime-local" name="starts_at" required value="{{ starts_at_default }}">
+        </label>
+        <label class="form-row">
+          <span>Ends <i class="eform__opt">optional</i></span>
+          <input class="field" type="datetime-local" name="ends_at" value="{{ ends_at_default }}">
+        </label>
+      </div>
 
-    <div class="lr-row" style="gap: var(--lr-s-3); flex-wrap: wrap; align-items: flex-end;">
-      <label class="lr-field" style="flex: 0 1 auto; display: flex; align-items: center; gap: var(--lr-s-2); padding-bottom: var(--lr-s-2);">
-        <input type="checkbox" id="lr-repeat-toggle"
-               style="width: 16px; height: 16px; accent-color: var(--lr-accent);">
-        <span class="lr-field__label" style="margin: 0;">Repeats weekly</span>
-      </label>
-      <label class="lr-field" style="flex: 1 1 200px;" id="lr-repeat-until-wrap" hidden>
-        <span class="lr-field__label">Repeat until</span>
-        <input class="lr-input" type="date" name="repeat_until"
-               id="lr-repeat-until">
-      </label>
-    </div>
-    <p class="lr-page__sub" id="lr-repeat-hint" hidden
-       style="margin-top: calc(-1 * var(--lr-s-2));">
-      One event per week on this weekday until that date. Occurrences
-      are independent — edit or delete any of them separately.
-    </p>
+      {% if mode == 'new' %}
+        <div class="eform__repeat">
+          <label class="eform__check"><input type="checkbox" data-repeat-toggle> Repeats weekly</label>
+          <label class="form-row" data-repeat-until hidden>
+            <span>Until</span>
+            <input class="field" type="date" name="repeat_until">
+          </label>
+          <p class="eform__hint" data-repeat-until hidden>One event a week on this weekday, up to that date. Each one can be edited or deleted on its own.</p>
+        </div>
+      {% endif %}
 
-    <label class="lr-field">
-      <span class="lr-field__label">Description (optional)</span>
-      <textarea class="lr-input" name="description" rows="4"
-                maxlength="2000">{{ event.description if event and event.description else "" }}</textarea>
-    </label>
+      <div class="eform__two">
+        <label class="form-row">
+          <span>Course <i class="eform__opt">optional</i></span>
+          {% set ec = event.course_id if event else '' %}
+          <select class="field" name="course_id">
+            <option value="">No course</option>
+            {% for c in courses %}
+              <option value="{{ c.id }}"{% if ec == c.id %} selected{% endif %}>{{ c.name }}{% if c.code %} ({{ c.code }}){% endif %}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="form-row">
+          <span>Place <i class="eform__opt">optional</i></span>
+          <input class="field" type="text" name="location" maxlength="200" autocomplete="off"
+                 placeholder="Room B12" value="{{ event.location if event and event.location else '' }}">
+        </label>
+      </div>
 
-    <div class="lr-form-actions">
-      <a class="lr-btn lr-btn--ghost"
-         href="{{ url_for('pages.ui_calendar') }}">Cancel</a>
+      <label class="form-row">
+        <span>Description <i class="eform__opt">optional</i></span>
+        <textarea class="field" name="description" rows="3" maxlength="2000">{{ event.description if event and event.description else "" }}</textarea>
+      </label>
+    </form>
+
+    <div class="eform__actions">
       {% if mode == 'edit' %}
-        <form method="post"
-              action="{{ url_for('pages.delete_event_action', event_id=event.id) }}"
-              style="display: inline;"
-              onsubmit="return confirm('Delete this event? This cannot be undone.');">
-          <button class="lr-btn lr-btn--danger" type="submit">Delete</button>
+        <form method="post" action="{{ url_for('pages.delete_event_action', event_id=event.id) }}" data-delete-event data-name="{{ event.title }}">
+          <button class="btn btn--ghost eform__delete" type="submit">{{ icon("trash", 15) }}Delete</button>
         </form>
       {% endif %}
-      <button class="lr-btn lr-btn--primary" type="submit">
-        {% if mode == 'new' %}Create event{% else %}Save changes{% endif %}
-      </button>
+      <span class="calbar__sp"></span>
+      <a class="btn" href="{{ back_url }}">Cancel</a>
+      <button class="btn btn--fill" type="submit" form="event-form">{{ "Add event" if mode == "new" else "Save" }}</button>
     </div>
-  </form>
+  </div>
 </div>
 
 <script>
-  // Toggle the "Repeat until" date on the weekly-recurrence tick box.
-  // Only relevant in create mode; hidden entirely when editing.
-  {% if mode == 'new' %}
-  (function () {
-    var toggle = document.getElementById("lr-repeat-toggle");
-    var wrap = document.getElementById("lr-repeat-until-wrap");
-    var until = document.getElementById("lr-repeat-until");
-    var hint = document.getElementById("lr-repeat-hint");
-    if (!toggle || !wrap || !until || !hint) return;
-    function refresh() {
-      wrap.hidden = !toggle.checked;
-      hint.hidden = !toggle.checked;
+document.addEventListener("DOMContentLoaded", function () {
+  /* "Repeats weekly" shows the Until date. */
+  var toggle = document.querySelector("[data-repeat-toggle]");
+  if (toggle) {
+    var parts = document.querySelectorAll("[data-repeat-until]");
+    var until = document.querySelector("[name=repeat_until]");
+    toggle.addEventListener("change", function () {
+      parts.forEach(function (p) { p.hidden = !toggle.checked; });
       until.required = toggle.checked;
       if (!toggle.checked) until.value = "";
-    }
-    toggle.addEventListener("change", refresh);
-    refresh();
-  })();
-  {% endif %}
+    });
+  }
+  /* Delete asks first. */
+  var del = document.querySelector("[data-delete-event]");
+  if (del) del.addEventListener("submit", function (e) {
+    if (del.dataset.ok) return;
+    e.preventDefault();
+    AW.confirm({ title: "Delete this event?", name: del.dataset.name, text: "A recording made in it stays." }).then(function (yes) {
+      if (yes) { del.dataset.ok = "1"; del.submit(); }
+    });
+  });
+});
 </script>
 {% endblock %}

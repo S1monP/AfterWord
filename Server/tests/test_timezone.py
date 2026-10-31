@@ -75,13 +75,16 @@ class EventTimezoneTests(LRTestCase):
         ends = sorted(e.ends_at for e in evs)
         self.assertTrue(all(f"{timeutil.to_local(s):%H:%M}" == "11:00" for s in ends))
 
-    def test_month_grid_uses_local_date(self):
-        ev = self._events().create(title="Late", kind="other",
-                                   starts_at="2027-07-01T23:30:00Z")   # 00:30 BST, 2 July
-        grid = events_mod.compute_month_grid(2027, 7, [ev])
-        days = {c["date"]: c["events"] for row in grid for c in row}
-        self.assertEqual(days[_dt.date(2027, 7, 2)], [ev])
-        self.assertEqual(days[_dt.date(2027, 7, 1)], [])
+    def test_calendar_uses_local_date(self):
+        self._events().create(title="Late", kind="other",
+                              starts_at="2027-07-01T23:30:00Z")   # 00:30 BST, 2 July
+        def day_panel(day):
+            body = self.client.get(f"/calendar?day={day}").get_data(as_text=True)
+            return body[body.index('id="cday-title"'):]
+        on_2nd, on_1st = day_panel("2027-07-02"), day_panel("2027-07-01")
+        self.assertIn("Late", on_2nd)
+        self.assertIn("00:30", on_2nd)
+        self.assertNotIn("Late", on_1st)
 
     def test_ics_floating_time_is_local(self):
         ics = (b"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:a@b\r\n"

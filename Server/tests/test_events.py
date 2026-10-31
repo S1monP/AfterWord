@@ -419,65 +419,6 @@ class ImportIcsTests(LRTestCase):
         # The 4th VEVENT in _SAMPLE_ICS has no SUMMARY.
         count = self._service().import_ics(_SAMPLE_ICS)
         self.assertEqual(count, 3)
-class MonthGridTests(unittest.TestCase):
-    def test_grid_is_always_6_rows_7_cols(self):
-        for y, m in [(2026, 1), (2026, 2), (2026, 12), (2024, 2)]:
-            grid = compute_month_grid(y, m, [])
-            self.assertEqual(len(grid), 6)
-            for row in grid:
-                self.assertEqual(len(row), 7)
-
-    def test_jan_2026_first_row(self):
-        grid = compute_month_grid(2026, 1, [])
-        dates = [str(c["date"]) for c in grid[0]]
-        # Jan 1 2026 is Thursday = Mon-first index 3.
-        self.assertEqual(dates, [
-            "2025-12-29", "2025-12-30", "2025-12-31",
-            "2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04",
-        ])
-        self.assertEqual(grid[0][3]["date"].day, 1)
-        self.assertTrue(grid[0][3]["in_month"])
-        for c in grid[0][:3]:
-            self.assertFalse(c["in_month"])
-
-    def test_feb_2026_grid_starts_at_jan_26(self):
-        grid = compute_month_grid(2026, 2, [])
-        # Feb 1 2026 is Sunday = weekday()=6, so grid_start is Jan 26.
-        self.assertEqual(grid[0][0]["date"].isoformat(), "2026-01-26")
-        self.assertEqual(grid[0][6]["date"].isoformat(), "2026-02-01")
-        self.assertTrue(grid[0][6]["in_month"])
-
-    def test_in_month_flag_correct_for_short_month(self):
-        grid = compute_month_grid(2026, 2, [])
-        self.assertFalse(grid[4][6]["in_month"])
-        last_in = None
-        for row in grid:
-            for c in row:
-                if c["in_month"]:
-                    last_in = c
-        self.assertEqual(last_in["date"].isoformat(), "2026-02-28")
-
-    def test_grid_contains_events_on_correct_dates(self):
-        ev = _make_event("2026-01-15T10:00:00Z", "e1")
-        grid = compute_month_grid(2026, 1, [ev])
-        # Jan 15 2026 is a Thursday = Mon-first index 3, in row 2.
-        cell = grid[2][3]
-        self.assertEqual(cell["date"].isoformat(), "2026-01-15")
-        self.assertEqual(len(cell["events"]), 1)
-        self.assertEqual(cell["events"][0].id, "e1")
-
-    def test_grid_caps_events_per_cell_with_overflow(self):
-        events = [
-            _make_event(f"2026-01-15T{i:02d}:00:00Z", f"e{i}")
-            for i in range(5)
-        ]
-        grid = compute_month_grid(2026, 1, events)
-        cell = grid[2][3]
-        self.assertEqual(len(cell["events"]), 3)
-        self.assertEqual(cell["overflow"], 2)
-        self.assertEqual([e.id for e in cell["more"]], ["e3", "e4"])
-
-
 class RecurringEventTests(LRTestCase):
     """Weekly recurrence: ticking the box materialises one event per
     occurrence, so the calendar, the dashboard, and the pipeline
@@ -564,7 +505,7 @@ def _make_event(starts_at: str, eid: str):
 # service-level tests above don't accidentally rely on them being in
 # scope at import time).
 from services.events import (  # noqa: E402
-    Event, compute_month_grid, suggest_match_confidence,
+    Event, suggest_match_confidence,
 )
 
 

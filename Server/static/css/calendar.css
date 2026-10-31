@@ -1,0 +1,261 @@
+/* Calendar (REDESIGN.md section 8; phone: section 14). Month or Week on
+   the left, the chosen day in a panel on the right; on the phone the
+   month shows dots and rings, and a day opens as its own screen. */
+.cal { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--panel); }
+
+/* --- Header -------------------------------------------------------------- */
+.calbar { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 20px; border-bottom: 1px solid var(--seam); }
+/* Fixed width, so the switch doesn't move when the heading changes. */
+.calbar__views { width: 146px; margin-right: 8px; }
+.calbar__views > a { flex: 1; justify-content: center; }
+.calbar__step { width: 32px; padding: 0; justify-content: center; }
+.calbar__heading { margin: 0 0 0 8px; font-size: 20px; font-weight: 600; letter-spacing: -.01em; white-space: nowrap; }
+.calbar__sp { flex: 1; }
+.calbar__break { display: none; }
+
+.cal__body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 330px; }
+.cal__legend { display: none; }
+
+/* --- Month --------------------------------------------------------------- */
+.mgrid { display: grid; grid-template-rows: auto repeat(6, minmax(0, 1fr)); gap: 1px; min-height: 0; background: var(--seam); }
+.mgrid__dows, .mgrid__row { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 1px; min-height: 0; }
+.mgrid__dows > span { padding: 8px 10px; background: var(--panel); font-size: 12px; font-weight: 600; color: var(--faint); }
+.mgrid__short { display: none; }
+.mcell {
+  display: flex; flex-direction: column; gap: 3px; min-height: 0; overflow: hidden; padding: 6px 6px 4px;
+  background: var(--panel); color: var(--text);
+}
+.mcell:hover { color: var(--text); background: color-mix(in srgb, var(--hi) 60%, var(--panel)); }
+.mcell.is-out { background: var(--side); }
+.mcell.is-out .mcell__num { color: var(--faint); opacity: .7; }
+.mcell.is-sel { box-shadow: inset 0 0 0 2px var(--accent); }
+.mcell__num {
+  align-self: flex-start; min-width: 26px; height: 24px; padding: 0 6px; border-radius: 12px;
+  display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600;
+}
+.mcell.is-today .mcell__num { background: var(--accent); color: var(--on-accent); }
+.mcell__chips { display: flex; flex-direction: column; gap: 3px; min-height: 0; }
+.mcell__dots, .mcell__rings { display: none; }
+
+.chip {
+  display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: var(--r-sm); font-size: 12px; line-height: 1.35;
+  background: color-mix(in srgb, var(--cc, var(--none)) 15%, var(--panel)); color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.chip__tm { flex: none; color: var(--muted); }
+.chip--due { display: block; background: transparent; border: 1px dashed color-mix(in srgb, var(--cc, var(--none)) 70%, transparent); padding: 2px 6px; }
+.chip.is-done { opacity: .55; text-decoration: line-through; }
+.chip__more { padding: 1px 6px; font-size: 12px; font-weight: 600; color: var(--accent); }
+
+/* --- Week (desktop): a time grid ---------------------------------------- */
+.wgrid { display: flex; flex-direction: column; min-height: 0; }
+.wgrid__head, .wgrid__body { display: grid; grid-template-columns: 56px repeat(7, minmax(0, 1fr)); }
+.wgrid__head { flex: none; border-bottom: 1px solid var(--seam); }
+.wgrid__day { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 8px 6px; border-left: 1px solid var(--seam); }
+.wgrid__label {
+  align-self: flex-start; height: 26px; padding: 0 8px; border-radius: 13px; display: inline-flex; align-items: center; gap: 4px;
+  font-size: 13px; font-weight: 600; color: var(--text);
+}
+.wgrid__label:hover { background: var(--hi); color: var(--text); }
+.wgrid__day.is-sel .wgrid__label { box-shadow: inset 0 0 0 1px var(--accent); }
+.wgrid__day.is-today .wgrid__label { background: var(--accent); color: var(--on-accent); }
+.wgrid__scroll { flex: 1; min-height: 0; overflow-y: auto; }
+/* The hours share the height, but never get shorter than 44px. */
+.wgrid__body { position: relative; height: max(100%, calc(var(--rows) * 44px)); }
+.wgrid__hours { position: relative; }
+.wgrid__hours span { position: absolute; right: 8px; margin-top: 2px; font-size: 11px; color: var(--faint); }
+.wgrid__col {
+  position: relative; border-left: 1px solid var(--seam);
+  background: linear-gradient(to bottom, var(--seam) 1px, transparent 1px) 0 0 / 100% calc(100% / var(--rows));
+}
+.wgrid__col.is-today { background-color: color-mix(in srgb, var(--soft) 50%, transparent); }
+.blk {
+  position: absolute; left: 3px; right: 3px; min-height: 30px; box-sizing: border-box; overflow: hidden; padding: 4px 7px; border-radius: 7px;
+  font-size: 12px; line-height: 1.3; color: var(--text);
+  background: color-mix(in srgb, var(--cc, var(--none)) 16%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--cc, var(--none)) 40%, transparent);
+}
+.blk:hover { color: var(--text); border-color: color-mix(in srgb, var(--cc, var(--none)) 75%, transparent); }
+.blk.is-past { opacity: .8; }
+.blk__tm { display: block; color: var(--muted); }
+.blk__title { display: block; font-weight: 600; }
+/* Under 45 minutes: time and title on one line. */
+.blk.is-short { display: flex; gap: 6px; min-height: 24px; padding-top: 3px; white-space: nowrap; }
+.blk.is-short .blk__title { overflow: hidden; text-overflow: ellipsis; }
+.calnow { position: absolute; left: 0; right: 0; z-index: 2; border-top: 2px solid var(--accent); }
+.calnow::before { content: ""; position: absolute; left: -4px; top: -5px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.wlist { display: none; }
+
+/* --- The day panel ------------------------------------------------------- */
+.cday { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; border-left: 1px solid var(--seam); background: var(--panel); }
+.cday__head { display: flex; align-items: flex-start; gap: 8px; padding: 16px 12px 10px 18px; border-bottom: 1px solid var(--seam); }
+.cday__head h2 { margin: 0; font-size: 17px; font-weight: 600; }
+.cday__sub { display: flex; align-items: center; gap: 8px; margin: 2px 0 0; font-size: 13px; color: var(--muted); }
+.cday__arrows { margin-left: auto; display: flex; }
+.cday__arrows .icon-btn { width: 30px; height: 30px; color: var(--muted); }
+.cday__dues { display: flex; flex-direction: column; gap: 6px; padding: 12px 18px 0; }
+.duechip {
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: var(--r-md);
+  border: 1px dashed color-mix(in srgb, var(--cc, var(--none)) 70%, transparent);
+}
+.duechip > svg { flex: none; color: var(--cc, var(--none)); }
+.duechip__body { min-width: 0; display: flex; flex-direction: column; }
+.duechip__title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.duechip__course { font-size: 12px; color: var(--muted); }
+.duechip__time { margin-left: auto; flex: none; font-size: 12px; color: var(--muted); }
+.duechip.is-done .duechip__title { color: var(--faint); text-decoration: line-through; }
+.cday__list { padding: 0 18px 18px; }
+.cday__empty { margin: 14px 0; color: var(--faint); }
+.dev { padding: 12px 0; border-bottom: 1px solid var(--seam); }
+.dev__meta { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.dev__title { margin: 2px 0; font-weight: 600; }
+.dev__status { display: flex; align-items: center; gap: 7px; min-height: 28px; font-size: 12px; color: var(--muted); }
+.dev__acts { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+.dev__acts .link { color: var(--accent); font-weight: 600; font-size: 12px; }
+.dev__edit { width: 28px; height: 28px; color: var(--faint); }
+.cday__add { width: 100%; margin-top: 14px; justify-content: center; }
+.cday__tl { display: none; }
+
+/* --- The event form ------------------------------------------------------ */
+.eform { flex: 1; min-height: 0; overflow-y: auto; background: var(--panel); }
+.eform__inner { max-width: 640px; padding: 22px 28px 40px; }
+.eform__back { margin-bottom: 10px; }
+.eform__heading { margin: 0 0 18px; font-size: 22px; font-weight: 700; letter-spacing: -.01em; }
+.eform .notice { margin-bottom: 16px; }
+.eform__form { display: flex; flex-direction: column; gap: 16px; }
+.eform__title { height: 42px; font-size: 16px; font-weight: 600; }
+.eform__kind { margin: 0; padding: 0; border: 0; }
+.eform__kind .seg { align-self: flex-start; width: 300px; }
+.eform__two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.eform__opt { font-style: normal; font-weight: 400; color: var(--faint); opacity: .8; margin-left: 4px; }
+.eform__repeat { display: flex; flex-direction: column; gap: 10px; margin-top: -4px; }
+.eform__check { display: inline-flex; align-items: center; gap: 8px; align-self: flex-start; font-size: 13px; color: var(--muted); cursor: pointer; }
+.eform__check input { width: 16px; height: 16px; accent-color: var(--accent); }
+.eform__repeat .form-row { max-width: 240px; }
+.eform__hint { margin: -4px 0 0; font-size: 12px; color: var(--faint); }
+.eform__actions { display: flex; align-items: center; gap: 8px; margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--seam); }
+.eform__delete { color: var(--danger); padding-left: 8px; }
+.eform__delete:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
+
+/* --- Narrower desktop: a slimmer day panel ------------------------------ */
+@media (min-width: 900px) and (max-width: 1100px) {
+  .cal__body { grid-template-columns: minmax(0, 1fr) 280px; }
+  .calbar__new span { display: none; }
+}
+
+/* --- Phone --------------------------------------------------------------- */
+@media (max-width: 899px) {
+  .cal { flex: none; min-height: calc(100dvh - 56px); }
+  .calbar { padding: 8px 10px 0 16px; gap: 6px; border-bottom: 0; }
+  .calbar__views { order: 1; width: 160px; margin: 0; }
+  .calbar__today { order: 2; }
+  .calbar__sp { order: 3; }
+  .calbar__new { order: 4; width: 44px; padding: 0; justify-content: center; background: transparent; border-color: transparent; color: var(--accent); }
+  .calbar__new span { display: none; }
+  .calbar__new svg { width: 24px; height: 24px; }
+  .calbar__break { order: 5; display: block; flex-basis: 100%; height: 0; }
+  .calbar__prev { order: 6; }
+  .calbar__heading { order: 7; flex: 1; margin: 0; text-align: center; font-size: 17px; }
+  .calbar__next { order: 8; }
+  .calbar__step { width: 44px; border-color: transparent; color: var(--muted); }
+  .calbar__import { display: none; }
+
+  .cal__body { display: flex; flex-direction: column; }
+  .cday { display: none; }
+
+  /* Month: dots for events, rings for deadlines. */
+  .mgrid { display: block; padding: 0 8px; background: transparent; }
+  .mgrid__dows { gap: 0; padding: 2px 0 6px; }
+  .mgrid__dows > span { padding: 0; background: transparent; text-align: center; }
+  .mgrid__long { display: none; }
+  .mgrid__short { display: inline; }
+  .mgrid__row { gap: 0; }
+  .mcell { align-items: center; gap: 5px; height: 86px; padding: 6px 0 0; border-top: 1px solid var(--seam); background: transparent; }
+  .mcell.is-out { background: transparent; color: var(--faint); }
+  .mcell.is-out .mcell__dots, .mcell.is-out .mcell__rings { opacity: .55; }
+  .mcell:active { background: var(--hi); }
+  .mcell.is-sel { box-shadow: none; }
+  .mcell__num { align-self: center; width: 32px; min-width: 0; height: 32px; padding: 0; border-radius: 50%; font-size: 15px; font-weight: 500; }
+  .mcell.is-today .mcell__num { font-weight: 700; }
+  .mcell__chips { display: none; }
+  .mcell__dots, .mcell__rings { display: flex; align-items: center; gap: 4px; height: 8px; }
+  .mcell__dots b { font-size: 10px; line-height: 1; color: var(--faint); }
+  .cd { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--cc, var(--none)); }
+  .cdue { display: inline-block; width: 8px; height: 8px; box-sizing: border-box; border-radius: 50%; border: 1.6px solid var(--cc, var(--none)); }
+  .cal__legend {
+    display: flex; align-items: center; gap: 16px; margin-top: auto; padding: 8px 8px 8px 16px;
+    border-top: 1px solid var(--seam); font-size: 13px; color: var(--faint);
+  }
+  .cal__legend > span { display: inline-flex; align-items: center; gap: 6px; }
+  .cal__legend .link { margin-left: auto; height: 44px; padding: 0 8px; font-size: 14px; }
+
+  /* Week: a list of days. */
+  .wgrid { display: none; }
+  .wlist { display: block; margin-top: 8px; border-top: 1px solid var(--seam); }
+  .wlist .wday { grid-template-columns: 44px minmax(0, 1fr); gap: 12px; padding: 12px 16px; color: var(--text); border-radius: 0; }
+  .wlist .wday:active { background: var(--hi); }
+  .wlist .wday__label { font-size: 13px; }
+  .wlist .wday__num { font-size: 20px; }
+  .wlist .wday__events { gap: 8px; }
+  .wlist .evt__title { font-size: 15px; }
+  .wlist .evt__status, .wlist .evt__time { font-size: 13px; }
+  .wlist .wday__empty { font-size: 14px; padding-top: 6px; }
+  .wdue {
+    display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: var(--r-md); font-size: 14px;
+    border: 1px dashed color-mix(in srgb, var(--cc, var(--none)) 70%, transparent);
+  }
+  .wdue svg { flex: none; color: var(--cc, var(--none)); }
+  .wdue.is-done { color: var(--faint); text-decoration: line-through; }
+
+  /* A chosen day opens as its own screen: the header, deadlines, a timeline. */
+  .cal.is-day .calbar, .cal.is-day .mgrid, .cal.is-day .cal__legend, .cal.is-day .wlist { display: none; }
+  .cal.is-day .cday { display: flex; overflow: visible; border: 0; }
+  .pbar__add { color: var(--accent) !important; }
+  .cday__head { padding: 12px 6px 8px 16px; border-bottom: 0; }
+  .cday__head h2 { font-size: 22px; line-height: 1.25; }
+  .cday__sub { margin-top: 4px; font-size: 14px; color: var(--faint); }
+  .cday__sub .tag { height: 22px; }
+  .cday__arrows .icon-btn { width: 44px; height: 44px; }
+  .cday__dues { padding: 0 16px 10px; }
+  .duechip { min-height: 42px; padding: 6px 12px; font-size: 15px; }
+  .duechip__course { font-size: 13px; }
+  .duechip__time { font-size: 13px; }
+  .cday__list { display: none; }
+  .cday__tl { display: block; padding-bottom: 24px; }
+  .cday__tl .cday__empty { margin: 0; padding: 14px 16px 0; font-size: 15px; }
+
+  .eform { overflow: visible; }
+  .eform__inner { padding: 8px 16px 32px; }
+  .eform__back, .eform__heading { display: none; }
+  .eform__kind .seg { width: 100%; }
+  .eform__two { grid-template-columns: minmax(0, 1fr); }
+  .eform__title { height: 48px; font-size: 17px; }
+  .eform__check { font-size: 15px; min-height: 44px; }
+  .eform__check input { width: 20px; height: 20px; }
+  .pbar__pad { width: 44px; flex: none; }
+
+  .tl { position: relative; height: calc(var(--rows) * 64px); margin: 18px 16px 20px 10px; }
+  .tl__hr { position: absolute; left: 0; right: 0; height: 20px; margin-top: -10px; display: flex; align-items: center; gap: 6px; }
+  .tl__hr span { flex: none; width: 46px; font-size: 13px; color: var(--muted); }
+  .tl__hr i { flex: 1; border-top: 1px solid var(--seam); }
+  .tl__hr--half { left: 52px; opacity: .8; }
+  .tl__hr--half i { border-top-style: dashed; }
+  .tl__blk {
+    position: absolute; left: 58px; right: 0; min-height: 40px; box-sizing: border-box; overflow: hidden;
+    display: flex; flex-direction: column; gap: 1px; padding: 6px 10px; border-radius: var(--r-md); color: var(--text);
+    background: color-mix(in srgb, var(--cc, var(--none)) 15%, var(--panel));
+    border: 1px solid color-mix(in srgb, var(--cc, var(--none)) 40%, transparent);
+  }
+  .tl__blk > span { flex: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tl__blk.is-past { opacity: .85; }
+  .tl__title { font-size: 15px; font-weight: 600; line-height: 1.3; }
+  .tl__sub, .tl__st { font-size: 13px; color: var(--muted); }
+  .tl__st b { color: var(--accent); font-weight: 600; }
+  /* Under 45 minutes: the title and time on one line. */
+  .tl__blk.is-short { flex-direction: row; align-items: center; gap: 8px; min-height: 32px; padding-top: 0; padding-bottom: 0; }
+  .tl__blk.is-short .tl__title { flex: none; max-width: 72%; }
+  .tl__blk.is-short .tl__sub { flex: 1 1 0; min-width: 0; }
+  .tl__blk.is-short .tl__st { display: none; }
+  .tl__now { position: absolute; left: 50px; right: 0; z-index: 2; border-top: 2px solid var(--accent); }
+  .tl__now span { position: absolute; left: -50px; top: -10px; padding-right: 3px; font-size: 12px; font-weight: 600; color: var(--accent); background: var(--panel); }
+}

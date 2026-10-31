@@ -120,7 +120,8 @@ def _event_view(ctx: _Ctx, ev) -> dict[str, Any]:
         "end": f"{end:%H:%M}" if end else "",
         "start_min": start_min, "end_min": max(end_min, start_min + 15),
         "cc": ctx.cc(ev.course_id), "status": label, "sc": sc,
-        "url": rec or f"/calendar?date={start.date().isoformat()}",
+        "url": rec or f"/calendar?day={start.date().isoformat()}",
+        "recording": rec, "kind": ev.kind,
         "is_past": (end or start + _dt.timedelta(hours=1)) <= ctx.now,
     }
 

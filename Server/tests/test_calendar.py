@@ -1,8 +1,5 @@
-"""Web UI tests for the month-grid calendar page and event forms.
-
-The grid layout math itself is unit-tested in tests/test_events.py
-(MonthGridTests); here we test the Flask routes that render the
-template and the form prefill behaviour.
+"""Web UI tests for the Calendar page (month, week, the day) and the
+event forms.
 """
 from __future__ import annotations
 
@@ -29,108 +26,85 @@ def _create_event(self, **overrides):
 
 
 class CalendarPageTests(LRTestCase):
-    def test_calendar_renders_with_grid(self):
-        resp = self.client.get("/calendar?year=2026&month=1")
+    def _get(self, url):
+        resp = self.client.get(url)
         self.assertEqual(resp.status_code, 200)
-        body = resp.get_data(as_text=True)
+        return resp.get_data(as_text=True)
+
+    def _day_panel(self, url):
+        body = self._get(url)
+        return body[body.index('id="cday-title"'):]
+
+    def test_month_renders_42_days(self):
+        body = self._get("/calendar?date=2026-01-10")
         self.assertIn("January 2026", body)
         for wd in ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"):
             self.assertIn(wd, body)
-        # 42 cells = 6 rows × 7 days. Each cell div starts with
-        # ``class="lr-cal__cell`` (the bare class; some cells also have
-        # ``--out`` or ``--today`` modifiers but not all do).
-        self.assertEqual(body.count('class="lr-cal__cell'), 42)
-        # Prev/next nav present: Jan 2026 prev = Dec 2025, next = Feb 2026.
-        self.assertIn("year=2025&amp;month=12", body)
-        self.assertIn("year=2026&amp;month=2", body)
+        self.assertEqual(body.count('role="gridcell"'), 42)
+        # Previous / next month.
+        self.assertIn("date=2025-12-01", body)
+        self.assertIn("date=2026-02-01", body)
+        self.assertIn("mcell is-out", body)
 
-    def test_calendar_defaults_to_current_month_when_no_params(self):
-        resp = self.client.get("/calendar")
-        self.assertEqual(resp.status_code, 200)
+    def test_defaults_and_bad_params(self):
+        self._get("/calendar")
+        self._get("/calendar?date=garbage&day=nope&view=year")
+        self.assertIn(">Today<", self._get("/calendar"))
 
-    def test_calendar_shows_today_button_when_off_current(self):
-        resp = self.client.get("/calendar?year=2026&month=2")
-        body = resp.get_data(as_text=True)
-        self.assertIn(">Today<", body)
+    def test_day_cells_choose_the_day(self):
+        body = self._get("/calendar?date=2026-01-10")
+        self.assertIn("day=2026-01-01", body)
+        self.assertIn("day=2025-12-29", body)   # out-of-month cells too
 
-    def test_calendar_hides_today_button_on_current_month(self):
-        now = dt.datetime.utcnow()
-        resp = self.client.get(
-            f"/calendar?year={now.year}&month={now.month}"
-        )
-        body = resp.get_data(as_text=True)
-        self.assertNotIn(">Today<", body)
-
-    def test_calendar_renders_event_chip(self):
-        _create_event(self, title="Calc II Lecture")
-        resp = self.client.get("/calendar?year=2027&month=3")
-        body = resp.get_data(as_text=True)
+    def test_event_chip_and_day_panel(self):
+        _create_event(self, title="Calc II Lecture", location="Room 4")
+        body = self._get("/calendar?date=2027-03-01")
         self.assertIn("Calc II Lecture", body)
-        self.assertIn("lr-cal__chip--lecture", body)
+        panel = self._day_panel("/calendar?day=2027-03-15")
+        self.assertIn("Monday 15 March", panel)
+        self.assertIn("1 event", panel)
+        self.assertIn("Room 4", panel)
+        self.assertIn("Add an event on this day", panel)
+        self.assertIn("/events/new?date=2027-03-15", panel)
 
-    def test_calendar_renders_meeting_chip(self):
-        _create_event(self, title="Standup", kind="meeting",
-                      starts_at="2027-03-15T09:00:00Z", ends_at=None)
-        resp = self.client.get("/calendar?year=2027&month=3")
-        body = resp.get_data(as_text=True)
-        self.assertIn("lr-cal__chip--meeting", body)
+    def test_deadlines_show_as_due_chips(self):
+        self.client.post("/api/v1/tasks", data=json.dumps({
+            "title": "Problem set 4", "kind": "deadline", "due_at": "2027-03-16T23:59:00Z",
+        }), content_type="application/json")
+        body = self._get("/calendar?date=2027-03-01")
+        self.assertIn("Due · Problem set 4", body)
+        panel = self._day_panel("/calendar?day=2027-03-16")
+        self.assertIn("1 deadline", panel)
 
-    def test_calendar_other_chip(self):
-        _create_event(self, title="Office Hours", kind="other",
-                      starts_at="2027-03-15T16:00:00Z", ends_at=None)
-        resp = self.client.get("/calendar?year=2027&month=3")
-        body = resp.get_data(as_text=True)
-        self.assertIn("lr-cal__chip--other", body)
-
-    def test_calendar_day_cells_are_clickable_links(self):
-        # In-month cells link to /events/new?date=YYYY-MM-DD.
-        resp = self.client.get("/calendar?year=2026&month=1")
-        body = resp.get_data(as_text=True)
-        self.assertIn("/events/new?date=2026-01-01", body)
-        # Out-of-month cells are also clickable.
-        self.assertIn("/events/new?date=2025-12-31", body)
-
-    def test_calendar_out_of_month_cells_have_out_class(self):
-        resp = self.client.get("/calendar?year=2026&month=1")
-        body = resp.get_data(as_text=True)
-        self.assertIn("lr-cal__cell--out", body)
-
-    def test_calendar_ics_import_section_present(self):
-        resp = self.client.get("/calendar?year=2026&month=1")
-        body = resp.get_data(as_text=True)
-        self.assertIn("Import .ics", body)
-        self.assertIn("action=\"/api/v1/events/import\"", body)
-
-    def test_calendar_handles_invalid_month(self):
-        resp = self.client.get("/calendar?year=2026&month=13")
-        self.assertEqual(resp.status_code, 200)
-class EventOverflowTests(LRTestCase):
-    def test_overflow_link_appears_for_more_than_three_events(self):
-        # Four events on the same day → "+ 1 more".
+    def test_overflow_after_three(self):
         for i in range(4):
-            _create_event(
-                self, title=f"Event {i}",
-                starts_at=f"2027-03-15T{9 + i:02d}:00:00Z",
-                ends_at=None,
-            )
-        resp = self.client.get("/calendar?year=2027&month=3")
-        body = resp.get_data(as_text=True)
+            _create_event(self, title=f"Event {i}",
+                          starts_at=f"2027-03-15T{9 + i:02d}:00:00Z", ends_at=None)
+        body = self._get("/calendar?date=2027-03-01")
         self.assertIn("+ 1 more", body)
-        # The fourth event is listed under it (it used to be empty).
-        self.assertIn("Event 3", body)
+        # The day panel lists all four.
+        self.assertIn("Event 3", self._day_panel("/calendar?day=2027-03-15"))
 
     def test_no_overflow_when_three_or_fewer(self):
         for i in range(3):
-            _create_event(
-                self, title=f"Event {i}",
-                starts_at=f"2027-03-15T{9 + i:02d}:00:00Z",
-                ends_at=None,
-            )
-        resp = self.client.get("/calendar?year=2027&month=3")
-        body = resp.get_data(as_text=True)
-        # Only the "+ New event" header button should contain a "+".
-        self.assertNotIn("+ 1 more", body)
-        self.assertNotIn("+ 2 more", body)
+            _create_event(self, title=f"Event {i}",
+                          starts_at=f"2027-03-15T{9 + i:02d}:00:00Z", ends_at=None)
+        self.assertNotIn(" more</span>", self._get("/calendar?date=2027-03-01"))
+
+    def test_week_view(self):
+        _create_event(self, title="Calc II Lecture")
+        body = self._get("/calendar?view=week&date=2027-03-17")
+        self.assertIn("15 Mar – 21 Mar 2027", body)
+        self.assertIn('class="wgrid', body)
+        self.assertIn("Calc II Lecture", body)
+        # Steps a week at a time, keeping the view.
+        self.assertIn("view=week&amp;date=2027-03-08", body)
+        self.assertIn("view=week&amp;date=2027-03-22", body)
+
+    def test_ics_import_button(self):
+        body = self._get("/calendar")
+        self.assertIn("Import .ics", body)
+        self.assertIn("data-ics-file", body)
 
 
 class EventFormTests(LRTestCase):
@@ -138,8 +112,11 @@ class EventFormTests(LRTestCase):
         resp = self.client.get("/events/new?date=2027-03-15")
         self.assertEqual(resp.status_code, 200)
         body = resp.get_data(as_text=True)
-        # Noon default for the chosen day.
-        self.assertIn('value="2027-03-15T12:00"', body)
+        # 09:00 to 10:00 on another day than today.
+        self.assertIn('value="2027-03-15T09:00"', body)
+        self.assertIn('value="2027-03-15T10:00"', body)
+        # Back goes to that day.
+        self.assertIn("/calendar?date=2027-03-15&amp;day=2027-03-15", body)
         for kind in ("lecture", "meeting", "other"):
             self.assertIn(kind, body)
 
@@ -177,7 +154,7 @@ class EventFormTests(LRTestCase):
             follow_redirects=False,
         )
         self.assertEqual(resp.status_code, 302)
-        self.assertIn("/calendar", resp.headers["Location"])
+        self.assertIn("/calendar?date=2027-03-15&day=2027-03-15", resp.headers["Location"])
 
     def test_create_event_form_invalid_returns_400(self):
         resp = self.client.post(

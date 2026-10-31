@@ -12,9 +12,6 @@ The service layer owns three concerns the storage layer doesn't:
   free function and used by :meth:`EventsService.suggest_match`.
 * Parsing .ics files into a stream of ``Event`` rows, used by
   :meth:`EventsService.import_ics`.
-* Building the month-grid matrix used by the ``/calendar`` UI;
-  :func:`compute_month_grid` is a pure function so the layout math
-  is unit-tested without rendering.
 
 The service is constructed with a :class:`storage.Storage` instance
 so it can be tested without a Flask app. Routes get the service via
@@ -261,75 +258,6 @@ def suggest_match_confidence(
         pos = (end_dt - session_dt).total_seconds() / right_span
         pos = max(0.0, min(1.0, pos))
         return 0.5 + 0.5 * pos
-
-
-# --- Month grid math --------------------------------------------------------
-
-def compute_month_grid(
-    year: int, month: int, events: list[Event], *,
-    max_per_cell: int = 3,
-) -> list[list[dict[str, Any]]]:
-    """Build a 6-row × 7-column calendar grid for ``(year, month)``.
-
-    Each cell is a dict with::
-
-        {"date": date, "in_month": bool, "weekday": int,
-         "events": list[Event], "more": list[Event], "overflow": int}
-
-    - ``date`` is a :class:`datetime.date`.
-    - ``in_month`` is True for cells belonging to ``(year, month)``;
-      leading/trailing cells are filled with days from the previous
-      and next month.
-    - ``weekday`` is 0 (Mon) … 6 (Sun), matching ``date.weekday()``.
-    - ``events`` is sorted by ``starts_at`` and capped at
-      ``max_per_cell``; the rest of the day's events are in ``more``
-      and counted in ``overflow``, for the template's "+N more" list.
-
-    The grid always has 6 rows (42 cells) so the layout doesn't jump
-    around as the user navigates months.
-
-    Events not on any of the 42 dates in the grid are ignored — by
-    construction that can't happen if ``events`` is the result of
-    :func:`Storage.list_events` with the right date bounds, but the
-    caller is free to pass any list.
-    """
-    first_of_month = _dt.date(year, month, 1)
-    # weekday(): Mon=0. We want Monday on the left edge of the grid.
-    leading = first_of_month.weekday()
-    grid_start = first_of_month - _dt.timedelta(days=leading)
-
-    # Group events by date, ignoring any whose date is not on the grid.
-    by_date: dict[_dt.date, list[Event]] = {}
-    for ev in events:
-        try:
-            ev_date = _parse_iso(ev.starts_at).astimezone(
-                timeutil.local_tz(),
-            ).date()
-        except (ValueError, AttributeError):
-            continue
-        if grid_start <= ev_date <= grid_start + _dt.timedelta(days=41):
-            by_date.setdefault(ev_date, []).append(ev)
-
-    rows: list[list[dict[str, Any]]] = []
-    for r in range(6):
-        row: list[dict[str, Any]] = []
-        for c in range(7):
-            cell_date = grid_start + _dt.timedelta(days=r * 7 + c)
-            day_events = by_date.get(cell_date, [])
-            day_events_sorted = sorted(
-                day_events, key=lambda e: e.starts_at,
-            )
-            overflow = max(0, len(day_events_sorted) - max_per_cell)
-            row.append({
-                "date": cell_date,
-                "in_month": cell_date.month == month,
-                "weekday": cell_date.weekday(),
-                "events": day_events_sorted[:max_per_cell],
-                "more": day_events_sorted[max_per_cell:],
-                "overflow": overflow,
-            })
-        rows.append(row)
-    return rows
 
 
 # --- Service ----------------------------------------------------------------
@@ -749,5 +677,4 @@ __all__ = [
     "KINDS",
     "EventsService",
     "suggest_match_confidence",
-    "compute_month_grid",
 ]

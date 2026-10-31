@@ -1,251 +1,215 @@
 {% extends "base.html" %}
-{% set legacy = true %}
+{% from "_icons.html" import icon %}
+{% block title %}Calendar · AfterWord{% endblock %}
+{% block extrahead %}<link rel="stylesheet" href="{{ asset('css/calendar.css') }}">{% endblock %}
+{% block extrascripts %}<script defer src="{{ asset('js/calendar.js') }}"></script>{% endblock %}
 
-{% block title %}Calendar &middot; Lecture Recorder{% endblock %}
+{# A calendar link that keeps the view (month is the default, so left out). #}
+{% macro cal(date=None, day=None, v=None) -%}
+  {{ url_for('pages.ui_calendar', view=(v or view) if (v or view) != 'month' else None, date=date, day=day) }}
+{%- endmacro %}
+{% macro hm(minutes) -%}{{ '%02d:%02d' % (minutes // 60, minutes % 60) }}{%- endmacro %}
 
-{% block extrahead %}
-  <style>
-    .lr-cal {
-      display: grid;
-      grid-template-columns: repeat(7, 1fr);
-      border: 1px solid var(--lr-border-hi);
-      border-radius: var(--lr-radius-md);
-      overflow: hidden;
-      margin-top: var(--lr-s-4);
-    }
-    .lr-cal__head {
-      background: var(--lr-surface);
-      text-align: center;
-      font-size: var(--lr-fs-xs);
-      font-weight: 600;
-      color: var(--lr-text-faint);
-      padding: var(--lr-s-2) 0;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      border-bottom: 1px solid var(--lr-border-hi);
-    }
-    .lr-cal__cell {
-      background: var(--lr-surface);
-      min-height: 96px;
-      padding: var(--lr-s-2);
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      position: relative;
-      border-right: 1px solid var(--lr-border-hi);
-      border-bottom: 1px solid var(--lr-border-hi);
-    }
-    /* Last column and last row have no right/bottom border; the
-       outer container provides the rightmost/bottommost edge. */
-    .lr-cal__cell:nth-child(7n) { border-right: 0; }
-    .lr-cal__cell:nth-last-child(-n+7) { border-bottom: 0; }
-    .lr-cal__cell--out { opacity: 0.45; }
-    .lr-cal__cell--today { box-shadow: inset 0 0 0 2px var(--lr-accent); }
-    .lr-cal__daynum {
-      font-size: var(--lr-fs-sm);
-      color: var(--lr-text);
-      text-decoration: none;
-      font-weight: 600;
-    }
-    .lr-cal__cell--out .lr-cal__daynum {
-      color: var(--lr-text-faint);
-      font-weight: 400;
-    }
-    .lr-cal__daynum:hover { color: var(--lr-accent); }
-    .lr-cal__chip {
-      display: block;
-      padding: 2px 6px;
-      border-radius: var(--lr-radius-sm);
-      font-size: var(--lr-fs-xs);
-      line-height: 1.25;
-      color: var(--lr-text);
-      background: var(--lr-surface-2, var(--lr-surface));
-      text-decoration: none;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      border-left: 3px solid var(--lr-text-faint);
-    }
-    .lr-cal__chip--lecture {
-      border-left-color: var(--lr-accent);
-      background: color-mix(in srgb, var(--lr-accent) 12%, var(--lr-surface));
-    }
-    .lr-cal__chip--meeting {
-      border-left-color: var(--lr-warning);
-      background: color-mix(in srgb, var(--lr-warning) 14%, var(--lr-surface));
-    }
-    .lr-cal__chip--other {
-      border-left-color: var(--lr-text-muted, var(--lr-text-faint));
-    }
-    .lr-cal__chip:hover {
-      background: var(--lr-surface-hover, var(--lr-surface-2));
-    }
-    .lr-cal__overflow {
-      font-size: var(--lr-fs-xs);
-      color: var(--lr-accent);
-      background: none;
-      border: 0;
-      cursor: pointer;
-      padding: 0;
-      margin-top: 2px;
-      text-align: left;
-    }
-    .lr-cal__overflow:hover { text-decoration: underline; }
-    .lr-cal__overflow-list {
-      list-style: none;
-      padding: 0;
-      margin: 4px 0 0;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-    .lr-import { margin-top: var(--lr-gap-card); }
-  </style>
+{% block pbar %}
+  {% if day_chosen %}
+    <header class="pbar">
+      <a class="pbar__back" href="{{ cal(anchor) }}">{{ icon("back", 22, 2) }}{{ back_label }}</a>
+      <span class="pbar__spacer"></span>
+      <a class="icon-btn pbar__add" href="{{ url_for('pages.ui_event_new', date=day.iso) }}" aria-label="Add an event on this day">{{ icon("plus", 24, 2) }}</a>
+    </header>
+  {% else %}
+    {{ super() }}
+  {% endif %}
 {% endblock %}
+{% block pbar_title %}Calendar{% endblock %}
 
 {% block content %}
-<div class="lr-page">
-  <header class="lr-page__header">
-    <div>
-      <h1 class="lr-page__title">Calendar</h1>
-      <div class="lr-page__sub">
-        Lectures and meetings you schedule. Sessions get linked here
-        once the AI pipeline matches them.
-      </div>
-    </div>
-    <a class="lr-btn lr-btn--primary"
-       href="{{ url_for('pages.ui_event_new') }}">+ New event</a>
+<div class="cal cal--{{ view }}{% if day_chosen %} is-day{% endif %}">
+  <header class="calbar">
+    <nav class="seg calbar__views" aria-label="View">
+      <a href="{{ cal(anchor, v='month') }}"{% if view == 'month' %} aria-current="page"{% endif %}>Month</a>
+      <a href="{{ cal(anchor, v='week') }}"{% if view == 'week' %} aria-current="page"{% endif %}>Week</a>
+    </nav>
+    <a class="btn calbar__step calbar__prev" href="{{ cal(prev) }}" aria-label="Previous {{ view }}">{{ icon("back", 15, 2) }}</a>
+    <a class="btn calbar__step calbar__next" href="{{ cal(next) }}" aria-label="Next {{ view }}">{{ icon("right", 15, 2) }}</a>
+    <a class="btn calbar__today" href="{{ cal() }}">Today</a>
+    <h1 class="calbar__heading">{{ heading }}</h1>
+    <span class="calbar__sp"></span>
+    <button type="button" class="btn calbar__import" data-ics-import>{{ icon("import", 15) }}Import .ics</button>
+    <a class="btn btn--fill calbar__new" href="{{ url_for('pages.ui_event_new', date=day.iso) }}" aria-label="New event">{{ icon("plus", 15, 2.4) }}<span>New event</span></a>
+    <span class="calbar__break" aria-hidden="true"></span>
   </header>
+  <input type="file" accept=".ics,text/calendar" hidden data-ics-file>
 
-  <nav class="lr-row"
-       style="justify-content: space-between; align-items: center;
-              margin-top: var(--lr-s-3);">
-    <a class="lr-btn lr-btn--ghost"
-       href="{{ url_for('pages.ui_calendar', year=prev_year, month=prev_month) }}">
-      &larr; Previous
-    </a>
-    <h2 style="font-size: var(--lr-fs-xl); margin: 0;">
-      {{ month_name }} {{ year }}
-    </h2>
-    <div style="display: flex; gap: var(--lr-s-2);">
-      {% if not is_current_month %}
-        <a class="lr-btn lr-btn--ghost"
-           href="{{ url_for('pages.ui_calendar') }}">Today</a>
-      {% endif %}
-      <a class="lr-btn lr-btn--ghost"
-         href="{{ url_for('pages.ui_calendar', year=next_year, month=next_month) }}">
-        Next &rarr;
-      </a>
-    </div>
-  </nav>
+  <div class="cal__body">
+    {% if view == 'month' %}
+      {# ---------------- Month: chips on desktop, dots on the phone ---------------- #}
+      <div class="mgrid" role="grid" aria-label="{{ heading }}">
+        <div class="mgrid__dows" role="row">
+          {% for w in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] %}
+            <span role="columnheader"><span class="mgrid__long">{{ w }}</span><span class="mgrid__short" aria-hidden="true">{{ w[0] }}</span></span>
+          {% endfor %}
+        </div>
+        {% for row in weeks %}
+          <div class="mgrid__row" role="row">
+            {% for c in row %}
+              <a class="mcell{% if not c.in_month %} is-out{% endif %}{% if c.is_today %} is-today{% endif %}{% if c.is_selected %} is-sel{% endif %}"
+                 role="gridcell" href="{{ cal(anchor, c.iso) }}" aria-label="{{ c.aria }}"{% if c.is_selected %} aria-selected="true"{% endif %}>
+                <span class="mcell__num mono">{{ c.num }}</span>
+                <span class="mcell__chips">
+                  {% for x in c.chips %}
+                    {% if x.due %}
+                      <span class="chip chip--due {{ x.cc }}{% if x.done %} is-done{% endif %}" title="Due · {{ x.title }}">Due · {{ x.title }}</span>
+                    {% else %}
+                      <span class="chip {{ x.cc }}" title="{{ x.start }} {{ x.title }}"><span class="mono chip__tm">{{ x.start }}</span>{{ x.title }}</span>
+                    {% endif %}
+                  {% endfor %}
+                  {% if c.more %}<span class="chip__more">+ {{ c.more }} more</span>{% endif %}
+                </span>
+                <span class="mcell__dots" aria-hidden="true">
+                  {% for cc in c.dots %}<i class="cd {{ cc }}"></i>{% endfor %}
+                  {% if c.extra %}<b>+{{ c.extra }}</b>{% endif %}
+                </span>
+                <span class="mcell__rings" aria-hidden="true">{% for x in c.deadlines[:3] %}<i class="cdue {{ x.cc }}"></i>{% endfor %}</span>
+              </a>
+            {% endfor %}
+          </div>
+        {% endfor %}
+      </div>
+      <div class="cal__legend">
+        <span><i class="cd cc-0"></i>event</span>
+        <span><i class="cdue cc-0"></i>deadline</span>
+        <button type="button" class="link" data-ics-import>{{ icon("import", 16) }}Import .ics</button>
+      </div>
+    {% else %}
+      {# ---------------- Week: a time grid on desktop ---------------- #}
+      <div class="wgrid">
+        <div class="wgrid__head">
+          <span></span>
+          {% for c in week.days %}
+            <div class="wgrid__day{% if c.is_today %} is-today{% endif %}{% if c.is_selected %} is-sel{% endif %}">
+              <a class="wgrid__label" href="{{ cal(anchor, c.iso) }}" aria-label="{{ c.aria }}">{{ c.dow }} <span class="mono">{{ c.num }}</span></a>
+              {% for x in c.deadlines %}
+                <span class="chip chip--due {{ x.cc }}{% if x.done %} is-done{% endif %}" title="Due · {{ x.title }}">Due · {{ x.title }}</span>
+              {% endfor %}
+            </div>
+          {% endfor %}
+        </div>
+        <div class="wgrid__scroll">
+          <div class="wgrid__body" style="--rows: {{ week.hours|length - 1 }}">
+            <div class="wgrid__hours">
+              {% for h in week.hours[:-1] %}<span class="mono" style="top: {{ loop.index0 / (week.hours|length - 1) * 100 }}%">{{ '%02d:00' % h }}</span>{% endfor %}
+            </div>
+            {% for c in week.days %}
+              <div class="wgrid__col{% if c.is_today %} is-today{% endif %}">
+                {% for e in c.timed %}
+                  <a class="blk {{ e.cc }}{% if e.is_past %} is-past{% endif %}{% if e.end_min - e.start_min < 45 %} is-short{% endif %}" href="{{ cal(anchor, c.iso) }}"
+                     style="top: {{ e.top }}%; height: {{ e.height }}%" title="{{ e.start }}–{{ e.end or '' }} {{ e.title }}">
+                    <span class="mono blk__tm">{{ e.start }}</span><span class="blk__title">{{ e.title }}</span>
+                  </a>
+                {% endfor %}
+                {% if c.now_pct is not none %}<div class="calnow" style="top: {{ c.now_pct }}%" aria-label="Now"></div>{% endif %}
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
 
-  <div class="lr-cal" role="grid"
-       aria-label="{{ month_name }} {{ year }}">
-    {% for wd in ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] %}
-      <div class="lr-cal__head" role="columnheader">{{ wd }}</div>
-    {% endfor %}
-
-    {% for row in grid %}
-      {% for cell in row %}
-        {% set iso_date = cell.date.isoformat() %}
-        {% set is_today = (iso_date == today_iso) %}
-        <div class="lr-cal__cell
-                    {% if not cell.in_month %}lr-cal__cell--out{% endif %}
-                    {% if is_today %}lr-cal__cell--today{% endif %}"
-             role="gridcell">
-          <a class="lr-cal__daynum"
-             href="{{ url_for('pages.ui_event_new') }}?date={{ iso_date }}">
-            {{ cell.date.day }}
+      {# Week on the phone: a list of days, as This week on Home. #}
+      <div class="wlist">
+        {% for c in week.days %}
+          <a class="wday{% if c.is_today %} is-today{% endif %}" href="{{ cal(anchor, c.iso) }}" aria-label="{{ c.aria }}">
+            <span class="wday__label"><span>{{ c.dow }}</span><span class="mono wday__num">{{ c.num }}</span></span>
+            <span class="wday__events">
+              {% if not c.events and not c.deadlines %}<span class="wday__empty">Nothing scheduled</span>{% endif %}
+              {% for x in c.deadlines %}
+                <span class="wdue {{ x.cc }}{% if x.done %} is-done{% endif %}">{{ icon("flag", 15) }}Due · {{ x.title }}</span>
+              {% endfor %}
+              {% for e in c.events %}
+                {% if c.now_at == loop.index0 %}<span class="nowline"><span class="mono">{{ now.strftime('%H:%M') }}</span><i></i></span>{% endif %}
+                <span class="evt {{ e.cc }}{% if e.is_past %} is-past{% endif %}">
+                  <span class="evt__time mono">{{ e.start }}</span>
+                  <span class="evt__body">
+                    <span class="evt__title">{{ e.title }}</span>
+                    <span class="evt__status {{ e.sc }}"><span class="dot"></span>{{ e.status }}</span>
+                  </span>
+                </span>
+              {% endfor %}
+              {% if c.is_today and c.events and c.now_at == c.events|length %}<span class="nowline"><span class="mono">{{ now.strftime('%H:%M') }}</span><i></i></span>{% endif %}
+            </span>
           </a>
-          {% for ev in cell.events %}
-            <a class="lr-cal__chip lr-cal__chip--{{ ev.kind }}"
-               href="{{ url_for('pages.ui_event_edit', event_id=ev.id) }}"
-               title="{{ ev.title }}">
-              <strong>{{ ev.starts_at|local_time }}</strong>
-              {{ ev.title }}
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    {# ---------------- The day: a panel on desktop, its own screen on the phone ---------------- #}
+    <aside class="cday" aria-labelledby="cday-title">
+      <div class="cday__head">
+        <div class="cday__titles">
+          <h2 id="cday-title">{{ day.title }}</h2>
+          <p class="cday__sub">{% if day.is_today %}<span class="tag tag--accent">Today</span>{% endif %}{{ day.counts }}</p>
+        </div>
+        <div class="cday__arrows">
+          <a class="icon-btn" href="{{ cal(day.prev, day.prev) }}" aria-label="Previous day">{{ icon("back", 20, 2) }}</a>
+          <a class="icon-btn" href="{{ cal(day.next, day.next) }}" aria-label="Next day">{{ icon("right", 20, 2) }}</a>
+        </div>
+      </div>
+
+      {% if day.deadlines %}
+        <div class="cday__dues">
+          {% for x in day.deadlines %}
+            <div class="duechip {{ x.cc }}{% if x.done %} is-done{% endif %}">
+              {{ icon("flag", 16) }}
+              <span class="duechip__body">
+                <span class="duechip__title">Due · {{ x.title }}</span>
+                {% if x.course %}<span class="duechip__course">{{ x.course }}</span>{% endif %}
+              </span>
+              <span class="mono duechip__time">{{ "done" if x.done else (x.time or "all day") }}</span>
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+
+      {# Desktop: the day's events as a list. #}
+      <div class="cday__list">
+        {% if not day.events and not day.deadlines %}<p class="cday__empty">Nothing on this day.</p>{% endif %}
+        {% for e in day.events %}
+          <div class="dev {{ e.cc }}">
+            <div class="dev__meta"><i class="sq"></i><span class="mono">{{ e.start }}{% if e.end %}–{{ e.end }}{% endif %}</span>{% if e.location %}<span>· {{ e.location }}</span>{% endif %}</div>
+            <div class="dev__title">{{ e.title }}</div>
+            <div class="dev__status {{ e.sc }}">
+              <span class="dot"></span>{{ e.status }}
+              <span class="dev__acts">
+                {% if e.recording %}<a class="link" href="{{ e.recording }}">Open recording</a>{% endif %}
+                <a class="icon-btn dev__edit" href="{{ url_for('pages.ui_event_edit', event_id=e.id) }}" aria-label="Edit {{ e.title }}" title="Edit">{{ icon("pencil", 15) }}</a>
+              </span>
+            </div>
+          </div>
+        {% endfor %}
+        <a class="btn field--dashed cday__add" href="{{ url_for('pages.ui_event_new', date=day.iso) }}">{{ icon("plus", 15, 2) }}Add an event on this day</a>
+      </div>
+
+      {# Phone: the day as a timeline, an hour label at every hour. #}
+      <div class="cday__tl">
+        {% if not day.events %}<p class="cday__empty">Nothing scheduled. Tap + to add an event.</p>{% endif %}
+        {% set n = day.hours|length - 1 %}
+        <div class="tl" style="--rows: {{ n }}">
+          {% for h in day.hours %}
+            <div class="tl__hr" style="top: {{ loop.index0 / n * 100 }}%"><span class="mono">{{ '%02d:00' % h }}</span><i></i></div>
+            {% if not loop.last %}<div class="tl__hr tl__hr--half" style="top: {{ (loop.index0 + 0.5) / n * 100 }}%"><i></i></div>{% endif %}
+          {% endfor %}
+          {% for e in day.timeline %}
+            <a class="tl__blk {{ e.cc }}{% if e.is_past %} is-past{% endif %}{% if e.end_min - e.start_min < 45 %} is-short{% endif %}" style="top: {{ e.top }}%; height: {{ e.height }}%"
+               href="{{ e.recording or url_for('pages.ui_event_edit', event_id=e.id) }}">
+              <span class="tl__title">{{ e.title }}</span>
+              <span class="tl__sub"><span class="mono">{{ e.start }}{% if e.end %}–{{ e.end }}{% endif %}</span>{% if e.location %} · {{ e.location }}{% endif %}</span>
+              <span class="tl__st {{ e.sc }}">{{ e.status }}{% if e.recording %} · <b>Open recording</b>{% endif %}</span>
             </a>
           {% endfor %}
-          {% if cell.overflow > 0 %}
-            <details>
-              <summary class="lr-cal__overflow">
-                + {{ cell.overflow }} more
-              </summary>
-              <ul class="lr-cal__overflow-list">
-                {% for ev in cell.more %}
-                  <li>
-                    <a class="lr-cal__chip lr-cal__chip--{{ ev.kind }}"
-                       href="{{ url_for('pages.ui_event_edit', event_id=ev.id) }}"
-                       title="{{ ev.title }}">
-                      <strong>{{ ev.starts_at|local_time }}</strong>
-                      {{ ev.title }}
-                    </a>
-                  </li>
-                {% endfor %}
-              </ul>
-            </details>
-          {% endif %}
+          {% if day.now_pct is not none %}<div class="tl__now" style="top: {{ day.now_pct }}%"><span class="mono">{{ now.strftime('%H:%M') }}</span></div>{% endif %}
         </div>
-      {% endfor %}
-    {% endfor %}
+      </div>
+    </aside>
   </div>
-
-  <section class="lr-card lr-import">
-    <header class="lr-card__header">
-      <h2 class="lr-card__title">Import .ics</h2>
-    </header>
-    <div class="lr-card__body">
-      <p style="color: var(--lr-text-faint); font-size: var(--lr-fs-sm);
-                margin-top: 0;">
-        Upload an iCalendar file (.ics) exported from your university
-        calendar or another scheduling tool. Events are added as meetings;
-        re-classify individual events afterwards.
-      </p>
-      <form method="post" action="{{ url_for('events_api.api_import_events_ics') }}"
-            enctype="multipart/form-data">
-        <div class="lr-row" style="gap: var(--lr-s-3); align-items: center;
-                                    flex-wrap: wrap;">
-          <input class="lr-input" type="file" name="file" accept=".ics"
-                 required>
-          <button class="lr-btn lr-btn--primary" type="submit">
-            Import
-          </button>
-        </div>
-      </form>
-      <div id="lr-import-result"
-           style="margin-top: var(--lr-s-3); font-size: var(--lr-fs-sm);"></div>
-    </div>
-  </section>
 </div>
-
-<script>
-  // Intercept the import form so we can show the imported count
-  // inline without a hard reload.
-  document.addEventListener("DOMContentLoaded", function () {
-    var form = document.querySelector(
-      "form[action='{{ url_for('events_api.api_import_events_ics') }}']"
-    );
-    if (!form) return;
-    form.addEventListener("submit", function (e) {
-      e.preventDefault();
-      var data = new FormData(form);
-      var out = document.getElementById("lr-import-result");
-      fetch(form.action, {
-        method: "POST", body: data, credentials: "same-origin",
-      }).then(function (r) { return r.json(); }).then(function (j) {
-        if (j && typeof j.imported === "number" && j.imported > 0) {
-          out.textContent = "Imported " + j.imported + " event"
-            + (j.imported === 1 ? "" : "s") + ". Reloading…";
-          out.style.color = "var(--lr-success)";
-          setTimeout(function () { window.location.reload(); }, 600);
-        } else {
-          out.textContent = "No events imported (file may be empty or invalid).";
-          out.style.color = "var(--lr-warning)";
-        }
-      }).catch(function () {
-        out.textContent = "Import failed — see server logs.";
-        out.style.color = "var(--lr-danger)";
-      });
-    });
-  });
-</script>
 {% endblock %}
