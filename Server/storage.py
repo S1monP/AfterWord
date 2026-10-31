@@ -346,6 +346,26 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_events_starts ON events(starts_at)",
+    # Calendar subscriptions: a link (the university timetable, an
+    # Apple / Google calendar) fetched every hour; its events are kept
+    # in step with it (services/calendar_feeds.py). ``hidden_keys`` is a
+    # JSON list of feed keys the user deleted, so they don't come back.
+    """
+    CREATE TABLE IF NOT EXISTS calendar_subscriptions (
+        id              TEXT PRIMARY KEY,
+        name            TEXT NOT NULL,
+        url             TEXT NOT NULL,
+        kind            TEXT NOT NULL,
+        course_id       TEXT REFERENCES courses(id) ON DELETE SET NULL,
+        hidden_keys     TEXT NOT NULL DEFAULT '[]',
+        last_attempt_at TEXT,
+        last_synced_at  TEXT,
+        last_error      TEXT,
+        event_count     INTEGER NOT NULL DEFAULT 0,
+        created_at      TEXT NOT NULL,
+        updated_at      TEXT NOT NULL
+    )
+    """,
     "CREATE INDEX IF NOT EXISTS idx_events_kind ON events(kind, starts_at)",
 )
 
@@ -366,6 +386,10 @@ SCHEMA_ALTERS: tuple[str, ...] = (
     "ALTER TABLE sessions ADD COLUMN title_source TEXT",
     # A note's course (Notes page course picker).
     "ALTER TABLE notes ADD COLUMN course_id TEXT REFERENCES courses(id) ON DELETE SET NULL",
+    # events: the calendar subscription an event came from (its
+    # ``source_ref`` is then the feed's key for it).
+    "ALTER TABLE events ADD COLUMN subscription_id TEXT",
+    "CREATE INDEX IF NOT EXISTS idx_events_feed ON events(subscription_id, source_ref)",
     # tasks: the merged todos + deadlines table; nothing to alter
     # because it was created at table-creation time. Future columns
     # go here.
@@ -650,13 +674,14 @@ class Event:
     starts_at: str
     ends_at: Optional[str]
     location: Optional[str]
-    source: str                        # 'manual' | 'ical_import'
+    source: str                        # 'manual' | 'ical_import' | 'subscription' | 'extracted'
     source_ref: Optional[str]
     course_id: Optional[str]
     matched_session_id: Optional[str]
     match_confidence: Optional[float]
     created_at: str
     updated_at: str
+    subscription_id: Optional[str] = None
 
     def to_api_dict(self) -> dict[str, Any]:
         return {
@@ -674,7 +699,25 @@ class Event:
             "match_confidence": self.match_confidence,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "subscription_id": self.subscription_id,
         }
+
+
+@dataclass
+class Subscription:
+    """A calendar link kept in step with the events it adds."""
+    id: str
+    name: str
+    url: str
+    kind: str                       # the kind its events get
+    course_id: Optional[str]        # None: match each event to a course by name
+    hidden_keys: list[str]
+    last_attempt_at: Optional[str]
+    last_synced_at: Optional[str]
+    last_error: Optional[str]
+    event_count: int
+    created_at: str
+    updated_at: str
 
 
 @dataclass
@@ -2130,6 +2173,7 @@ class Storage:
         course_id: Optional[str] = None,
         matched_session_id: Optional[str] = None,
         match_confidence: Optional[float] = None,
+        subscription_id: Optional[str] = None,
     ) -> Event:
         """Insert a new event. All validation is the caller's job
         (the service layer is responsible)."""
@@ -2141,12 +2185,13 @@ class Storage:
                     (id, title, description, kind, starts_at, ends_at,
                      location, source, source_ref, course_id,
                      matched_session_id, match_confidence,
-                     created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     created_at, updated_at, subscription_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (event_id, title, description, kind, starts_at, ends_at,
                  location, source, source_ref, course_id,
-                 matched_session_id, match_confidence, now, now),
+                 matched_session_id, match_confidence, now, now,
+                 subscription_id),
             )
         return self.get_event(event_id)  # type: ignore[return-value]
 
@@ -2174,6 +2219,7 @@ class Storage:
         course_id: Any = _UNSET,
         matched_session_id: Any = _UNSET,
         match_confidence: Any = _UNSET,
+        subscription_id: Any = _UNSET,
     ) -> Event:
         """Partial update. ``title``, ``kind``, ``starts_at``, ``source``
         use the simple None-means-don't-touch convention. The other
@@ -2206,6 +2252,8 @@ class Storage:
         if match_confidence is not _UNSET:
             sets.append("match_confidence = ?")
             params.append(match_confidence)
+        if subscription_id is not _UNSET:
+            sets.append("subscription_id = ?"); params.append(subscription_id)
         if not sets:
             existing = self.get_event(event_id)
             if existing is None:
@@ -2276,6 +2324,92 @@ class Storage:
                 where_params + [limit, offset],
             ).fetchall()
         return [self._row_to_event(r) for r in rows], int(total)
+
+    def events_from_feed(self, subscription_id: Optional[str], *, source: Optional[str] = None) -> list[Event]:
+        """Every event a subscription added (``subscription_id``), or,
+        with ``subscription_id=None`` and a ``source``, every event of
+        that source that isn't a subscription's (one-off imports)."""
+        with self._tx() as conn:
+            if subscription_id is not None:
+                rows = conn.execute(
+                    "SELECT * FROM events WHERE subscription_id = ? ORDER BY starts_at",
+                    (subscription_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM events WHERE subscription_id IS NULL AND source = ? "
+                    "AND source_ref IS NOT NULL ORDER BY starts_at",
+                    (source,),
+                ).fetchall()
+        return [self._row_to_event(r) for r in rows]
+
+    def create_subscription(self, sub_id: str, *, name: str, url: str, kind: str,
+                            course_id: Optional[str]) -> Subscription:
+        now = now_iso()
+        with self._tx() as conn:
+            conn.execute(
+                "INSERT INTO calendar_subscriptions (id, name, url, kind, course_id, "
+                "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (sub_id, name, url, kind, course_id, now, now),
+            )
+        return self.get_subscription(sub_id)  # type: ignore[return-value]
+
+    def get_subscription(self, sub_id: str) -> Optional[Subscription]:
+        with self._tx() as conn:
+            row = conn.execute(
+                "SELECT * FROM calendar_subscriptions WHERE id = ?", (sub_id,)
+            ).fetchone()
+        return self._row_to_subscription(row) if row else None
+
+    def list_subscriptions(self) -> list[Subscription]:
+        with self._tx() as conn:
+            rows = conn.execute(
+                "SELECT * FROM calendar_subscriptions ORDER BY created_at"
+            ).fetchall()
+        return [self._row_to_subscription(r) for r in rows]
+
+    _SUB_FIELDS = ("name", "url", "kind", "course_id", "hidden_keys", "last_attempt_at",
+                   "last_synced_at", "last_error", "event_count")
+
+    def update_subscription(self, sub_id: str, **fields: Any) -> Subscription:
+        """Set any of ``_SUB_FIELDS`` (``hidden_keys`` as a list)."""
+        sets, params = [], []
+        for key, value in fields.items():
+            if key not in self._SUB_FIELDS:
+                raise ValueError(f"unknown subscription field {key!r}")
+            if key == "hidden_keys":
+                value = json.dumps(sorted(set(value)))
+            sets.append(f"{key} = ?"); params.append(value)
+        sets.append("updated_at = ?"); params.append(now_iso())
+        with self._tx() as conn:
+            cur = conn.execute(
+                f"UPDATE calendar_subscriptions SET {', '.join(sets)} WHERE id = ?",
+                params + [sub_id],
+            )
+            if cur.rowcount == 0:
+                raise KeyError(sub_id)
+        return self.get_subscription(sub_id)  # type: ignore[return-value]
+
+    def delete_subscription(self, sub_id: str) -> bool:
+        """Delete a subscription and every event it added (recordings
+        made in them stay)."""
+        with self._tx() as conn:
+            conn.execute("DELETE FROM events WHERE subscription_id = ?", (sub_id,))
+            cur = conn.execute("DELETE FROM calendar_subscriptions WHERE id = ?", (sub_id,))
+            return cur.rowcount > 0
+
+    def _row_to_subscription(self, row: sqlite3.Row) -> Subscription:
+        try:
+            hidden = json.loads(row["hidden_keys"] or "[]")
+        except ValueError:
+            hidden = []
+        return Subscription(
+            id=row["id"], name=row["name"], url=row["url"], kind=row["kind"],
+            course_id=row["course_id"], hidden_keys=list(hidden),
+            last_attempt_at=row["last_attempt_at"], last_synced_at=row["last_synced_at"],
+            last_error=row["last_error"], event_count=int(row["event_count"] or 0),
+            created_at=row["created_at"], updated_at=row["updated_at"],
+        )
 
     def clear_event_match_for_session(self, session_id: str) -> int:
         """Remove ``matched_session_id`` from any event that points at
@@ -2497,6 +2631,9 @@ class Storage:
             match_confidence=(
                 row["match_confidence"]
                 if "match_confidence" in keys else None
+            ),
+            subscription_id=(
+                row["subscription_id"] if "subscription_id" in keys else None
             ),
             created_at=row["created_at"],
             updated_at=row["updated_at"],

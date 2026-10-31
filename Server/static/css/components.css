@@ -81,6 +81,7 @@
 }
 .field:focus { border-color: var(--accent); outline: none; }
 .field--dashed { border-style: dashed; background: transparent; }
+.field:disabled { opacity: .55; cursor: not-allowed; }
 textarea.field { height: auto; padding: 9px 11px; line-height: 1.5; resize: vertical; }
 select.field { padding-right: 28px; }
 .form-row { display: flex; flex-direction: column; gap: 6px; }

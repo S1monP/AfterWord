@@ -101,10 +101,11 @@ class CalendarPageTests(LRTestCase):
         self.assertIn("view=week&amp;date=2027-03-08", body)
         self.assertIn("view=week&amp;date=2027-03-22", body)
 
-    def test_ics_import_button(self):
+    def test_subscriptions_link(self):
+        # Subscriptions and .ics imports live on their own page.
         body = self._get("/calendar")
-        self.assertIn("Import .ics", body)
-        self.assertIn("data-ics-file", body)
+        self.assertIn('href="/calendar/subscriptions"', body)
+        self.assertIn("Import a file", self._get("/calendar/subscriptions"))
 
 
 class EventFormTests(LRTestCase):

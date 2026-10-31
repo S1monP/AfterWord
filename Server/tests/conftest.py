@@ -51,6 +51,8 @@ class LRTestCase(unittest.TestCase):
         # on the post-upload status are deterministic. (Production
         # runs them in a background thread.)
         self.app.config["LR_PIPELINE_BACKGROUND"] = False
+        # No calendar fetching from the network in tests.
+        self.app.config["LR_SUBSCRIPTION_SYNC"] = False
         self.client = self.app.test_client()
 
     def tearDown(self) -> None:

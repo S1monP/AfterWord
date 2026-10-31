@@ -43,7 +43,7 @@ MAX_REPEAT_OCCURRENCES = 52
 
 KINDS: frozenset[str] = frozenset({"lecture", "meeting", "other"})
 # 'extracted': filed from a recording (services/filing.py).
-SOURCES: frozenset[str] = frozenset({"manual", "ical_import", "extracted"})
+SOURCES: frozenset[str] = frozenset({"manual", "ical_import", "subscription", "extracted"})
 
 # Match window for session→event matching. A session that started up
 # to 10 minutes before ``event_starts_at`` is still considered a
@@ -440,8 +440,14 @@ class EventsService:
         return first, weeks
 
     def delete(self, event_id: str) -> bool:
+        """Delete an event. One from a calendar subscription stays
+        deleted: the subscription won't add it again."""
         if not isinstance(event_id, str) or not event_id:
             raise ValueError("event_id is required")
+        event = self._store.get_event(event_id)
+        if event is not None and event.subscription_id:
+            from services.calendar_feeds import SubscriptionsService
+            SubscriptionsService(self._store).hide(event)
         return self._store.delete_event(event_id)
 
     def get(self, event_id: str) -> Optional[Event]:
@@ -542,134 +548,22 @@ class EventsService:
 
     # -- .ics import -----------------------------------------------------
 
-    def import_ics(self, ics_bytes: bytes) -> int:
-        """Parse an .ics file and create events from each ``VEVENT``.
-
-        Returns the count of events imported. Non-datetime events
-        (e.g. all-day events without a DTEND) are still imported with
-        a noon start time. Events with no SUMMARY are skipped (they
-        can't be displayed).
-
-        Each imported event is created with ``kind='meeting'`` (the
-        ``icalendar`` format doesn't carry our kind concept; the user
-        can reclassify individual events after import). The
-        ``source_ref`` is set to the event's UID for traceability.
-        """
-        try:
-            from icalendar import Calendar
-        except ImportError as exc:  # pragma: no cover
-            raise RuntimeError(
-                "icalendar package not installed; run "
-                "'pip install icalendar'"
-            ) from exc
+    def import_ics(self, ics_bytes: bytes, kind: str = "meeting") -> int:
+        """Add the events of an .ics file (repeating ones expanded) as
+        ``kind``; returns how many were added or updated. Importing the
+        same file again updates its events instead of adding copies
+        (services/calendar_feeds.py). A file that isn't a calendar
+        imports nothing."""
+        from services.calendar_feeds import FeedError, SubscriptionsService
         if not isinstance(ics_bytes, (bytes, bytearray)):
             raise ValueError("ics_bytes must be bytes")
         if not ics_bytes:
             return 0
         try:
-            cal = Calendar.from_ical(bytes(ics_bytes))
-        except (ValueError, TypeError):
-            # Not a parseable .ics file; nothing imported, no error.
+            result = SubscriptionsService(self._store).import_file(bytes(ics_bytes), kind)
+        except FeedError:
             return 0
-        imported = 0
-        for component in cal.walk("VEVENT"):
-            try:
-                title = str(component.get("SUMMARY", "")).strip()
-                if not title:
-                    continue
-                dtstart = component.get("DTSTART")
-                if dtstart is None:
-                    continue
-                dtstart_dt = dtstart.dt
-                if isinstance(dtstart_dt, _dt.date) and not isinstance(
-                    dtstart_dt, _dt.datetime,
-                ):
-                    # All-day event with no time component: local noon.
-                    dtstart_dt = _dt.datetime.combine(
-                        dtstart_dt, _dt.time(12, 0),
-                        tzinfo=timeutil.local_tz(),
-                    )
-                elif isinstance(dtstart_dt, _dt.datetime):
-                    if dtstart_dt.tzinfo is None:
-                        # ICS "floating" time: local wall clock.
-                        dtstart_dt = dtstart_dt.replace(
-                            tzinfo=timeutil.local_tz(),
-                        )
-                    dtstart_dt = dtstart_dt.astimezone(_dt.timezone.utc)
-                starts_at = dtstart_dt.strftime(
-                    "%Y-%m-%dT%H:%M:%SZ"
-                )
-
-                ends_at: Optional[str] = None
-                dtend = component.get("DTEND")
-                if dtend is not None:
-                    dtend_dt = dtend.dt
-                    if isinstance(dtend_dt, _dt.date) and not isinstance(
-                        dtend_dt, _dt.datetime,
-                    ):
-                        # All-day DTEND: in our model an event runs
-                        # noon-to-midnight of its start day. If DTEND
-                        # equals DTSTART (single-day event), set
-                        # ends_at to 23:59 of that day so it sorts
-                        # after the noon start. Multi-day events get
-                        # noon of the DTEND day as their end.
-                        start_day = (
-                            dtstart_dt.date()
-                            if isinstance(dtstart_dt, _dt.datetime)
-                            else dtstart_dt
-                        )
-                        if dtend_dt == start_day:
-                            dtend_dt = _dt.datetime.combine(
-                                dtend_dt,
-                                _dt.time(23, 59, 59),
-                                tzinfo=timeutil.local_tz(),
-                            )
-                        else:
-                            dtend_dt = _dt.datetime.combine(
-                                dtend_dt,
-                                _dt.time(12, 0),
-                                tzinfo=timeutil.local_tz(),
-                            )
-                    elif isinstance(dtend_dt, _dt.datetime):
-                        if dtend_dt.tzinfo is None:
-                            dtend_dt = dtend_dt.replace(
-                                tzinfo=timeutil.local_tz(),
-                            )
-                        dtend_dt = dtend_dt.astimezone(
-                            _dt.timezone.utc,
-                        )
-                    ends_at = dtend_dt.strftime(
-                        "%Y-%m-%dT%H:%M:%SZ"
-                    )
-
-                location = component.get("LOCATION")
-                location_str = (
-                    str(location).strip() if location is not None else None
-                )
-                description = component.get("DESCRIPTION")
-                description_str = (
-                    str(description).strip()
-                    if description is not None else None
-                )
-                uid = str(component.get("UID", "")) or None
-
-                self.create(
-                    title=title,
-                    kind="meeting",
-                    starts_at=starts_at,
-                    ends_at=ends_at,
-                    description=description_str,
-                    location=location_str,
-                    source="ical_import",
-                    source_ref=uid,
-                )
-                imported += 1
-            except (ValueError, TypeError, AttributeError):
-                # Skip malformed VEVENTs rather than failing the whole
-                # import. The user can re-import after fixing their
-                # .ics file.
-                continue
-        return imported
+        return result.added + result.updated
 
 
 __all__ = [

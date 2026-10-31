@@ -35,11 +35,10 @@
     <a class="btn calbar__today" href="{{ cal() }}">Today</a>
     <h1 class="calbar__heading">{{ heading }}</h1>
     <span class="calbar__sp"></span>
-    <button type="button" class="btn calbar__import" data-ics-import>{{ icon("import", 15) }}Import .ics</button>
+    <a class="btn calbar__import" href="{{ url_for('pages.ui_subscriptions') }}">{{ icon("link", 15) }}Subscriptions</a>
     <a class="btn btn--fill calbar__new" href="{{ url_for('pages.ui_event_new', date=day.iso) }}" aria-label="New event">{{ icon("plus", 15, 2.4) }}<span>New event</span></a>
     <span class="calbar__break" aria-hidden="true"></span>
   </header>
-  <input type="file" accept=".ics,text/calendar" hidden data-ics-file>
 
   <div class="cal__body">
     {% if view == 'month' %}
@@ -79,7 +78,7 @@
       <div class="cal__legend">
         <span><i class="cd cc-0"></i>event</span>
         <span><i class="cdue cc-0"></i>deadline</span>
-        <button type="button" class="link" data-ics-import>{{ icon("import", 16) }}Import .ics</button>
+        <a class="link" href="{{ url_for('pages.ui_subscriptions') }}">{{ icon("link", 16) }}Subscriptions</a>
       </div>
     {% else %}
       {# ---------------- Week: a time grid on desktop ---------------- #}

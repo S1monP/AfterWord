@@ -136,6 +136,30 @@ def ui_calendar() -> Any:
     return render_template("calendar.html", **calendar_context(view, anchor, day))
 
 
+@bp.get("/calendar/subscriptions")
+def ui_subscriptions() -> Any:
+    """Calendar subscriptions (a link kept in step every hour) and
+    one-off .ics imports."""
+    from services.calendar_feeds import display_url
+    from web.common import current_app_subscriptions_service
+    svc = current_app_subscriptions_service()
+    today = timeutil.local_today()
+
+    def when(iso):
+        t = timeutil.to_local(iso)
+        if t is None:
+            return ""
+        return f"today {t:%H:%M}" if t.date() == today else f"{t:%a} {t.day} {t:%b} {t:%H:%M}"
+
+    subs = [{
+        "sub": s, "url": display_url(s.url), "synced": when(s.last_synced_at),
+        "tried": when(s.last_attempt_at), "missing": svc.missing_courses(s.id),
+    } for s in svc.list()]
+    courses = current_app_courses_service().list()[0]
+    return render_template("subscriptions.html", subs=subs, courses=courses,
+                           course_options=[{"id": c.id, "name": c.name} for c in courses])
+
+
 def _back_to_day(starts_at: str | None) -> Any:
     """After saving an event, go to its day in the calendar."""
     start = timeutil.to_local(starts_at)
@@ -151,8 +175,12 @@ def _event_form(mode: str, event: Any, starts: str, ends: str, error: str = "") 
     to the event's day."""
     day = _iso_date(starts)
     back = url_for("pages.ui_calendar", date=day.isoformat(), day=day.isoformat()) if day else url_for("pages.ui_calendar")
+    feed = None
+    if event is not None and event.subscription_id:
+        from web.common import current_app_subscriptions_service
+        feed = current_app_subscriptions_service().get(event.subscription_id)
     page = render_template(
-        "event_form.html", mode=mode, event=event, error=error,
+        "event_form.html", mode=mode, event=event, error=error, feed=feed,
         starts_at_default=starts, ends_at_default=ends, back_url=back,
         courses=current_app_courses_service().list()[0],
     )
@@ -219,13 +247,18 @@ def create_event_action() -> Any:
 @bp.post("/events/<event_id>/edit")
 def update_event_action(event_id: str) -> Any:
     payload = _event_fields()
+    existing = current_app_events_service().get(event_id)
+    if existing is not None and existing.subscription_id:
+        # The calendar it comes from owns the rest (the form shows them locked).
+        payload = {"kind": payload["kind"], "course_id": payload["course_id"]}
     try:
         ev = current_app_events_service().update(event_id, **payload)
     except KeyError:
         abort(404)
     except ValueError as exc:
-        return _event_form("edit", current_app_events_service().get(event_id),
-                           payload["starts_at"], payload["ends_at"] or "", str(exc))
+        ev = current_app_events_service().get(event_id)
+        return _event_form("edit", ev, payload.get("starts_at") or _local_input(ev.starts_at),
+                           payload.get("ends_at") or _local_input(ev.ends_at), str(exc))
     return _back_to_day(ev.starts_at)
 
 

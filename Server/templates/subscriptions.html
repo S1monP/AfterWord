@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon, kebab %}
+{% block title %}Calendar subscriptions · AfterWord{% endblock %}
+{% block extrahead %}<link rel="stylesheet" href="{{ asset('css/settings.css') }}">{% endblock %}
+{% block extrascripts %}<script defer src="{{ asset('js/subscriptions.js') }}"></script>{% endblock %}
+
+{% set KINDS = [("lecture", "Lectures"), ("meeting", "Meetings"), ("other", "Other")] %}
+{% macro kind_seg(name, current) -%}
+  <div class="seg" role="radiogroup" aria-label="These events are">
+    {% for value, label in KINDS %}
+      <label><input type="radio" name="{{ name }}" value="{{ value }}"{% if value == current %} checked{% endif %}><span>{{ label }}</span></label>
+    {% endfor %}
+  </div>
+{%- endmacro %}
+
+{% block pbar %}
+  <header class="pbar">
+    <a class="pbar__back" href="{{ url_for('pages.ui_calendar') }}">{{ icon("back", 22, 2) }}Calendar</a>
+    <h1 class="pbar__title">Subscriptions</h1>
+    <span class="pbar__pad"></span>
+  </header>
+{% endblock %}
+
+{% block content %}
+<div class="spage">
+  <div class="spage__inner">
+    <a class="link spage__back" href="{{ url_for('pages.ui_calendar') }}">{{ icon("back", 14, 2) }}Calendar</a>
+    <h1 class="spage__heading">Calendar subscriptions</h1>
+    <p class="spage__sub">A calendar link (your university timetable, or an Apple or Google calendar shared as a link) is checked every hour. New, moved and cancelled events follow it; the kind and course you give an event stay yours.</p>
+
+    {% if subs %}
+      <ul class="slist">
+        {% for item in subs %}
+          {% set s = item.sub %}
+          <li class="srow" data-sub="{{ s.id }}" data-name="{{ s.name }}" data-kind="{{ s.kind }}" data-course="{{ s.course_id or '' }}" data-count="{{ s.event_count }}">
+            <div class="srow__main">
+              <span class="srow__icon">{{ icon("calendar", 18) }}</span>
+              <div class="srow__body">
+                <span class="srow__name">{{ s.name }}</span>
+                <span class="srow__meta">
+                  <span class="tag tag--accent">{{ {"lecture": "Lectures", "meeting": "Meetings"}.get(s.kind, "Other") }}</span>
+                  <span class="mono">{{ item.url }}</span>
+                </span>
+                {% if s.last_error %}
+                  <span class="srow__status is-bad"><span class="dot"></span>Couldn't update{% if item.tried %} ({{ item.tried }}){% endif %}: {{ s.last_error }}{% if item.synced %} Last good update {{ item.synced }}; its events are kept.{% endif %}</span>
+                {% else %}
+                  <span class="srow__status"><span class="dot"></span>{{ s.event_count }} event{{ "" if s.event_count == 1 else "s" }}{% if item.synced %} · updated {{ item.synced }}{% endif %}{% if s.hidden_keys %} · {{ s.hidden_keys|length }} you deleted stay hidden{% endif %}</span>
+                {% endif %}
+              </div>
+              <button type="button" class="icon-btn" data-sync aria-label="Update {{ s.name }} now" title="Update now">{{ icon("retry", 17) }}</button>
+              <button type="button" class="icon-btn" data-sub-menu aria-haspopup="menu" aria-expanded="false" aria-label="Actions for {{ s.name }}">{{ kebab(16) }}</button>
+            </div>
+            {% if item.missing %}
+              <div class="smods">
+                <p><b>{{ item.missing|length }} module{{ "" if item.missing|length == 1 else "s" }} without a course:</b>
+                  {% for m in item.missing %}{{ m.code }} {{ m.name }}{{ ", " if not loop.last else "." }}{% endfor %}</p>
+                <button type="button" class="btn" data-make-courses>{{ icon("plus", 15, 2) }}Create {{ item.missing|length }} course{{ "" if item.missing|length == 1 else "s" }}</button>
+              </div>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+
+    <h2 class="spage__h2">Add a calendar link</h2>
+    <form class="sform" data-sub-add autocomplete="off">
+      <label class="form-row">
+        <span>Link</span>
+        <input class="field mono" type="url" name="url" required placeholder="https://… or webcal://…" inputmode="url" spellcheck="false">
+      </label>
+      <fieldset class="form-row sform__kind">
+        <legend class="form-label">These events are</legend>
+        {{ kind_seg("kind", "lecture") }}
+      </fieldset>
+      <div class="sform__two">
+        <label class="form-row">
+          <span>Course</span>
+          <select class="field" name="course_id">
+            <option value="">Match each event to a course by name</option>
+            {% for c in courses %}<option value="{{ c.id }}">All {{ c.name }}</option>{% endfor %}
+          </select>
+        </label>
+        <label class="form-row">
+          <span>Name <i class="eform__opt">optional</i></span>
+          <input class="field" name="name" maxlength="100" placeholder="Taken from the calendar">
+        </label>
+      </div>
+      <div class="sform__go">
+        <span class="sform__state" data-state role="status"></span>
+        <button type="submit" class="btn btn--fill">{{ icon("plus", 15, 2) }}Subscribe</button>
+      </div>
+    </form>
+
+    <h2 class="spage__h2">Import a file</h2>
+    <p class="spage__sub">A one-off copy of a calendar file (.ics); it doesn't update. Importing the same file again updates its events instead of adding them twice.</p>
+    <form class="sform sform--import" data-import>
+      <fieldset class="form-row sform__kind">
+        <legend class="form-label">These events are</legend>
+        {{ kind_seg("import_kind", "meeting") }}
+      </fieldset>
+      <input type="file" accept=".ics,text/calendar" hidden data-import-file>
+      <div class="sform__go">
+        <span class="sform__state" data-import-state role="status"></span>
+        <button type="button" class="btn" data-import-pick>{{ icon("import", 15) }}Choose an .ics file</button>
+      </div>
+    </form>
+  </div>
+</div>
+{# For the Edit dialog's course list. #}
+<script type="application/json" id="courses-data">{{ course_options|tojson }}</script>
+{% endblock %}

@@ -10,6 +10,10 @@ bleach>=6.0
 # Used for parsing .ics calendar files (Tier 1's calendar import).
 icalendar>=5.0
 
+# Calendar subscriptions: expands repeating events (RRULE, EXDATE, moved
+# and cancelled occurrences) inside a date window. Pure Python.
+recurring-ical-events>=3.3
+
 # Time zone database for zoneinfo (Windows has none built in; see
 # timeutil.py).
 tzdata>=2024.1

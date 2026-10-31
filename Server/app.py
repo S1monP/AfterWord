@@ -63,6 +63,11 @@ def create_app(config: Optional[config_mod.Config] = None) -> Flask:
     app.config["LR_EVENTS_SERVICE"] = services.events.EventsService(
         app.config["LR_STORAGE"]
     )
+    # Calendar subscriptions (synced hourly by start_scheduler below).
+    from services import calendar_feeds
+    app.config["LR_SUBSCRIPTIONS_SERVICE"] = calendar_feeds.SubscriptionsService(
+        app.config["LR_STORAGE"]
+    )
     app.config["LR_CLASSIFICATION_SERVICE"] = (
         services.classification.ClassificationService(
             app.config["LR_STORAGE"]
@@ -139,6 +144,7 @@ def create_app(config: Optional[config_mod.Config] = None) -> Flask:
         not in ("0", "false", "no", "off"),
     )
     _start_pipeline_worker(app)
+    calendar_feeds.start_scheduler(app)
     try:
         sweep_stranded_sessions(app)
     except Exception as exc:  # pragma: no cover

@@ -45,6 +45,11 @@ def current_app_events_service() -> services.events.EventsService:
     return current_app.config["LR_EVENTS_SERVICE"]
 
 
+def current_app_subscriptions_service():
+    """The calendar subscriptions service (services/calendar_feeds.py)."""
+    return current_app.config["LR_SUBSCRIPTIONS_SERVICE"]
+
+
 def current_app_classification_service() -> (
     services.classification.ClassificationService
 ):

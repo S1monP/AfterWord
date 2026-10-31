@@ -142,9 +142,8 @@ def api_delete_event(event_id: str) -> Any:
 def api_import_events_ics() -> Any:
     """Import events from a .ics file. Multipart field ``file``.
 
-    Returns ``{"imported": N}``. Bad files (unparseable) return
-    0 imported; only truly invalid requests (missing file, too
-    large) return 4xx."""
+    Returns ``{"imported": N, "added", "updated", "summary"}``; a file
+    that isn't a calendar is a 400 with a ``detail`` for the user."""
     cfg = current_app.config["LR_CONFIG"]
     if "file" not in request.files:
         return jsonify({
@@ -163,10 +162,20 @@ def api_import_events_ics() -> Any:
                 f"{cfg.max_upload_bytes}"
             ),
         }), 413
+    # ``kind`` (form field): what the events are; meeting by default.
+    # Importing the same file again updates instead of duplicating.
+    from services.calendar_feeds import FeedError
+    from web.common import current_app_subscriptions_service
     try:
-        count = current_app_events_service().import_ics(raw)
-    except ValueError as exc:
+        result = current_app_subscriptions_service().import_file(
+            raw, (request.form.get("kind") or "meeting").strip(),
+        )
+    except (ValueError, FeedError) as exc:
         return jsonify({
-            "error": "invalid_payload", "detail": str(exc),
+            "error": "invalid_payload", "detail": str(exc), "imported": 0,
         }), 400
-    return jsonify({"imported": count})
+    return jsonify({
+        "imported": result.added + result.updated,
+        "added": result.added, "updated": result.updated,
+        "summary": result.summary(),
+    })

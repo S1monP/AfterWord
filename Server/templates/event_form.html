@@ -18,6 +18,13 @@
     <a class="link eform__back" href="{{ back_url }}">{{ icon("back", 14, 2) }}Calendar</a>
     <h1 class="eform__heading">{{ heading }}</h1>
 
+    {% set locked = " disabled" if feed else "" %}
+    {% if feed %}
+      <div class="notice eform__feed">
+        <span class="notice__title">From “{{ feed.name }}”</span>
+        Its title, time and place follow that calendar. The kind and course are yours to change.
+      </div>
+    {% endif %}
     {% if error %}
       <div class="notice notice--bad" role="alert"><span class="notice__title">Not saved</span>{{ error }}</div>
     {% endif %}
@@ -27,7 +34,7 @@
       <label class="form-row">
         <span>Title</span>
         <input class="field eform__title" type="text" name="title" required maxlength="200" autocomplete="off"
-               placeholder="Linear Algebra · Lecture 9" value="{{ event.title if event else '' }}"{% if mode == 'new' %} autofocus{% endif %}>
+               placeholder="Linear Algebra · Lecture 9" value="{{ event.title if event else '' }}"{% if mode == 'new' %} autofocus{% endif %}{{ locked }}>
       </label>
 
       {% set k = event.kind if event else 'lecture' %}
@@ -43,11 +50,11 @@
       <div class="eform__two">
         <label class="form-row">
           <span>Starts</span>
-          <input class="field" type="datetime-local" name="starts_at" required value="{{ starts_at_default }}">
+          <input class="field" type="datetime-local" name="starts_at" required value="{{ starts_at_default }}"{{ locked }}>
         </label>
         <label class="form-row">
           <span>Ends <i class="eform__opt">optional</i></span>
-          <input class="field" type="datetime-local" name="ends_at" value="{{ ends_at_default }}">
+          <input class="field" type="datetime-local" name="ends_at" value="{{ ends_at_default }}"{{ locked }}>
         </label>
       </div>
 
@@ -76,19 +83,20 @@
         <label class="form-row">
           <span>Place <i class="eform__opt">optional</i></span>
           <input class="field" type="text" name="location" maxlength="200" autocomplete="off"
-                 placeholder="Room B12" value="{{ event.location if event and event.location else '' }}">
+                 placeholder="Room B12" value="{{ event.location if event and event.location else '' }}"{{ locked }}>
         </label>
       </div>
 
       <label class="form-row">
         <span>Description <i class="eform__opt">optional</i></span>
-        <textarea class="field" name="description" rows="3" maxlength="2000">{{ event.description if event and event.description else "" }}</textarea>
+        <textarea class="field" name="description" rows="3" maxlength="2000"{{ locked }}>{{ event.description if event and event.description else "" }}</textarea>
       </label>
     </form>
 
     <div class="eform__actions">
       {% if mode == 'edit' %}
-        <form method="post" action="{{ url_for('pages.delete_event_action', event_id=event.id) }}" data-delete-event data-name="{{ event.title }}">
+        <form method="post" action="{{ url_for('pages.delete_event_action', event_id=event.id) }}" data-delete-event data-name="{{ event.title }}"
+              data-text="{{ 'It stays deleted when the calendar updates. A recording made in it stays.' if feed else 'A recording made in it stays.' }}">
           <button class="btn btn--ghost eform__delete" type="submit">{{ icon("trash", 15) }}Delete</button>
         </form>
       {% endif %}
@@ -117,7 +125,7 @@ document.addEventListener("DOMContentLoaded", function () {
   if (del) del.addEventListener("submit", function (e) {
     if (del.dataset.ok) return;
     e.preventDefault();
-    AW.confirm({ title: "Delete this event?", name: del.dataset.name, text: "A recording made in it stays." }).then(function (yes) {
+    AW.confirm({ title: "Delete this event?", name: del.dataset.name, text: del.dataset.text }).then(function (yes) {
       if (yes) { del.dataset.ok = "1"; del.submit(); }
     });
   });
