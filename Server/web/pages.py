@@ -32,79 +32,14 @@ bp = Blueprint("pages", __name__)
 # --- Web UI ----------------------------------------------------------
 @bp.get("/")
 def ui_dashboard() -> Any:
-    """The home page: a fixed-height bento grid. Every card's
-    content is capped and rendered single-line so it always fits
-    its box ("View all (N)" links lead to the full pages):
-
-    * Calendar: today's and this week's events + deadlines.
-    * Lectures / Meetings: the 5 most recent recordings.
-    * Deadlines / Tasks: the 5 most recent open items.
-    """
-    import datetime as _dt
-    today = timeutil.local_today()
-
-    def _day(n: int) -> str:
-        """Start of local day ``today + n``, as stored (UTC)."""
-        return timeutil.local_midnight_utc(today + _dt.timedelta(days=n))
-
-    events_service = current_app_events_service()
-    events_today, _ = events_service.list(
-        starts_after=_day(0), starts_before=_day(1), limit=4,
-    )
-    events_week, _ = events_service.list(
-        starts_after=_day(1), starts_before=_day(7), limit=4,
-    )
-    # Open deadlines due within the week, soonest first.
-    week_deadlines = sorted(
-        (
-            d for d in current_app_tasks_service().list(
-                kind="deadline", status="open", limit=50,
-            )[0]
-            if d.due_at
-            and d.due_at <= _day(7)
-        ),
-        key=lambda d: d.due_at,
-    )[:4]
-
-    # Recent recordings per kind (list_sessions is newest first).
-    sessions = current_app_storage().list_sessions()
-    recent_lectures = [
-        s for s in sessions
-        if s.kind == "lecture" and s.status in ("ready", "done")
-    ]
-    lecture_total = len(recent_lectures)
-    recent_lectures = recent_lectures[:5]
-    recent_meetings = [
-        s for s in sessions
-        if s.kind == "meeting" and s.status in ("ready", "done")
-    ]
-    meeting_total = len(recent_meetings)
-    recent_meetings = recent_meetings[:5]
-
-    recent_notes, _ = current_app_notes_service().list(limit=5, offset=0)
-    open_tasks, open_task_total = current_app_tasks_service().list(
-        kind="task", status="open", limit=5, offset=0,
-    )
-    open_deadlines, deadline_open_total = (
-        current_app_tasks_service().list(
-            kind="deadline", status="open", limit=5, offset=0,
-        )
-    )
-    return render_template(
-        "dashboard.html",
-        recent_notes=recent_notes,
-        open_tasks=open_tasks,
-        open_task_count=open_task_total,
-        open_deadlines=open_deadlines,
-        deadline_open_total=deadline_open_total,
-        events_today=events_today,
-        events_week=events_week,
-        week_deadlines=week_deadlines,
-        recent_lectures=recent_lectures,
-        lecture_total=lecture_total,
-        recent_meetings=recent_meetings,
-        meeting_total=meeting_total,
-    )
+    """Home (REDESIGN.md section 3; phone: Home I, section 14).
+    ``?week=`` moves the week schedule by that many weeks."""
+    from web.home import home_context
+    try:
+        week = max(-52, min(52, int(request.args.get("week", "0"))))
+    except ValueError:
+        week = 0
+    return render_template("home.html", **home_context(week))
 
 
 @bp.get("/lectures")

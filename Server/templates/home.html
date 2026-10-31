@@ -1,0 +1,290 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon, logo %}
+{% block title %}AfterWord{% endblock %}
+{% block pbar %}{% endblock %}{# Home draws its own phone header #}
+{% block extrascripts %}<script defer src="{{ url_for('static', filename='js/home.js') }}"></script>{% endblock %}
+
+{% macro event_row(ev) -%}
+  <a class="evt {{ ev.cc }}{% if ev.is_past %} is-past{% endif %}" href="{{ ev.url }}">
+    <span class="evt__time mono">{{ ev.start }}</span>
+    <span class="evt__body">
+      <span class="evt__title">{{ ev.title }}</span>
+      <span class="evt__status {{ ev.sc }}"><span class="dot"></span>{{ ev.status }}{% if ev.location %}<span class="faint"> · {{ ev.location }}</span>{% endif %}</span>
+    </span>
+  </a>
+{%- endmacro %}
+{% macro now_line() -%}
+  <div class="nowline" aria-label="Now"><span class="mono">{{ now.strftime('%H:%M') }}</span><i></i></div>
+{%- endmacro %}
+{% macro todo_check(t) -%}
+  <label class="check">
+    <input type="checkbox" data-todo="{{ t.id }}" {% if t.done %}checked{% endif %} aria-label="Done: {{ t.title }}">
+  </label>
+{%- endmacro %}
+
+{% block content %}
+{% set sched = schedule %}
+
+{# ============================ Desktop ============================ #}
+<div class="home">
+  <header class="home__top">
+    <form class="home__search" role="search" data-home-search-form>
+      {{ icon("search", 16, cls="home__search-ic") }}
+      <label class="sr-only" for="home-search">Search</label>
+      <input class="field home__search-input" id="home-search" type="search" autocomplete="off" spellcheck="false"
+             placeholder="Search lectures, transcripts, notes, to-dos…" data-home-search
+             role="combobox" aria-autocomplete="list" aria-controls="home-search-results" aria-expanded="false">
+      <span class="kbd home__slash" aria-hidden="true">/</span>
+      <div class="sres home__drop" id="home-search-results" role="listbox" aria-label="Search results" hidden></div>
+    </form>
+    <div class="home__status">
+      {% if processing %}
+        <span class="pill st-busy"><span class="dot"></span>{{ processing }} recording{{ "s" if processing != 1 }} processing</span>
+      {% endif %}
+      <span class="mono home__clock" data-clock>{{ now.strftime("%a %d %b · %H:%M") }}</span>
+    </div>
+  </header>
+
+  <div class="home__grid">
+    {# --- Schedule --- #}
+    <section class="hpanel sched" aria-label="Schedule">
+      <div class="panel-head">
+        <div class="seg" role="group" aria-label="Show">
+          <button type="button" data-sched="week" aria-pressed="true">This week</button>
+          <button type="button" data-sched="day" aria-pressed="false">Today</button>
+        </div>
+        <a class="link end" href="{{ url_for('pages.ui_calendar') }}">Calendar {{ icon("arrow", 14, 2) }}</a>
+      </div>
+
+      <div class="sched__view" data-sched-view="week">
+        <div class="sched__nav">
+          <a class="icon-btn" href="{{ url_for('pages.ui_dashboard', week=sched.week_offset - 1) }}" aria-label="Previous week">{{ icon("back", 16, 2) }}</a>
+          <span class="mono">{{ sched.week_label }}</span>
+          <a class="icon-btn" href="{{ url_for('pages.ui_dashboard', week=sched.week_offset + 1) }}" aria-label="Next week">{{ icon("right", 16, 2) }}</a>
+        </div>
+        <div class="sched__days">
+          {% for d in sched.days %}
+            <div class="wday{% if d.is_today %} is-today{% endif %}">
+              <div class="wday__label"><span>{{ d.dow }}</span><span class="mono wday__num">{{ d.num }}</span></div>
+              <div class="wday__events">
+                {% if not d.events %}<span class="wday__empty">Nothing scheduled</span>{% endif %}
+                {% for ev in d.events %}
+                  {% if d.now_at == loop.index0 %}{{ now_line() }}{% endif %}
+                  {{ event_row(ev) }}
+                {% endfor %}
+                {% if d.is_today and d.events and d.now_at == d.events|length %}{{ now_line() }}{% endif %}
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="sched__view" data-sched-view="day" hidden>
+        <div class="dayline" style="--hours: {{ sched.hours|length - 1 }}">
+          {% for h in sched.hours %}
+            <div class="dayline__hour" style="top: {{ (loop.index0 / (sched.hours|length - 1) * 100)|round(3) }}%"><span class="mono">{{ "%02d:00"|format(h) }}</span></div>
+          {% endfor %}
+          {% for ev in sched.today %}
+            <a class="dayline__ev {{ ev.cc }}{% if ev.is_past %} is-past{% endif %}" href="{{ ev.url }}"
+               style="top: {{ ev.top|round(3) }}%; height: {{ ev.height|round(3) }}%">
+              <span class="dayline__title">{{ ev.title }}</span>
+              <span class="dayline__meta {{ ev.sc }}"><span class="dot"></span><span class="mono">{{ ev.start }}{% if ev.end %}–{{ ev.end }}{% endif %}</span> · {{ ev.status }}</span>
+            </a>
+          {% endfor %}
+          {% if sched.now_pct is not none %}
+            <div class="dayline__now" style="top: {{ sched.now_pct|round(3) }}%"><span class="mono">{{ now.strftime('%H:%M') }}</span></div>
+          {% endif %}
+        </div>
+        {% if not sched.today %}<p class="sched__none">Nothing scheduled today.</p>{% endif %}
+      </div>
+    </section>
+
+    {# --- Recent --- #}
+    <section class="hpanel recent" aria-labelledby="h-recent">
+      <div class="panel-head">
+        <h2 id="h-recent">Recent</h2>
+        <div class="tabs end" role="group" aria-label="Show">
+          {% for value, label in [("all", "All"), ("lecture", "Lectures"), ("meeting", "Meetings"), ("note", "Notes")] %}
+            <button type="button" class="tab" data-recent="{{ value }}" aria-pressed="{{ 'true' if value == 'all' else 'false' }}">{{ label }}</button>
+          {% endfor %}
+        </div>
+      </div>
+      {% if recent %}
+        <div class="recent__fit">
+          {% for r in recent %}
+            <article class="ritem" data-kind="{{ r.kind }}">
+              <div class="ritem__meta">
+                <span class="ritem__chip {{ r.cc }}"><span class="sq"></span>{{ r.chip }}</span>
+                <span class="mono">{{ r.when }}</span>
+                {% if r.status %}<span class="ritem__status {{ r.sc }}"><span class="dot"></span>{{ r.status }}</span>{% endif %}
+              </div>
+              <a class="ritem__title" href="{{ r.url }}">{{ r.title }}</a>
+              {% if r.gist %}<p class="ritem__gist">{{ r.gist }}</p>{% endif %}
+              {% if r.filed %}
+                <div class="ritem__filed">
+                  {% for m in r.filed %}<a class="moment" href="{{ m.url }}"><span class="mono">{{ m.at }}</span>{{ m.label }}</a>{% endfor %}
+                </div>
+              {% endif %}
+            </article>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="empty">
+          <span class="empty__icon">{{ icon("mic", 28) }}</span>
+          <span class="empty__title">No recordings yet</span>
+          <p>Recordings from the device appear here as they are processed. You can also upload one.</p>
+          <a class="btn btn--fill" href="{{ url_for('pages.ui_upload') }}">{{ icon("upload", 16, 2.1) }}Upload recording</a>
+        </div>
+      {% endif %}
+    </section>
+
+    {# --- Deadlines and to-dos --- #}
+    <div class="hpanel lists">
+      <section class="lists__due" aria-labelledby="h-due">
+        <div class="panel-head">
+          <h2 id="h-due">Deadlines</h2>
+          <a class="link end" href="{{ url_for('pages.ui_todos') }}#deadlines">All {{ deadline_total }}</a>
+        </div>
+        {% if deadlines %}
+          <ul class="dlist">
+            {% for d in deadlines[:4] %}
+              <li class="drow {{ d.cc }}">
+                <span class="tile{% if d.days < 0 %} is-late{% elif d.days == 0 %} is-today{% endif %}"><span class="mono tile__n">{{ d.days_num }}</span><span class="tile__u">{{ d.days_label }}</span></span>
+                <span class="drow__body">
+                  <a class="drow__title" href="{{ url_for('pages.ui_todos') }}#todo-{{ d.id }}">{{ d.title }}</a>
+                  <span class="drow__sub"><span class="sq"></span>{% if d.course %}{{ d.course }} · {% endif %}{{ d.due }}</span>
+                  {% if d.said_in %}<a class="said" href="{{ d.said_in.url }}">{{ d.said_in.label }}</a>{% endif %}
+                </span>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="lists__none">Nothing due.</p>
+        {% endif %}
+      </section>
+      <section class="lists__todo" aria-labelledby="h-todo">
+        <div class="panel-head">
+          <h2 id="h-todo">To-dos</h2>
+          <a class="link end" href="{{ url_for('pages.ui_todos') }}">All {{ open_todos }}</a>
+        </div>
+        <ul class="tlist" data-todo-list>
+          {% for t in todos %}
+            <li class="trow{% if t.done %} is-done{% endif %}">
+              {{ todo_check(t) }}
+              <span class="trow__body">
+                <span class="trow__title">{{ t.title }}</span>
+                <span class="trow__meta">
+                  <span class="tag prio--{{ t.prio }}">{{ t.prio_label }}</span>
+                  {% if t.due %}<span class="{{ t.due_cls }}">{{ t.due }}</span>{% endif %}
+                  {% if t.said_in %}<a class="said" href="{{ t.said_in.url }}">{{ t.said_in.label }}</a>{% endif %}
+                </span>
+              </span>
+            </li>
+          {% endfor %}
+        </ul>
+        {% if not todos %}<p class="lists__none" data-todo-none>All clear.</p>{% endif %}
+        <form class="tadd" data-todo-add>
+          <label class="sr-only" for="todo-add">Add a to-do</label>
+          <input class="field field--dashed" id="todo-add" type="text" maxlength="200" placeholder="Add a to-do" autocomplete="off">
+        </form>
+      </section>
+    </div>
+  </div>
+</div>
+
+{# ============================ Phone (Home I) ============================ #}
+<div class="hp">
+  <header class="hp__head">
+    <button type="button" class="hp__logo" data-open-nav aria-label="Menu" aria-controls="nav">{{ logo(30) }}</button>
+    <span class="hp__date">{{ date_label }}</span>
+    {% if processing %}<span class="pill st-busy"><span class="dot"></span>{{ processing }} summarising</span>{% endif %}
+  </header>
+
+  {% if next_up %}
+    <a class="hp__next" href="{{ next_up.url }}">
+      <span class="hp__when"><span class="mono">{{ next_up.start }}</span><span class="hp__in">{{ next_up.when }}</span></span>
+      <span class="hp__what">
+        <span class="hp__label">Next up</span>
+        <span class="hp__title">{{ next_up.title }}</span>
+        {% if next_up.place %}<span class="hp__place">{{ next_up.place }}</span>{% endif %}
+      </span>
+    </a>
+  {% else %}
+    <div class="hp__next hp__next--none"><span class="hp__what"><span class="hp__label">Next up</span><span class="hp__place">Nothing else scheduled.</span></span></div>
+  {% endif %}
+
+  <section class="hp__sec" aria-labelledby="hp-day">
+    <h2 class="hp__h" id="hp-day">Today</h2>
+    <a class="ribbon" href="{{ url_for('pages.ui_calendar') }}" aria-label="Today in the calendar">
+      <span class="ribbon__bar">
+        {% if sched.now_pct is not none %}<span class="ribbon__past" style="width: {{ sched.now_pct|round(3) }}%"></span>{% endif %}
+        {% set ns = namespace(next_done=false) %}
+        {% for ev in sched.today %}
+          {% if ev.is_past %}{% set state = "past" %}
+          {% elif not ns.next_done %}{% set state = "next" %}{% set ns.next_done = true %}
+          {% else %}{% set state = "later" %}{% endif %}
+          <span class="ribbon__seg {{ ev.cc }} is-{{ state }}" style="left: {{ ev.top|round(3) }}%; width: {{ ev.height|round(3) }}%"></span>
+        {% endfor %}
+        {% if sched.now_pct is not none %}<span class="ribbon__now" style="left: {{ sched.now_pct|round(3) }}%"></span>{% endif %}
+      </span>
+      <span class="ribbon__hours mono">
+        {% for h in sched.hours %}{% if loop.first or loop.last or h % 3 == 2 %}
+          <span style="left: {{ (loop.index0 / (sched.hours|length - 1) * 100)|round(3) }}%">{{ "%02d"|format(h) }}</span>
+        {% endif %}{% endfor %}
+      </span>
+    </a>
+  </section>
+
+  <section class="hp__sec" aria-labelledby="hp-todo">
+    <div class="hp__sh"><h2 class="hp__h" id="hp-todo">To-dos</h2><a class="link" href="{{ url_for('pages.ui_todos') }}">All {{ open_todos }} {{ icon("right", 14, 2) }}</a></div>
+    {% set open_list = todos | rejectattr("done") | list %}
+    {% if open_list %}
+      <div class="cards">
+        {% for t in open_list %}
+          <div class="card card--todo{% if t.due_cls == 'is-late' %} is-late{% endif %}">
+            {{ todo_check(t) }}
+            <span class="card__body">
+              <span class="card__title">{{ t.title }}</span>
+              <span class="card__meta"><span class="tag prio--{{ t.prio }}">{{ t.prio_label }}</span>{% if t.due %}<span class="{{ t.due_cls }}">{{ t.due | replace("Late · ", "") }}</span>{% endif %}</span>
+            </span>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}<p class="hp__none">All clear.</p>{% endif %}
+  </section>
+
+  <section class="hp__sec" aria-labelledby="hp-due">
+    <div class="hp__sh"><h2 class="hp__h" id="hp-due">Deadlines</h2><a class="link" href="{{ url_for('pages.ui_todos') }}#deadlines">All {{ deadline_total }} {{ icon("right", 14, 2) }}</a></div>
+    {% if deadlines %}
+      <div class="cards">
+        {% for d in deadlines %}
+          <a class="card {{ d.cc }}" href="{{ url_for('pages.ui_todos') }}#todo-{{ d.id }}">
+            <span class="tile{% if d.days < 0 %} is-late{% elif d.days == 0 %} is-today{% endif %}"><span class="mono tile__n">{{ d.days_num }}</span><span class="tile__u">{{ d.days_label }}</span></span>
+            <span class="card__body"><span class="card__title">{{ d.title }}</span><span class="card__meta"><span class="sq"></span>{{ d.due }}</span></span>
+          </a>
+        {% endfor %}
+      </div>
+    {% else %}<p class="hp__none">Nothing due.</p>{% endif %}
+  </section>
+
+  <section class="hp__sec" aria-labelledby="hp-rec">
+    <h2 class="hp__h" id="hp-rec">Recent</h2>
+    {% if recent %}
+      <div class="rlist">
+        {% for r in recent %}
+          <a class="rrow {{ r.cc }}" href="{{ r.url }}">
+            <span class="rrow__icon">{{ icon(r.icon, 17) }}</span>
+            <span class="rrow__body"><span class="rrow__title">{{ r.title }}</span><span class="rrow__meta">{{ r.chip }} · {{ r.when }}</span></span>
+            {% if r.status in ("Summarising", "Processing") %}<span class="rrow__status st-busy"><span class="dot"></span>{{ r.status }}</span>{% endif %}
+          </a>
+        {% endfor %}
+      </div>
+    {% else %}<p class="hp__none">No recordings yet.</p>{% endif %}
+  </section>
+
+  <div class="dock">
+    <button type="button" class="dock__search" data-open-search>{{ icon("search", 19) }}Search everything</button>
+    <a class="dock__new" href="{{ url_for('pages.ui_notes', new=1) }}" aria-label="New note">{{ icon("plus", 22, 2.2) }}</a>
+  </div>
+</div>
+{% endblock %}

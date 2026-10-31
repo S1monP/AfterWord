@@ -190,9 +190,3 @@ class SearchApiTests(_Base):
         self.assertIn("&lt;b&gt;<mark>lenses</mark>&lt;/b&gt;", body)
         plain = self.client.get(f"/lectures?session={sid}").get_data(as_text=True)
         self.assertNotIn("<mark>", plain)
-
-    def test_dashboard_box(self):
-        body = self.client.get("/?q=lens").get_data(as_text=True)
-        self.assertIn('id="lr-search-results"', body)
-        self.assertIn("search.js", body)
-        self.assertIn('value="lens"', body)

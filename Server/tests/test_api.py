@@ -412,42 +412,6 @@ class TranscribeRouteTests(LRTestCase):
 
 class WebUITests(LRTestCase):
 
-    def test_dashboard_renders(self) -> None:
-        """The home page (/) is the bento dashboard."""
-        r = self.client.get("/")
-        self.assertEqual(r.status_code, 200)
-        body = r.get_data()
-        # Bento wrapper and all six panels.
-        self.assertIn(b"lr-dashboard", body)
-        for needle in (b"Calendar", b"Deadlines", b"Todos",
-                       b"Notes", b"Lectures", b"Meetings"):
-            self.assertIn(needle, body)
-        # Each panel's empty-state copy.
-        self.assertIn(b"Nothing scheduled", body)   # Calendar
-        self.assertIn(b"Nothing due", body)           # Deadlines
-        self.assertIn(b"All clear", body)             # Todos
-        self.assertIn(b"No notes yet", body)          # Notes
-        self.assertIn(b"No lectures yet", body)        # Lectures
-        self.assertIn(b"No meetings recorded", body)  # Meetings
-        # Search bar with the keyboard shortcut hint.
-        self.assertIn(b"Search recordings", body)
-        self.assertIn(b"lr-search__shortcut", body)
-        # Nav has the new structure: Lectures, Meetings, Notes, Todos, Calendar.
-        for nav_link in (b"Lectures", b"Meetings", b"Notes",
-                         b"Todos", b"Calendar"):
-            self.assertIn(nav_link, body)
-        # Old nav items should NOT be there.
-        self.assertNotIn(b"\">Home</a>", body)  # no nav link to Home (page is the Home)
-        self.assertNotIn(b"\">Recs</a>", body)  # no nav link to Recs (removed earlier)
-        # Deadlines card now points to /todos (unified page).
-        self.assertIn(b"Open &rarr;", body)  # the deadlines card Open arrow link
-        # Lectures card has a "View all" link to /lectures.
-        self.assertIn(b'href="/lectures"', body)
-        # Page wrapper has the with-gap modifier for the top breathing room.
-        self.assertIn(b"lr-page--with-gap", body)
-        # And the full modifier so it fills the viewport edge-to-edge.
-        self.assertIn(b"lr-page--full", body)
-
     def test_dashboard_shows_real_data(self):
         """With a lecture, a meeting, and an event in the DB, the
         dashboard cards show them instead of the empty states."""
