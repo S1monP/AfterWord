@@ -346,7 +346,7 @@ class NotesWebUITests(LRTestCase):
     def test_note_detail_renders_editor_prefilled(self):
         note_id = self._create(title="Hello", body_md="**world**").get_json()["note"]["id"]
         body = self.client.get(f"/notes?note_id={note_id}").get_data(as_text=True)
-        self.assertIn('data-title>Hello</textarea>', body)
+        self.assertIn('data-note-title>Hello</textarea>', body)
         self.assertIn("**world**", body)                      # Markdown for the live editor
         self.assertIn(f'data-id="{note_id}"', body)
 

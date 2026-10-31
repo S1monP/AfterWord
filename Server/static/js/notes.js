@@ -50,6 +50,11 @@
     close();
     return out.join("");
   }
+  // "** bold **" isn't Markdown: the marks go round the words, the spaces outside.
+  function wrap(inner, mark) {
+    var m = inner.match(/^(\s*)([\s\S]*?)(\s*)$/);
+    return m[2] ? m[1] + mark + m[2] + mark + m[3] : inner;
+  }
   function inlineMd(node) {
     var s = "";
     node.childNodes.forEach(function (c) {
@@ -57,8 +62,8 @@
       if (c.nodeType !== 1) return;
       var t = c.tagName, inner = inlineMd(c);
       if (t === "BR") s += "\n";
-      else if (t === "STRONG" || t === "B") s += inner.trim() ? "**" + inner + "**" : inner;
-      else if (t === "EM" || t === "I") s += inner.trim() ? "*" + inner + "*" : inner;
+      else if (t === "STRONG" || t === "B") s += wrap(inner, "**");
+      else if (t === "EM" || t === "I") s += wrap(inner, "*");
       else if (t === "CODE") s += "`" + inner + "`";
       else if (t === "A") s += "[" + inner + "](" + (c.getAttribute("href") || "") + ")";
       else s += inner;
@@ -91,7 +96,8 @@
 
   if (!ed) return;
   var body = ed.querySelector("[data-body]");
-  var titleEl = ed.querySelector("[data-title]");
+  // Not [data-title]: the actions button carries that too.
+  var titleEl = ed.querySelector("[data-note-title]");
   var noteId = ed.dataset.id || "";
   if (!body) return;
   document.execCommand("defaultParagraphSeparator", false, "p");
@@ -169,16 +175,32 @@
     caretToEnd(el);
     return el;
   }
-  function becomesList(blk, tag, cls, text) {
+  // ``html`` keeps bold and italic when a line becomes a list item.
+  function becomesList(blk, tag, cls, text, html) {
     var prev = blk.previousElementSibling, list;
     if (prev && prev.tagName === tag.toUpperCase() && prev.classList.contains("checklist") === !!cls) list = prev;
     else { list = document.createElement(tag); if (cls) list.className = cls; blk.before(list); }
     var li = document.createElement("li");
-    li.textContent = text;
-    if (!text) li.innerHTML = "<br>";
+    if (html !== undefined) li.innerHTML = html.trim() ? html : "<br>";
+    else { li.textContent = text; if (!text) li.innerHTML = "<br>"; }
     list.appendChild(li);
     blk.remove();
     caretToEnd(li);
+  }
+  // A list item back to a line of its own (splitting the list around it).
+  function unlist(li) {
+    var list = li.parentNode, p = document.createElement("p");
+    p.innerHTML = li.innerHTML || "<br>";
+    var after = Array.prototype.slice.call(list.children, Array.prototype.indexOf.call(list.children, li) + 1);
+    if (after.length) {
+      var rest = list.cloneNode(false);
+      after.forEach(function (x) { rest.appendChild(x); });
+      list.after(rest);
+    }
+    list.after(p);
+    li.remove();
+    if (!list.children.length) list.remove();
+    caretToEnd(p);
   }
   body.addEventListener("input", function () {
     var blk = currentBlock();
@@ -214,14 +236,26 @@
 
   /* --- Formatting buttons -------------------------------------------------------- */
   var tools = ed.querySelector("[data-tools]");
-  tools.addEventListener("mousedown", function (e) { if (e.target.closest("button")) e.preventDefault(); });
+  // Pressing a button mustn't take the focus (and the selection) from the note.
+  ["pointerdown", "mousedown"].forEach(function (ev) {
+    tools.addEventListener(ev, function (e) { if (e.target.closest("button")) e.preventDefault(); });
+  });
+  var lastRange = null;
+  document.addEventListener("selectionchange", function () {
+    var s = window.getSelection();
+    if (s.rangeCount && body.contains(s.anchorNode)) lastRange = s.getRangeAt(0).cloneRange();
+  });
   tools.addEventListener("click", function (e) {
     var b = e.target.closest("[data-fmt]");
     if (b) { format(b.dataset.fmt); queueSave(); }
     if (e.target.closest("[data-done]")) body.blur();
   });
   function format(kind) {
-    if (document.activeElement !== body) body.focus();
+    if (document.activeElement !== body) {
+      body.focus({ preventScroll: true });
+      if (lastRange) { var s = window.getSelection(); s.removeAllRanges(); s.addRange(lastRange); }
+    }
+    if (!body.firstChild) { body.innerHTML = "<p><br></p>"; caretToEnd(body.firstChild); }
     var blk = currentBlock();
     if (kind === "bold" || kind === "italic") { document.execCommand(kind); return; }
     if (kind === "heading") {
@@ -229,16 +263,17 @@
       else if (blk && (blk.tagName === "P" || blk.tagName === "DIV")) becomes(blk, "h2", blk.textContent);
       return;
     }
-    if (kind === "list") {
-      if (blk && blk.tagName === "UL" && blk.classList.contains("checklist")) { blk.classList.remove("checklist"); return; }
-      document.execCommand("insertUnorderedList");
-      return;
-    }
-    if (kind === "check") {
-      if (blk && blk.tagName === "UL") { blk.classList.toggle("checklist"); return; }
-      document.execCommand("insertUnorderedList");
-      var made = currentBlock();
-      if (made && made.tagName === "UL") made.classList.add("checklist");
+    if (kind === "list" || kind === "check") {
+      var cls = kind === "check" ? "checklist" : "";
+      if (blk && (blk.tagName === "UL" || blk.tagName === "OL")) {
+        var sel = window.getSelection(), li = sel.anchorNode && (sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentNode).closest("li");
+        // The same button again: back to a plain line. The other one: switch the list's kind.
+        if (blk.tagName === "UL" && blk.classList.contains("checklist") === !!cls) { if (li) unlist(li); }
+        else if (blk.tagName === "OL") { var ul = document.createElement("ul"); if (cls) ul.className = cls; ul.innerHTML = blk.innerHTML; blk.replaceWith(ul); caretToEnd(li ? ul.children[Array.prototype.indexOf.call(blk.children, li)] : ul); }
+        else blk.classList.toggle("checklist", !!cls);
+      } else if (blk && /^(P|DIV|H2|H3)$/.test(blk.tagName)) {
+        becomesList(blk, "ul", cls, "", blk.innerHTML.replace(/^<br>$/, ""));
+      }
       return;
     }
     if (kind === "link") {

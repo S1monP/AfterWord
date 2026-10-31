@@ -89,7 +89,7 @@
       </div>
       <div class="ned__scroll">
         <label class="sr-only" for="note-title">Title</label>
-        <textarea class="ned__title" id="note-title" rows="1" maxlength="200" placeholder="Title" autocomplete="off" data-title>{{ n.title if n else '' }}</textarea>
+        <textarea class="ned__title" id="note-title" rows="1" maxlength="200" placeholder="Title" autocomplete="off" data-note-title>{{ n.title if n else '' }}</textarea>
         {% if editor %}<p class="ned__made mono">{{ editor.made }}</p>{% endif %}
 
         {% if editor and editor.recording and editor.row.has_audio %}
