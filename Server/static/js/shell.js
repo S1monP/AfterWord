@@ -84,7 +84,7 @@
     if (openMenu && !openMenu.el.contains(e.target) && e.target !== openMenu.anchor && !openMenu.anchor.contains(e.target)) closeMenu();
   }
   function place(el, anchor) {
-    if (AW.isPhone()) return;
+    if (AW.isPhone() && !el.classList.contains("menu--pop")) return;
     var r = anchor.getBoundingClientRect(), w = el.offsetWidth, h = el.offsetHeight;
     var left = Math.min(Math.max(8, r.right - w), window.innerWidth - w - 8);
     var top = r.bottom + 6;
@@ -103,7 +103,7 @@
       html += '<button type="button" class="menu__item' + (it.danger ? " menu__item--danger" : "") + '" role="' + role + '" data-i="' + i + '"' +
         (it.checked !== undefined ? ' aria-checked="' + (it.checked ? "true" : "false") + '"' : "") + ">" +
         (it.swatch ? '<span class="sq ' + it.swatch + '" style="width:10px;height:10px"></span>' : (it.icon ? AW.icon(it.icon) : "")) +
-        "<span>" + AW.esc(it.label) + "</span>" + (end ? '<span class="end">' + end + "</span>" : "") + "</button>";
+        "<span" + (it.labelCls ? ' class="' + it.labelCls + '"' : "") + ">" + AW.esc(it.label) + "</span>" + (end ? '<span class="end">' + end + "</span>" : "") + "</button>";
     });
     el.innerHTML = html;
     el.querySelectorAll("[data-i]").forEach(function (b) {
@@ -124,9 +124,9 @@
     closeMenu();
     if (again) return;
     var el = document.createElement("div");
-    el.className = "menu"; el.setAttribute("role", "menu");
+    el.className = "menu" + (opts.pop ? " menu--pop" : ""); el.setAttribute("role", "menu");
     var scrim = null;
-    if (AW.isPhone()) {
+    if (AW.isPhone() && !opts.pop) {
       scrim = document.createElement("div"); scrim.className = "menu-scrim";
       scrim.addEventListener("click", closeMenu);
       document.body.appendChild(scrim);

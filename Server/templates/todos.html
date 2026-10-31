@@ -1,158 +1,96 @@
 {% extends "base.html" %}
-{% set legacy = true %}
+{% from "_icons.html" import icon, kebab %}
+{% block title %}To-dos · AfterWord{% endblock %}
+{% block extrahead %}<link rel="stylesheet" href="{{ asset('css/todos.css') }}">{% endblock %}
+{% block extrascripts %}<script defer src="{{ asset('js/todos.js') }}"></script>{% endblock %}
+{% block pbar_title %}To-dos{% endblock %}
 
-{% block title %}Tasks &middot; Lecture Recorder{% endblock %}
+{% macro item(r) -%}
+  <div class="titem{% if r.done %} is-done{% endif %}" id="todo-{{ r.id }}" data-task
+       data-id="{{ r.id }}" data-kind="{{ r.kind }}" data-title="{{ r.title }}" data-prio="{{ r.prio }}"
+       data-due="{{ r.due_date }}" data-time="{{ r.due_time }}" data-course="{{ r.course_id }}"
+       data-rec="{{ r.said_in.url if r.said_in else '' }}">
+    <label class="check titem__check"><input type="checkbox" data-tick{% if r.done %} checked{% endif %} aria-label="Done: {{ r.title }}"></label>
+    {% if r.tile_unit %}
+      <span class="ttile{% if r.late %} is-late{% endif %}"><b class="mono">{{ r.tile_num }}</b><span>{{ r.tile_unit }}</span></span>
+    {% endif %}
+    <div class="titem__body" data-row-open>
+      <span class="titem__title">{{ r.title }}</span>
+      <span class="titem__meta">
+        {% if r.kind == "task" %}<span class="tag prio--{{ r.prio }}">{{ r.prio_label }}</span>{% endif %}
+        {% if r.due %}<span class="titem__due {{ r.due_cls }}">{{ icon("calendar", 12, 2) }}{{ r.due }}</span>{% endif %}
+        {% if r.course %}<span class="titem__course {{ r.cc }}"><i class="sq"></i>{{ r.course }}</span>{% endif %}
+        {% if r.said_in %}<a class="titem__said" href="{{ r.said_in.url }}">{{ r.said_in.label }}</a>{% endif %}
+      </span>
+    </div>
+    <button type="button" class="icon-btn titem__dots" data-actions aria-haspopup="menu" aria-expanded="false" aria-label="Actions for {{ r.title }}">{{ kebab(16) }}</button>
+  </div>
+{%- endmacro %}
 
 {% block content %}
-<div class="lr-page">
-  <header class="lr-page__header">
-    <div>
-      <h1 class="lr-page__title">Tasks</h1>
-      <div class="lr-page__sub">
-        Personal tasks. {{ open_count }} open / {{ total }} total.
-        {% if status_filter %}Filtered to <span class="lr-mono">{{ status_filter }}</span>.{% endif %}
-      </div>
-    </div>
-  </header>
+<div class="tpage" data-tab="task">
+  <nav class="seg tswitch" aria-label="Show">
+    <button type="button" data-tab-btn="task" aria-pressed="true">To-dos <span class="count">{{ todos.open }}</span></button>
+    <button type="button" data-tab-btn="deadline" aria-pressed="false">Deadlines <span class="count">{{ deadlines.open }}</span></button>
+  </nav>
 
-  <div class="lr-row" style="gap: var(--lr-s-5); align-items: flex-start; flex-wrap: wrap;">
-    <section class="lr-card" style="flex: 1 1 360px; min-width: 320px;">
-      <header class="lr-card__header">
-        <h2 class="lr-card__title">Tasks</h2>
-        <div class="lr-card__actions">
-          <a class="lr-card__action {% if status_filter == '' %}is-active{% endif %}" href="{{ url_for('pages.ui_todos') }}">All</a>
-          <a class="lr-card__action {% if status_filter == 'open' %}is-active{% endif %}" href="{{ url_for('pages.ui_todos', status='open') }}">Open</a>
-          <a class="lr-card__action {% if status_filter == 'done' %}is-active{% endif %}" href="{{ url_for('pages.ui_todos', status='done') }}">Done</a>
-        </div>
-      </header>
-
-      <form class="lr-card__quickadd" method="post" action="{{ url_for('pages.ui_todos_quick') }}">
-        <input class="lr-input" type="text" name="title" required maxlength="200"
-               placeholder="Add a task and press Enter..." autocomplete="off">
-        <select class="lr-input lr-input--narrow" name="priority" aria-label="Priority" title="Priority">
-          <option value="low">Low</option>
-          <option value="medium" selected>Medium</option>
-          <option value="high">High</option>
-          <option value="urgent">Urgent</option>
-        </select>
-        <input class="lr-input lr-input--narrow" type="date" name="due_at"
-               title="Due date (optional)" aria-label="Due date">
-        <button class="lr-btn lr-btn--primary" type="submit">+ Add</button>
-      </form>
-
-      <div class="lr-card__body">
-        {% if tasks %}
-          <ul class="lr-todo-list" id="lr-todo-list">
-            {% for t in tasks %}
-              {% set overdue = t.status == 'open' and t.due_at and is_overdue(t.due_at, now_iso) %}
-              {% set due_today = t.status == 'open' and t.due_at and is_due_today(t.due_at, now_iso) and not overdue %}
-              <li id="todo-{{ t.id }}" class="lr-todo {% if t.status == 'done' %}is-done{% endif %} {% if t.status == 'cancelled' %}is-cancelled{% endif %} {% if overdue %}is-overdue{% endif %}"
-                  data-todo-id="{{ t.id }}" data-status="{{ t.status }}" data-priority="{{ t.priority }}">
-                <input class="lr-todo__check" type="checkbox"
-                       {% if t.status == 'done' %}checked{% endif %}
-                       aria-label="Mark as done">
-                {% set rec = recording_url(t.source_ref, t=t.source_offset_ms or 0) if t.source_ref else None %}
-                {% if rec %}
-                  <a class="lr-todo__title lr-todo__title--linked"
-                     href="{{ rec }}"
-                     title="Jump to this moment in the recording">{{ t.title }}</a>
-                {% else %}
-                  <span class="lr-todo__title" tabindex="0">{{ t.title }}</span>
-                {% endif %}
-                {% if t.due_at %}
-                  <span class="lr-todo__due lr-badge {% if overdue %}lr-badge--danger{% elif due_today %}lr-badge--warning{% else %}lr-badge--info{% endif %}"
-                        title="{{ t.due_at|iso_local }}">
-                    {% if overdue %}overdue&middot;{% elif due_today %}today&middot;{% endif %}{{ t.due_at|local_date }}
-                  </span>
-                {% endif %}
-                <span class="lr-todo__priority lr-badge lr-badge--{{ t.priority }}">{{ t.priority }}</span>
-                <button class="lr-todo__del" type="button" aria-label="Delete">&times;</button>
-              </li>
+  <div class="tcols">
+    {% for kind, title, data, filters, noun, empty in [
+         ("task", "To-dos", todos, ["Open", "Done", "All"], "to-do", "All clear. Nothing left to do."),
+         ("deadline", "Deadlines", deadlines, ["Upcoming", "Done", "All"], "deadline", "Nothing due. Deadlines from your lectures show up here."),
+       ] %}
+      <section class="tpanel" id="{{ 'todos' if kind == 'task' else 'deadlines' }}" data-panel="{{ kind }}" data-show="open" aria-labelledby="th-{{ kind }}">
+        <header class="tpanel__head">
+          <h1 id="th-{{ kind }}">{{ title }}</h1>
+          <span class="mono tpanel__count">{{ data.open }}</span>
+          <div class="seg tpanel__filter" role="group" aria-label="Show">
+            {% for f in filters %}
+              <button type="button" data-filter="{{ ['open', 'done', 'all'][loop.index0] }}" aria-pressed="{{ 'true' if loop.first else 'false' }}">{{ f }}</button>
             {% endfor %}
-          </ul>
-        {% else %}
-          <div class="lr-empty-card">
-            <div class="lr-empty-card__title">
-              {% if status_filter %}No {{ status_filter }} tasks{% else %}No tasks yet{% endif %}
-            </div>
-            <p>Type a task above and press Enter.</p>
           </div>
-        {% endif %}
-      </div>
-    </section>
+        </header>
 
-    <section class="lr-card" style="flex: 1 1 360px; min-width: 320px;">
-      <header class="lr-card__header">
-        <h2 class="lr-card__title">Deadlines</h2>
-        <div class="lr-card__actions">
-          <a class="lr-card__action {% if deadline_status == '' %}is-active{% endif %}"
-             href="{{ url_for('pages.ui_todos', status=(status_filter or None)) }}">All</a>
-          <a class="lr-card__action {% if deadline_status == 'open' %}is-active{% endif %}"
-             href="{{ url_for('pages.ui_todos', status=(status_filter or None), deadline_status='open') }}">Open</a>
-          <a class="lr-card__action {% if deadline_status == 'done' %}is-active{% endif %}"
-             href="{{ url_for('pages.ui_todos', status=(status_filter or None), deadline_status='done') }}">Done</a>
-        </div>
-      </header>
-
-      <form class="lr-card__quickadd" method="post" action="{{ url_for('pages.ui_todos_deadline_quick') }}">
-        <input class="lr-input" type="text" name="title" required maxlength="200"
-               placeholder="Add a deadline and press Enter..." autocomplete="off">
-        <input class="lr-input lr-input--narrow" type="date" name="due_at"
-               required title="Due date" aria-label="Due date">
-        <select class="lr-input lr-input--narrow" name="course_id" aria-label="Course" title="Course">
-          <option value="">No course</option>
-          {% for c in courses %}
-            <option value="{{ c.id }}">{{ c.name }}{% if c.code %} ({{ c.code }}){% endif %}</option>
+        <div class="tlist">
+          {% if not data.groups %}<p class="tlist__empty">{{ empty }}</p>{% endif %}
+          {% for g in data.groups %}
+            <div class="tgroup">
+              <h2 class="tgrp {{ g.cls }}">{{ g.label }}</h2>
+              {% for r in g.rows %}{{ item(r) }}{% endfor %}
+            </div>
           {% endfor %}
-        </select>
-        <button class="lr-btn lr-btn--primary" type="submit">+ Add</button>
-      </form>
+          {% if data.done %}
+            <details class="tdone">
+              <summary class="tgrp">Done · {{ data.done_total }}{{ icon("right", 16, 2, cls="tdone__chev") }}</summary>
+              {% for r in data.done %}{{ item(r) }}{% endfor %}
+            </details>
+          {% else %}
+            <p class="tlist__empty tdone-empty">Nothing done yet.</p>
+          {% endif %}
+        </div>
 
-      <div class="lr-card__body">
-        {% if deadlines %}
-          <ul class="lr-todo-list" id="lr-deadline-list">
-            {% for d in deadlines %}
-              {% set d_overdue = d.status == 'open' and is_overdue(d.due_at, now_iso) %}
-              {% set d_due_today = d.status == 'open' and not d_overdue and is_due_today(d.due_at, now_iso) %}
-              <li id="todo-{{ d.id }}" class="lr-todo lr-deadline {% if d.status == 'done' %}is-done{% endif %} {% if d.status == 'cancelled' %}is-cancelled{% endif %} {% if d_overdue %}is-overdue{% endif %}"
-                  data-todo-id="{{ d.id }}" data-status="{{ d.status }}" data-priority="{{ d.priority }}">
-                <input class="lr-todo__check" type="checkbox"
-                       {% if d.status == 'done' %}checked{% endif %}
-                       aria-label="Mark as done">
-                {% set rec = recording_url(d.source_ref, t=d.source_offset_ms or 0) if d.source_ref else None %}
-                {% if rec %}
-                  <a class="lr-todo__title lr-todo__title--linked"
-                     href="{{ rec }}"
-                     title="Jump to this moment in the recording">{{ d.title }}</a>
-                {% else %}
-                  <span class="lr-todo__title" tabindex="0">{{ d.title }}</span>
-                {% endif %}
-                <span class="lr-todo__due lr-badge {% if d_overdue %}lr-badge--danger{% elif d_due_today %}lr-badge--warning{% else %}lr-badge--info{% endif %}"
-                      title="{{ d.due_at|iso_local }}">
-                  {% if d_overdue %}overdue&middot;{% elif d_due_today %}today&middot;{% endif %}{{ d.due_at|local_date }}
-                </span>
-                <span class="lr-todo__priority lr-badge lr-badge--{{ d.priority }}">{{ d.priority }}</span>
-                <button class="lr-todo__del" type="button" aria-label="Delete">&times;</button>
-              </li>
-            {% endfor %}
-          </ul>
-        {% else %}
-          <div class="lr-empty-card">
-            <div class="lr-empty-card__title">
-              {% if deadline_status %}No {{ deadline_status }} deadlines{% else %}No deadlines yet{% endif %}
-            </div>
-            <p>Add a deadline above. The due date is required, and the
-               course is optional.</p>
-            <p style="margin-top: var(--lr-s-2); font-size: var(--lr-fs-xs); color: var(--lr-text-faint);">
-              Deadlines pulled from recordings by the AI land here with
-              a deep-link to the moment each one was mentioned.
-            </p>
-          </div>
-        {% endif %}
-      </div>
-    </section>
+        <form class="tadd" data-add="{{ kind }}" autocomplete="off">
+          <label class="sr-only" for="add-{{ kind }}">Add a {{ noun }}</label>
+          <input class="field field--dashed tadd__title" id="add-{{ kind }}" name="title" type="text" maxlength="500"
+                 placeholder="Add a {{ noun }}" enterkeyhint="done" required>
+          {% if kind == "task" %}
+            <button type="button" class="tadd__prio" data-add-prio="medium" aria-haspopup="menu" aria-expanded="false" aria-label="Urgency: Medium"><span class="tag prio--medium">Medium</span></button>
+          {% endif %}
+          <label class="btn tadd__date{% if kind == 'deadline' %} is-required{% endif %}">
+            {{ icon("calendar", 16) }}<span data-date-text>{{ "Due date" if kind == "deadline" else "Date" }}</span>
+            <input type="date" name="due"{% if kind == "deadline" %} required{% endif %} aria-label="{{ 'Due date' if kind == 'deadline' else 'Date (optional)' }}">
+          </label>
+          {% if kind == "deadline" %}
+            <select class="field tadd__course" name="course_id" aria-label="Course">
+              <option value="">No course</option>
+              {% for c in courses %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+            </select>
+          {% endif %}
+          <button type="submit" class="btn btn--fill tadd__go">Add</button>
+        </form>
+      </section>
+    {% endfor %}
   </div>
 </div>
-
-<script src="{{ url_for('static', filename='js/legacy/todos.js') }}" defer></script>
+{# For the Edit dialog's course list. #}
+<script type="application/json" id="courses-data">{{ course_options|tojson }}</script>
 {% endblock %}

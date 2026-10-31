@@ -106,88 +106,11 @@ def ui_export_note(note_id: str) -> Any:
 
 @bp.get("/todos")
 def ui_todos() -> Any:
-    """The unified Tasks + Deadlines page: personal tasks on the
-    left (``?status=`` filter), course deadlines on the right
-    (``?deadline_status=`` filter), each with a quick-add form."""
-    status_filter = request.args.get("status")
-    if status_filter not in (None, "", "open", "done", "cancelled"):
-        status_filter = None
-    tasks, total = current_app_tasks_service().list(
-        kind="task", status=status_filter or None, limit=100,
-    )
-    open_count = sum(1 for t in tasks if t.status == "open")
-    deadline_status = request.args.get("deadline_status")
-    if deadline_status not in (None, "", "open", "done", "cancelled"):
-        deadline_status = None
-    deadlines, deadline_total = current_app_tasks_service().list(
-        kind="deadline", status=deadline_status or None, limit=100,
-    )
-    deadline_open_count = sum(
-        1 for d in deadlines if d.status == "open"
-    )
-    courses, _ = current_app_courses_service().list()
-    return render_template(
-        "todos.html",
-        tasks=tasks,
-        total=total,
-        open_count=open_count,
-        status_filter=status_filter or "",
-        deadlines=deadlines,
-        deadline_total=deadline_total,
-        deadline_open_count=deadline_open_count,
-        deadline_status=deadline_status or "",
-        courses=courses,
-    )
-
-
-@bp.post("/todos/quick")
-def ui_todos_quick() -> Any:
-    """Quick-add a personal task. Optional fields: priority, due_at.
-
-    ``due_at`` is optional for tasks (kind='task' here). Empty
-    form values are normalised to ``None`` so the service sees a
-    clean value.
-    """
-    title = (request.form.get("title") or "").strip()
-    if not title:
-        return redirect(url_for("pages.ui_todos"))
-    priority = (request.form.get("priority") or "medium").strip()
-    due_at_raw = (request.form.get("due_at") or "").strip()
-    try:
-        current_app_tasks_service().create(
-            title=title, kind="task",
-            priority=priority, due_at=due_at_raw or None,
-        )
-    except ValueError:
-        return redirect(url_for("pages.ui_todos"))
-    return redirect(url_for("pages.ui_todos"))
-
-
-@bp.post("/todos/deadline-quick")
-def ui_todos_deadline_quick() -> Any:
-    """Quick-add a deadline from the unified Todos page.
-
-    ``due_at`` is required (HTML5 ``required`` in the form, and
-    enforced server-side). ``course_id`` is optional — deadlines
-    may be associated with a course. Priority stays at its
-    'medium' default (no priority control in this form).
-    """
-    title = (request.form.get("title") or "").strip()
-    if not title:
-        return redirect(url_for("pages.ui_todos"))
-    due_at_raw = (request.form.get("due_at") or "").strip()
-    course_id = (request.form.get("course_id") or "").strip()
-    description = (request.form.get("description") or "").strip()
-    try:
-        current_app_tasks_service().create(
-            title=title, kind="deadline",
-            due_at=due_at_raw or None,
-            description=description or None,
-            course_id=course_id or None,
-        )
-    except ValueError:
-        return redirect(url_for("pages.ui_todos"))
-    return redirect(url_for("pages.ui_todos"))
+    """To-dos and deadlines (web/todos_page.py): two panels on desktop,
+    a To-dos | Deadlines switch on the phone. Adding, ticking and the
+    actions menu use the tasks API."""
+    from web.todos_page import page_context
+    return render_template("todos.html", **page_context())
 
 
 def _iso_date(raw: str | None):

@@ -467,8 +467,7 @@ class WebUITests(LRTestCase):
         self.assertEqual(r.status_code, 200)
         body = r.get_data()
         self.assertIn(b"To-dos", body)
-        # Both sub-sections visible.
-        self.assertIn(b"Tasks", body)
+        # Both lists.
         self.assertIn(b"Deadlines", body)
 
     def test_calendar_renders(self) -> None:

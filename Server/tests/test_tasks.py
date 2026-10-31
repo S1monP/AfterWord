@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import unittest
 from typing import Any
 
+import timeutil
 from tests.conftest import LRTestCase
 
 # ---------------------------------------------------------------------------
@@ -337,52 +339,54 @@ class TasksWebUITests(LRTestCase):
         resp = self.client.get("/todos")
         self.assertEqual(resp.status_code, 200)
         body = resp.get_data(as_text=True)
-        self.assertIn("Tasks", body)
-        self.assertIn("0 open", body)
+        self.assertIn("To-dos", body)
+        self.assertIn("Deadlines", body)
+        self.assertIn("All clear", body)
+        self.assertIn("Nothing due", body)
 
     def test_todos_list_shows_real_todo(self):
         self._create(title="Buy milk")
-        resp = self.client.get("/todos")
-        self.assertEqual(resp.status_code, 200)
-        body = resp.get_data(as_text=True)
+        body = self.client.get("/todos").get_data(as_text=True)
         self.assertIn("Buy milk", body)
-        self.assertIn("1 open", body)
+        self.assertIn("No date", body)
+        self.assertIn('<span class="mono tpanel__count">1</span>', body)
 
-    def test_todos_list_status_filter(self):
+    def test_todos_groups_and_urgency_order(self):
+        today = timeutil.local_today()
+        self._create(title="Late one", due_at=(today - dt.timedelta(days=2)).isoformat())
+        self._create(title="Low today", priority="low", due_at=today.isoformat())
+        self._create(title="High today", priority="high", due_at=today.isoformat())
+        body = self.client.get("/todos").get_data(as_text=True)
+        self.assertIn('class="tgrp is-danger">Overdue', body)
+        self.assertLess(body.index("Overdue"), body.index(">Today<"))
+        # High urgency first within a group.
+        self.assertLess(body.index("High today"), body.index("Low today"))
+
+    def test_done_items_are_kept_in_the_done_group(self):
         a = self._create(title="first todo").get_json()["task"]
         self._create(title="second todo")
-        # Mark first as done.
         self.client.post(
             f"/api/v1/tasks/{a['id']}/status",
             data=json.dumps({"status": "done"}),
             content_type="application/json",
         )
-        resp = self.client.get("/todos?status=done")
-        body = resp.get_data(as_text=True)
-        self.assertIn("first todo", body)
-        self.assertNotIn("second todo", body)
+        body = self.client.get("/todos").get_data(as_text=True)
+        done = body[body.index('<details class="tdone">'):]
+        self.assertIn("first todo", done)
+        self.assertNotIn("second todo", done)
+        self.assertIn("Done · 1", done)
 
-    def test_todos_quick_add(self):
-        resp = self.client.post(
-            "/todos/quick",
-            data={"title": "From form"},
-            follow_redirects=True,
-        )
-        self.assertEqual(resp.status_code, 200)
-        body = resp.get_data(as_text=True)
-        self.assertIn("From form", body)
-
-    def test_todos_quick_add_blank(self):
-        resp = self.client.post(
-            "/todos/quick",
-            data={"title": ""},
-            follow_redirects=True,
-        )
-        # Blank titles are silently ignored (redirect to /todos).
-        self.assertEqual(resp.status_code, 200)
-        # The list is still empty.
-        body = resp.get_data(as_text=True)
-        self.assertIn("0 open", body)
+    def test_deadline_groups_and_days_left(self):
+        today = timeutil.local_today()
+        self._create(title="Far away", kind="deadline", due_at=(today + dt.timedelta(days=30)).isoformat())
+        self._create(title="Due today", kind="deadline", due_at=today.isoformat())
+        body = self.client.get("/todos").get_data(as_text=True)
+        panel = body[body.index('data-panel="deadline"'):]
+        self.assertIn("This week", panel)
+        self.assertIn("Later", panel)
+        self.assertIn("<span>today</span>", panel)
+        self.assertIn("<span>days</span>", panel)
+        self.assertLess(panel.index("Due today"), panel.index("Far away"))
 
 
 if __name__ == "__main__":
@@ -600,18 +604,11 @@ class TasksDueAtAPITests(LRTestCase):
 
     def test_api_quick_add_with_priority_and_due_at(self):
         resp = self.client.post(
-            "/todos/quick",
-            data={"title": "Form task", "priority": "high", "due_at": "2027-01-15"},
-            follow_redirects=True,
+            "/api/v1/tasks",
+            data=json.dumps({"title": "Form task", "kind": "task", "priority": "high", "due_at": "2027-01-15"}),
+            content_type="application/json",
         )
-        self.assertEqual(resp.status_code, 200)
-        body = resp.get_data(as_text=True)
-        self.assertIn("Form task", body)
-        # The new task should appear with high priority and the due date.
-        # We don't have a direct API fetch in this test, but the list
-        # view shows the title; the badges are present but not
-        # asserted on string match. A follow-up test using the API
-        # directly checks the persistence.
+        self.assertEqual(resp.status_code, 201)
         api = self.client.get("/api/v1/tasks").get_json()
         self.assertEqual(api["total"], 1)
         self.assertEqual(api["tasks"][0]["priority"], "high")
@@ -709,16 +706,16 @@ class DeadlinesDeepLinkTests(LRTestCase):
             source_offset_ms=42000,
         )
         body = self.client.get("/todos").get_data(as_text=True)
-        # The title links to the recording, where it is read, at ?t=<ms>.
+        # "Said in …" links to the recording, where it is read, at ?t=<ms>.
         self.assertIn(
             'href="/other?session=abcdef1234567890&amp;t=42000"', body,
         )
-        self.assertIn("lr-todo__title--linked", body)
+        self.assertIn("titem__said", body)
 
     def test_deadline_from_a_missing_recording_is_not_a_link(self):
         self._create_deadline(source_ref="gone000000000000")
         body = self.client.get("/todos").get_data(as_text=True)
-        self.assertNotIn("lr-todo__title--linked", body)
+        self.assertNotIn('class="titem__said"', body)
 
     def test_deadline_without_source_ref_renders_as_plain_span(self):
         self._create_deadline()
@@ -726,35 +723,17 @@ class DeadlinesDeepLinkTests(LRTestCase):
         self.assertEqual(resp.status_code, 200)
         body = resp.get_data(as_text=True)
         # No deep-link markers when source_ref is absent.
-        self.assertNotIn("lr-todo__title--linked", body)
+        self.assertNotIn('class="titem__said"', body)
 
-    def test_deadline_quick_add_with_course(self):
-        """The unified Todos page's deadline quick-add accepts an
-        optional course, and the form renders a course dropdown
-        instead of a priority dropdown."""
-        # Create a course via the API.
+    def test_deadline_shows_its_course(self):
         c = self.client.post(
             "/api/v1/courses",
             data=json.dumps({"name": "CS101"}),
             content_type="application/json",
         ).get_json()["course"]
-        resp = self.client.post(
-            "/todos/deadline-quick",
-            data={
-                "title": "Submit lab report",
-                "due_at": "2027-02-01",
-                "course_id": c["id"],
-            },
-            follow_redirects=True,
-        )
-        self.assertEqual(resp.status_code, 200)
-        body = resp.get_data(as_text=True)
+        self._create_deadline(title="Submit lab report", course_id=c["id"])
+        body = self.client.get("/todos").get_data(as_text=True)
         self.assertIn("Submit lab report", body)
-        # Priority dropdown is gone from the deadline form; the
-        # course dropdown is there with the created course.
-        api = self.client.get("/api/v1/tasks").get_json()
-        deadline = next(
-            t for t in api["tasks"] if t["title"] == "Submit lab report"
-        )
-        self.assertEqual(deadline["priority"], "medium")
-        self.assertEqual(deadline["course_id"], c["id"])
+        self.assertIn("CS101</span>", body)
+        # The add bar offers the course.
+        self.assertIn(f'<option value="{c["id"]}">CS101</option>', body)

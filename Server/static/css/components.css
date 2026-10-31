@@ -161,18 +161,20 @@ select.field { padding-right: 28px; }
   .field { height: 44px; font-size: 16px; border-radius: 11px; }
   .tag { height: 22px; }
 
-  /* Menus become a sheet from the bottom. */
-  .menu {
+  /* Menus become a sheet from the bottom (a small pop-up stays one). */
+  .menu:not(.menu--pop) {
     left: 0 !important; right: 0 !important; top: auto !important; bottom: 0 !important;
     max-width: none; max-height: 86vh; overflow-y: auto; padding: 8px 8px calc(20px + env(safe-area-inset-bottom));
     border-radius: 18px 18px 0 0; border-width: 1px 0 0;
   }
-  .menu::before { content: ""; display: block; width: 38px; height: 5px; border-radius: 3px; background: var(--seam); margin: 2px auto 8px; }
-  .menu__title {
+  .menu:not(.menu--pop)::before { content: ""; display: block; width: 38px; height: 5px; border-radius: 3px; background: var(--seam); margin: 2px auto 8px; }
+  .menu:not(.menu--pop) .menu__title {
     display: block; padding: 2px 12px 12px; margin-bottom: 4px; font-size: 14px; color: var(--faint);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-bottom: 1px solid var(--seam);
   }
   .menu__item { min-height: 52px; font-size: 16px; gap: 14px; padding: 0 12px; border-radius: 11px; }
+  .menu--pop { min-width: 160px; }
+  .menu--pop .menu__item { min-height: 46px; }
   .menu__item .end { font-size: 14px; }
   .menu-scrim { position: fixed; inset: 0; z-index: 59; background: rgba(0,0,0,.5); }
   .dialog-wrap { align-items: flex-end; padding: 0; }

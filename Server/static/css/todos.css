@@ -1,0 +1,119 @@
+/* To-dos and Deadlines (REDESIGN.md section 9; phone: section 14). Two
+   panels side by side on desktop, a switch between them on the phone.
+   Nothing here may scroll sideways. */
+.tpage { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.tswitch { display: none; }
+.tcols { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--seam); }
+.tpanel { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--panel); }
+.tpanel__head { flex: none; display: flex; align-items: center; gap: 10px; padding: 16px 18px 12px; border-bottom: 1px solid var(--seam); }
+.tpanel__head h1 { font-size: 18px; }
+.tpanel__count { font-size: 13px; color: var(--faint); }
+.tpanel__filter { margin-left: auto; }
+
+.tlist { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-bottom: 10px; }
+.tlist__empty { margin: 24px 18px; color: var(--faint); }
+.tgrp { display: flex; align-items: center; gap: 8px; padding: 14px 18px 4px; font-size: 12px; font-weight: 600; color: var(--faint); }
+.tgrp.is-danger { color: var(--danger); }
+
+/* Which part shows: Open (the groups), Done, or All. */
+.tpanel[data-show="open"] .tdone, .tpanel[data-show="open"] .tdone-empty { display: none; }
+.tpanel[data-show="done"] .tgroup, .tpanel[data-show="done"] > .tlist > .tlist__empty:not(.tdone-empty) { display: none; }
+.tpanel[data-show="open"] .tdone-empty, .tpanel[data-show="all"] .tdone-empty { display: none; }
+.tdone > summary { list-style: none; cursor: pointer; }
+.tdone > summary::-webkit-details-marker { display: none; }
+.tdone__chev { margin-left: auto; transition: transform .15s; }
+.tdone[open] .tdone__chev { transform: rotate(90deg); }
+/* On desktop Done is chosen with the filter, so its heading doesn't fold. */
+.tpanel[data-show] .tdone > summary { pointer-events: none; }
+.tpanel[data-show] .tdone__chev { display: none; }
+
+.titem { position: relative; display: flex; align-items: flex-start; gap: 12px; padding: 10px 54px 10px 18px; border-top: 1px solid var(--seam); }
+.titem:hover { background: var(--hi); }
+.titem:target { background: var(--soft); }
+.titem__check { padding-top: 1px; }
+.titem__check input { width: 17px; height: 17px; }
+.titem__body { flex: 1; min-width: 0; }
+.titem__title { display: block; font-weight: 500; overflow-wrap: anywhere; }
+.titem.is-done .titem__title { color: var(--faint); text-decoration: line-through; }
+.titem__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 3px; font-size: 12px; color: var(--faint); }
+.titem__meta > * { min-width: 0; overflow-wrap: anywhere; }
+.titem.is-done .titem__meta .tag { opacity: .6; }
+.titem__due { display: inline-flex; align-items: center; gap: 5px; }
+.titem__due.is-late { color: var(--danger); font-weight: 600; }
+.titem__due.is-today { color: var(--accent); font-weight: 600; }
+.titem__course { display: inline-flex; align-items: center; gap: 6px; }
+.titem__said { color: var(--accent); }
+.titem__said:hover { text-decoration: underline; }
+.titem__dots { position: absolute; top: 50%; right: 12px; transform: translateY(-50%); width: 30px; height: 30px; opacity: 0; }
+.titem:hover .titem__dots, .titem__dots[aria-expanded="true"], .titem__dots:focus-visible { opacity: 1; }
+@media (hover: none) { .titem__dots { opacity: 1; } }
+
+.ttile { flex: none; width: 46px; padding: 4px 0; border-radius: var(--r-md); background: var(--hi); text-align: center; }
+.ttile b { display: block; min-height: 1.2em; font-size: 17px; font-weight: 600; line-height: 1.2; }
+.ttile span { display: block; font-size: 10px; color: var(--faint); }
+.ttile.is-late { background: color-mix(in srgb, var(--danger) 14%, transparent); }
+.ttile.is-late b, .ttile.is-late span { color: var(--danger); }
+.titem.is-done .ttile { opacity: .5; }
+
+/* Quick add */
+.tadd { flex: none; display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 18px 16px; border-top: 1px solid var(--seam); }
+.tadd__title { flex: 1 1 200px; min-width: 0; }
+.tadd__prio { height: 36px; padding: 0 8px; border-radius: var(--r-md); border: 1px solid var(--seam); display: inline-flex; align-items: center; }
+.tadd__prio:hover, .tadd__prio[aria-expanded="true"] { background: var(--hi); }
+.tadd__date { position: relative; height: 36px; color: var(--muted); }
+.tadd__date.has-date { color: var(--text); }
+.tadd__date input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.tadd__course { width: auto; max-width: 180px; height: 36px; }
+.tadd__go { height: 36px; }
+
+/* The edit dialog */
+.tedit { display: flex; flex-direction: column; gap: 14px; margin-top: 4px; }
+.tedit__two { display: grid; grid-template-columns: minmax(0, 1fr) 120px; gap: 10px; }
+.tedit .seg { width: 100%; }
+
+@media (min-width: 900px) and (max-width: 1100px) {
+  .tcols { grid-template-columns: minmax(0, 1fr); grid-auto-rows: minmax(0, 1fr); }
+}
+
+/* --- Phone: one list at a time, Done folded, the add bar pinned ------------- */
+@media (max-width: 899px) {
+  .tpage { flex: none; min-height: calc(100dvh - 56px); padding-bottom: 76px; background: var(--panel); }
+  .tswitch { display: flex; margin: 10px 16px 4px; }
+  .tswitch > button { flex: 1; }
+  .tcols { display: block; background: transparent; }
+  .tpage[data-tab="task"] [data-panel="deadline"], .tpage[data-tab="deadline"] [data-panel="task"] { display: none; }
+  .tpanel__head { display: none; }
+  .tlist { overflow: visible; }
+  .tlist__empty { margin: 20px 16px; font-size: 15px; }
+  .tgrp { padding: 16px 16px 6px; font-size: 13px; }
+  /* Every part shows; Done is a folded group at the end. */
+  .tpanel[data-show] .tgroup, .tpanel[data-show] .tdone, .tpanel[data-show] .tlist__empty:not(.tdone-empty) { display: block; }
+  .tpanel[data-show] .tdone-empty { display: none; }
+  .tpanel[data-show] .tdone > summary { pointer-events: auto; height: 48px; padding-top: 6px; border-top: 1px solid var(--seam); font-size: 13px; }
+  .tpanel[data-show] .tdone__chev { display: block; }
+
+  .titem { gap: 4px; padding: 2px 12px 2px 6px; }
+  .titem:hover { background: transparent; }
+  .titem__check { width: 44px; height: 44px; }
+  .titem__check input { width: 22px; height: 22px; margin: 0; }
+  .titem__body { padding: 10px 0; cursor: pointer; }
+  .titem__body:active { background: var(--hi); }
+  .titem__title { font-size: 16px; }
+  .titem__meta { font-size: 13px; gap: 4px 10px; }
+  .titem__dots { display: none; }
+  .ttile { order: 3; margin: 10px 0 0 8px; width: 48px; }
+  .ttile b { font-size: 18px; }
+  .ttile span { font-size: 11px; }
+
+  .tadd {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; flex-wrap: nowrap; align-items: center; gap: 8px;
+    padding: 10px 12px calc(14px + env(safe-area-inset-bottom)); background: var(--side);
+  }
+  .tpage[data-tab="task"] [data-panel="deadline"] .tadd, .tpage[data-tab="deadline"] [data-panel="task"] .tadd { display: none; }
+  .tadd__title { flex: 1 1 auto; background: transparent; }
+  .tadd__prio { height: 44px; padding: 0 6px; border: 0; }
+  .tadd__date { height: 44px; padding: 0 10px; }
+  .tadd__date:not(.has-date) span { display: none; }
+  .tadd__course, .tadd__go { display: none; }
+  .tedit__two { grid-template-columns: minmax(0, 1fr) 110px; }
+}
