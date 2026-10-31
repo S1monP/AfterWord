@@ -25,7 +25,7 @@
                data-has-selection="{{ '1' if (selected_id and group.lectures and group.lectures|selectattr('id', 'equalto', selected_id)|list) else '0' }}">
             <div class="lr-course__head" data-toggle-course>
               <span class="lr-course__swatch"
-                    {% if group.course.color %}style="background: {{ group.course.color }}"{% endif %}></span>
+                    {% if group.course.color %}style="background: {{ course_color(group.course.color) }}"{% endif %}></span>
               <span class="lr-course__name">
                 {{ group.course.name }}
                 {% if group.course.code %}<small> ({{ group.course.code }})</small>{% endif %}

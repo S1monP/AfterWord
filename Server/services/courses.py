@@ -7,19 +7,18 @@ unlinks its sessions (the schema's ``ON DELETE SET NULL``).
 
 The service layer owns three concerns the storage layer doesn't:
 
-* Input validation (``name`` required, ``color`` is a hex string,
-  ``sort_order`` is an int).
+* Input validation (``name`` required, ``color`` is a palette slot
+  "1".."12" (``services.palette``; an old hex colour maps to the
+  nearest slot), ``sort_order`` is an int).
 * Generating ids (``uuid4().hex``) so callers don't have to.
-* A small ``color_hex_re`` guard so a bad value is rejected
-  early, not silently stored.
+* Giving a new course the first course colour not used yet.
 """
 from __future__ import annotations
 
-import re
 import uuid
 from typing import Optional
 
-import storage
+from services import palette
 from storage import Course, Storage
 
 
@@ -27,11 +26,6 @@ from storage import Course, Storage
 
 MAX_NAME_LEN = 200
 MAX_CODE_LEN = 50
-MAX_COLOR_LEN = 16  # "#rrggbb" plus a little slack
-
-
-# Match "#RGB" or "#RRGGBB" (3 or 6 hex digits), with the leading "#".
-_COLOR_RE = re.compile(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 
 
 # --- Validators -------------------------------------------------------------
@@ -58,17 +52,7 @@ def _validate_code(code: object) -> Optional[str]:
 
 
 def _validate_color(color: object) -> Optional[str]:
-    if color is None or color == "":
-        return None
-    if not isinstance(color, str):
-        raise ValueError("color must be a string")
-    if not _COLOR_RE.match(color):
-        raise ValueError(
-            f"color must be a CSS hex string like '#a3c4f3' "
-            f"(3 or 6 hex digits); got {color!r}"
-        )
-    # Normalise to lowercase.
-    return color.lower()
+    return palette.to_slot(color)
 
 
 def _validate_sort_order(sort_order: object) -> int:
@@ -116,6 +100,10 @@ class CoursesService:
         name = _validate_name(name)
         code = _validate_code(code)
         color = _validate_color(color)
+        if color is None:
+            color = palette.next_free(
+                c.color for c in self._store.list_courses(limit=500)[0]
+            )
         sort_order = _validate_sort_order(sort_order)
         course_id = uuid.uuid4().hex
         return self._store.create_course(

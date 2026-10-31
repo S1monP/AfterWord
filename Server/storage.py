@@ -669,7 +669,8 @@ class Event:
 class Course:
     """In-memory view of a courses-table row.
 
-    ``color`` is a CSS hex string like ``#a3c4f3`` (or ``None``).
+    ``color`` is a course-palette slot "1".."12" (``services.palette``)
+    or ``None``.
     ``sort_order`` is an int used to order the sidebar; lower numbers
     come first. ``created_at`` is ISO-8601 UTC.
     """
@@ -738,6 +739,7 @@ class Storage:
             # that pre-date the merged schema. It's a one-shot upgrade.
             self._migrate_todos_to_tasks(conn)
             self._migrate_naive_started_at(conn)
+            self._migrate_course_colors(conn)
             conn.commit()
         self._log(f"data dir: {self._data_dir}")
         self._log(f"DB ready: {self._db_path}")
@@ -766,6 +768,24 @@ class Storage:
                 )
         if rows:
             self._log(f"normalised started_at of {len(rows)} session(s) to UTC")
+
+    def _migrate_course_colors(self, conn: sqlite3.Connection) -> None:
+        """Course colours were free hex values; they are now palette
+        slots ("1".."12", ``services/palette.py``). Map old hex values
+        to the nearest slot. Idempotent: slots are left alone."""
+        from services import palette
+        rows = conn.execute(
+            "SELECT id, color FROM courses WHERE color LIKE '#%'"
+        ).fetchall()
+        for row in rows:
+            try:
+                slot = palette.to_slot(row[1])
+            except ValueError:
+                slot = None
+            conn.execute("UPDATE courses SET color = ? WHERE id = ?",
+                         (slot, row[0]))
+        if rows:
+            self._log(f"mapped {len(rows)} course colour(s) to palette slots")
 
     def _migrate_todos_to_tasks(self, conn: sqlite3.Connection) -> None:
         """One-shot migration: copy ``todos`` rows into ``tasks`` with

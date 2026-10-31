@@ -194,6 +194,7 @@ def register_filters(app: Flask) -> None:
     app.template_filter("rec_title")(rec_title)
     app.template_filter("rec_when")(rec_when)
     app.add_template_global(recording_url)
+    app.add_template_global(course_color)
 
     # A page opened from a search result (?hl=<query>) marks the
     # matched words, in every word form (search.highlight).
@@ -258,6 +259,19 @@ def recording_url(
         sess.kind or "", ("pages.ui_other", "session"),
     )
     return url_for(endpoint, **{param: sess.id}, **args)
+
+
+def course_color(slot: "str | int | None") -> str:
+    """CSS colour for a course-palette slot: the active scheme's tone
+    (``--cc<n>``, tokens.css), falling back to the default tone."""
+    from services import palette
+    try:
+        n = int(slot or 0)
+    except (TypeError, ValueError):
+        n = 0
+    if not 1 <= n <= palette.SLOTS:
+        return "var(--none, #878ea0)"
+    return f"var(--cc{n}, {palette.REFERENCE[n]})"
 
 
 def rec_title(sess: storage.Session) -> str:

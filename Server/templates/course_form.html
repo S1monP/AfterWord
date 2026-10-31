@@ -47,11 +47,17 @@
     </label>
 
     <div class="lr-row" style="gap: var(--lr-s-3); flex-wrap: wrap;">
-      <label class="lr-field" style="flex: 1 1 200px;">
-        <span class="lr-field__label">Colour (hex)</span>
-        <input class="lr-input" type="color" name="color"
-               value="{{ form_color }}">
-      </label>
+      <fieldset class="lr-field" style="flex: 1 1 200px; border: 0; padding: 0; margin: 0;">
+        <legend class="lr-field__label">Colour</legend>
+        <div class="lr-row" style="gap: 6px; flex-wrap: wrap;">
+          {% for n in range(1, 13) %}
+            <label title="Colour {{ n }}" style="display: inline-flex; align-items: center; gap: 2px;">
+              <input type="radio" name="color" value="{{ n }}" {% if form_color == n|string %}checked{% endif %}>
+              <span class="lr-swatch" style="background: {{ course_color(n) }}"></span>
+            </label>
+          {% endfor %}
+        </div>
+      </fieldset>
       <label class="lr-field" style="flex: 1 1 200px;">
         <span class="lr-field__label">Sort order</span>
         <input class="lr-input" type="number" name="sort_order" min="0"

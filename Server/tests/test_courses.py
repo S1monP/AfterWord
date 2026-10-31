@@ -26,24 +26,30 @@ class CoursesServiceTests(LRTestCase):
         c = self._service().create(name="Biology EP3456")
         self.assertEqual(c.name, "Biology EP3456")
         self.assertIsNone(c.code)
-        self.assertIsNone(c.color)
+        self.assertEqual(c.color, "1")       # the first free palette colour
         self.assertEqual(c.sort_order, 0)
+
+    def test_new_courses_take_the_next_unused_colour(self):
+        svc = self._service()
+        svc.create(name="A", color="2")
+        self.assertEqual(svc.create(name="B").color, "1")
+        self.assertEqual(svc.create(name="C").color, "3")
 
     def test_create_persists_each_field(self):
         c = self._service().create(
             name="Calc II",
             code="MATH2341",
-            color="#a3c4f3",
+            color=7,
             sort_order=5,
         )
         self.assertEqual(c.name, "Calc II")
         self.assertEqual(c.code, "MATH2341")
-        self.assertEqual(c.color, "#a3c4f3")
+        self.assertEqual(c.color, "7")
         self.assertEqual(c.sort_order, 5)
 
-    def test_create_normalises_color_to_lowercase(self):
-        c = self._service().create(name="X", color="#A3C4F3")
-        self.assertEqual(c.color, "#a3c4f3")
+    def test_an_old_hex_colour_maps_to_the_nearest_slot(self):
+        c = self._service().create(name="X", color="#6AA7FF")
+        self.assertEqual(c.color, "1")
 
     def test_create_rejects_blank_name(self):
         with self.assertRaises(ValueError):
@@ -56,13 +62,13 @@ class CoursesServiceTests(LRTestCase):
             self._service().create(name="x" * 201)
 
     def test_create_rejects_bad_color(self):
-        for bad in ("red", "#xyzxyz", "#1234", "#aabbccdd", "aabbcc"):
+        for bad in ("red", "#xyzxyz", "#1234", "#aabbccdd", "aabbcc", "0", "13", True):
             with self.assertRaises(ValueError):
                 self._service().create(name="X", color=bad)
 
     def test_create_accepts_3_digit_hex_color(self):
         c = self._service().create(name="X", color="#abc")
-        self.assertEqual(c.color, "#abc")
+        self.assertIn(c.color, [str(n) for n in range(1, 13)])
 
     def test_create_rejects_negative_sort_order(self):
         with self.assertRaises(ValueError):
@@ -84,22 +90,30 @@ class CoursesServiceTests(LRTestCase):
     def test_update_partial_fields(self):
         c = self._service().create(name="Old")
         updated = self._service().update(
-            c.id, code="CODE101", color="#ff00ff", sort_order=10,
+            c.id, code="CODE101", color="12", sort_order=10,
         )
         self.assertEqual(updated.name, "Old")
         self.assertEqual(updated.code, "CODE101")
-        self.assertEqual(updated.color, "#ff00ff")
+        self.assertEqual(updated.color, "12")
         self.assertEqual(updated.sort_order, 10)
 
     def test_update_clears_optional_fields_with_none(self):
         c = self._service().create(
-            name="X", code="C", color="#abc",
+            name="X", code="C", color="3",
         )
         cleared = self._service().update(
             c.id, code=None, color=None,
         )
         self.assertIsNone(cleared.code)
         self.assertIsNone(cleared.color)
+
+    def test_old_hex_colours_become_slots_on_start(self):
+        store = self.app.config["LR_STORAGE"]
+        c = self._service().create(name="X")
+        with store._tx() as conn:
+            conn.execute("UPDATE courses SET color = '#3cc7b0' WHERE id = ?", (c.id,))
+        store.initialise()
+        self.assertEqual(self._service().get(c.id).color, "3")
 
     def test_update_missing_raises_keyerror(self):
         with self.assertRaises(KeyError):

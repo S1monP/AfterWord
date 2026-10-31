@@ -620,7 +620,7 @@ def ui_courses_admin() -> Any:
 def ui_course_new() -> Any:
     return render_template(
         "course_form.html", mode="new", course=None,
-        form_name="", form_code="", form_color="#888888",
+        form_name="", form_code="", form_color="",
         form_sort_order="0",
     )
 
@@ -634,7 +634,7 @@ def ui_course_edit(course_id: str) -> Any:
         "course_form.html", mode="edit", course=course,
         form_name=course.name,
         form_code=course.code or "",
-        form_color=course.color or "#888888",
+        form_color=course.color or "",
         form_sort_order=str(course.sort_order),
     )
 
@@ -656,7 +656,7 @@ def create_course_action() -> Any:
                 mode="new", course=None,
                 form_name=payload["name"],
                 form_code=payload["code"] or "",
-                form_color=payload["color"] or "#888888",
+                form_color=payload["color"] or "",
                 form_sort_order=str(payload["sort_order"]),
                 error=str(exc),
             ),
@@ -685,7 +685,7 @@ def update_course_action(course_id: str) -> Any:
                 mode="edit", course=course,
                 form_name=payload.get("name") or "",
                 form_code=payload.get("code") or "",
-                form_color=payload.get("color") or "#888888",
+                form_color=payload.get("color") or "",
                 form_sort_order=str(payload.get("sort_order") or 0),
                 error=str(exc),
             ),
