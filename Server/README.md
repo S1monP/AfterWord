@@ -109,6 +109,19 @@ for the two keys.
 Tests that need ffmpeg are skipped without it. None of them call the AI
 APIs.
 
+For checking the web UI by eye, without touching real data:
+
+```powershell
+.venv\Scripts\python.exe scripts\demo_server.py             # demo data on http://127.0.0.1:8010
+.venv\Scripts\python.exe scriptsrowser_check.py steps.json # real clicks, typing, screenshots
+```
+
+## Running it on the home network
+
+`scriptsun_home.ps1` runs the production server as **http://afterword.local**
+(port 80, plus 8000 for the recorder), logging to `data\server.log`.
+`scriptsutostart.ps1` makes it start at Windows logon (`-Remove` undoes it).
+
 ## Layout
 
 ```
@@ -132,7 +145,7 @@ Server/
 │   └── pipeline.py       background worker and boot sweep
 ├── templates/, static/
 ├── tests/
-└── scripts/          run_tests.py, e2e_check.py, upload_smoke.py
+└── scripts/          tests and checks, demo server, browser check, home-network start
 ```
 
 ## Device protocol
