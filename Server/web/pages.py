@@ -9,12 +9,9 @@ from flask import abort, Blueprint, current_app, redirect, render_template, requ
 
 import services
 import services.events  # noqa: F401
-import services.classification  # noqa: F401
 import timeutil
 from services import transcode
-from web.pipeline import set_kind_by_hand
 from web.common import (
-    _selected_session_context,
     current_app_courses_service,
     current_app_events_service,
     current_app_notes_service,
@@ -84,79 +81,29 @@ def ui_export_session(session_id: str) -> Any:
     )
 
 
-@bp.post("/sessions/<session_id>/kind")
-def ui_set_kind(session_id: str) -> Any:
-    """Form post from the Other page: classify by hand, then go to
-    the page the recording now belongs on."""
-    if current_app_storage().get_session(session_id) is None:
-        abort(404)
-    kind = request.form.get("kind", "").strip()
-    if kind not in services.classification.SELECTABLE_KINDS:
-        abort(400)
-    sess = set_kind_by_hand(current_app._get_current_object(), session_id, kind)
-    return redirect(recording_url(sess))
-
-
 @bp.get("/notes")
 def ui_notes() -> Any:
-    """Two-pane notes page: sidebar list on the left, embedded
-    editor on the right.
+    """Notes and voice memos, one list and one live editor
+    (web/notes_page.py). ``?note_id=`` opens a note, ``?new=1`` a blank
+    one; without either, desktop opens the newest."""
+    from web.notes_page import page_context
+    ctx = page_context(request.args.get("note_id", "").strip(), bool(request.args.get("new")))
+    if ctx.get("missing"):
+        abort(404)
+    return render_template("notes.html", **ctx)
 
-    Modes (via query params):
 
-    * ``?note_id=<id>`` — editor prefilled with that note.
-    * ``?new=1``        — blank editor for a new note.
-    * ``?memo=<id>``    — a voice-memo recording: audio + transcript.
-    * neither           — empty right pane ("Pick a note").
-
-    ``q`` filters the sidebar lists (bookmarkable): notes, and voice
-    memos by title or transcript.
-    """
-    q = request.args.get("q", "").strip()
-    notes, total = current_app_notes_service().list(
-        limit=50, offset=0, search=q or None,
-    )
-    store = current_app_storage()
-    memos = [s for s in store.list_sessions() if s.kind == "voice_memo"]
-    if q:
-        needle = q.lower()
-
-        def _matches(sess) -> bool:
-            transcript = store.get_artifact(sess.id, "transcript")
-            text = (transcript or {}).get("content") or ""
-            return (needle in (sess.title or "").lower()
-                    or needle in text.lower())
-
-        memos = [s for s in memos if _matches(s)]
-    mode = "empty"
-    note = None
-    memo_ctx: dict[str, Any] = {}
-    memo_id = request.args.get("memo", "").strip()
-    if memo_id:
-        memo_ctx = _selected_session_context(memo_id)
-        if memo_ctx["selected_session"] is None:
-            abort(404)
-        mode = "memo"
-        memo_ctx["kinds"] = sorted(services.classification.SELECTABLE_KINDS)
-    elif request.args.get("new"):
-        mode = "new"
-    else:
-        note_id = request.args.get("note_id", "").strip()
-        if note_id:
-            note = current_app_notes_service().get(note_id)
-            if note is None:
-                abort(404)
-            mode = "edit"
-    return render_template(
-        "notes.html",
-        notes=notes,
-        total=total,
-        memos=memos,
-        q=q,
-        mode=mode,
-        note=note,
-        **memo_ctx,
-    )
+@bp.get("/notes/<note_id>/export.md")
+def ui_export_note(note_id: str) -> Any:
+    """Download a note as a Markdown file."""
+    note = current_app_notes_service().get(note_id)
+    if note is None:
+        abort(404)
+    title = note.title or "Note"
+    text = f"# {title}\n\n{note.body_md}".rstrip() + "\n"
+    safe = "".join(c for c in title if c not in '\\/:*?"<>|').strip() or "Note"
+    return send_file(io.BytesIO(text.encode("utf-8")), as_attachment=True,
+                     download_name=f"{safe}.md", mimetype="text/markdown")
 
 
 @bp.get("/todos")

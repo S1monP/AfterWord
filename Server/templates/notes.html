@@ -1,160 +1,147 @@
 {% extends "base.html" %}
-{% set legacy = true %}
+{% from "_icons.html" import icon, kebab, play %}
+{% block title %}Notes · AfterWord{% endblock %}
+{% block extrahead %}
+  <link rel="stylesheet" href="{{ asset('css/reading.css') }}">
+  <link rel="stylesheet" href="{{ asset('css/notes.css') }}">
+{% endblock %}
+{% block extrascripts %}
+  <script defer src="{{ asset('js/reading.js') }}"></script>
+  <script defer src="{{ asset('js/notes.js') }}"></script>
+{% endblock %}
+{% set opened = (editor and not auto_selected) or new %}
+{% set n = editor.note if editor else none %}
 
-{% block title %}Notes &middot; Lecture Recorder{% endblock %}
+{% macro note_data(row) -%}
+  data-note-menu data-id="{{ row.id }}" data-title="{{ row.title }}" data-recording="{{ row.recording_id }}"
+  data-audio="{{ '1' if row.has_audio else '' }}" aria-haspopup="menu" aria-expanded="false"
+{%- endmacro %}
+
+{% block pbar %}
+  {% if opened %}
+    <header class="pbar">
+      <a class="pbar__back" href="{{ url_for('pages.ui_notes') }}">{{ icon("back", 22, 2) }}Notes</a>
+      <span class="pbar__saved" data-saved>{{ editor.saved if editor else "" }}</span>
+      {% if editor %}<button type="button" class="icon-btn" {{ note_data(editor.row) }} aria-label="Actions">{{ kebab(20) }}</button>{% else %}<span class="pbar__pad"></span>{% endif %}
+    </header>
+  {% else %}
+    {{ super() }}
+  {% endif %}
+{% endblock %}
+{% block pbar_title %}Notes{% endblock %}
 
 {% block content %}
-<div class="lr-page">
-  <header class="lr-page__header">
-    <div>
-      <h1 class="lr-page__title">Notes</h1>
-      <div class="lr-page__sub">
-        Markdown notes, and voice memos recorded on the device.
-        {% if q %}Searching for &ldquo;<span class="lr-mono">{{ q }}</span>&rdquo;.{% endif %}
+<div class="rpage npage{% if opened %} is-open{% endif %}">
+  <aside class="lcol" aria-label="Notes">
+    <div class="lcol__head">
+      <h1>Notes <span class="mono lcol__count">{{ total }}</span></h1>
+      <a class="btn btn--fill lcol__new" href="{{ url_for('pages.ui_notes', new=1) }}">{{ icon("compose", 15) }}New note</a>
+    </div>
+    <div class="lcol__tools">
+      <div class="lsearch">
+        {{ icon("search", 15, cls="lsearch__ic") }}
+        <label class="sr-only" for="list-filter">Search notes</label>
+        <input class="field" id="list-filter" type="search" placeholder="Search notes" autocomplete="off" data-list-filter>
       </div>
     </div>
-  </header>
+    <div class="lcol__rows" data-rows>
+      <ul class="lgroup__rows">
+        {% for r in rows %}
+          <li class="lrow nrow{% if r.id == selected_id %} is-selected{% if auto_selected %} is-auto{% endif %}{% endif %}" data-row data-find="{{ (r.title ~ ' ' ~ r.first ~ ' ' ~ r.course)|lower }}" data-row-id="{{ r.id }}">
+            <a class="lrow__main" href="{{ url_for('pages.ui_notes', note_id=r.id) }}">
+              <span class="lrow__title" data-row-title>{{ r.title }}</span>
+              <span class="nrow__first" data-row-first>{{ r.first }}</span>
+              <span class="lrow__meta">
+                <span class="mono">{{ r.when }}</span>
+                {% if r.course %}<span class="lrow__course {{ r.cc }}"><span class="sq"></span>{{ r.course }}</span>{% endif %}
+                {% if r.length %}<span class="nrow__audio">{{ play(11) }}<span class="mono">{{ r.length }}</span></span>{% endif %}
+              </span>
+            </a>
+            <button type="button" class="icon-btn lrow__dots" {{ note_data(r) }} aria-label="Actions for {{ r.title }}">{{ kebab(18) }}</button>
+          </li>
+        {% endfor %}
+      </ul>
+      {% if not rows %}
+        <div class="empty">
+          <span class="empty__icon">{{ icon("note", 28) }}</span>
+          <span class="empty__title">No notes yet</span>
+          <p>Write one, or record a voice memo on the device: it lands here as a note you can edit.</p>
+        </div>
+      {% endif %}
+      <p class="lcol__nomatch" data-no-match hidden>Nothing matches.</p>
+    </div>
+    <div class="nbar">
+      <span></span>
+      <span class="nbar__count">{{ total }} note{{ "s" if total != 1 }}</span>
+      <a class="icon-btn nbar__new" href="{{ url_for('pages.ui_notes', new=1) }}" aria-label="New note">{{ icon("compose", 22) }}</a>
+    </div>
+  </aside>
 
-  <div class="lr-twopane">
-    <aside class="lr-twopane__sidebar">
-      <div style="margin-bottom: var(--lr-s-3);">
-        <a class="lr-btn lr-btn--primary"
-           style="display: block; text-align: center;"
-           href="{{ url_for('pages.ui_notes', new=1) }}">+ Add note</a>
+  <section class="ned" aria-label="Note" data-editor data-id="{{ n.id if n else '' }}" data-course="{{ n.course_id or '' if n else '' }}">
+    {% if editor or new %}
+      <div class="ned__bar">
+        {% set crow = editor.row if editor else none %}
+        <button type="button" class="ned__course {{ crow.cc if crow else 'cc-0' }}" data-course-pick aria-haspopup="menu" aria-expanded="false">
+          <span class="sq"></span><span data-course-name>{{ crow.course if crow and crow.course else "No course" }}</span>{{ icon("down", 14, 2) }}
+        </button>
+        <span class="ned__saved" data-saved>{{ editor.saved if editor else "" }}</span>
+        {% if editor %}<button type="button" class="icon-btn ned__dots" {{ note_data(editor.row) }} aria-label="Actions">{{ kebab(20) }}</button>{% endif %}
       </div>
+      <div class="ned__scroll">
+        <label class="sr-only" for="note-title">Title</label>
+        <textarea class="ned__title" id="note-title" rows="1" maxlength="200" placeholder="Title" autocomplete="off" data-title>{{ n.title if n else '' }}</textarea>
+        {% if editor %}<p class="ned__made mono">{{ editor.made }}</p>{% endif %}
 
-      <form class="lr-search" method="get" action="{{ url_for('pages.ui_notes') }}" role="search"
-            style="margin-bottom: var(--lr-s-3);">
-        <input class="lr-input" type="search" name="q" value="{{ q or '' }}"
-               placeholder="Search notes&hellip;" aria-label="Search notes">
-        <button class="lr-btn" type="submit">Search</button>
-      </form>
-      {% if q %}
-        <div style="margin: calc(-1 * var(--lr-s-2)) 0 var(--lr-s-3);">
-          <a class="lr-course__empty" href="{{ url_for('pages.ui_notes') }}">Clear search</a>
-        </div>
-      {% endif %}
-
-      <h2>Voice memos</h2>
-      {% if memos %}
-        <ul class="lr-flat-list">
-          {% for m in memos %}
-            <li>
-              <a class="lr-course__lecture {% if selected_session and m.id == selected_session.id %}is-active{% endif %}"
-                 href="{{ url_for('pages.ui_notes', memo=m.id) }}">
-                {{ m|rec_title }}<span class="lr-rec__when">{{ m|rec_when }}</span>
-                <span class="lr-other__tag">{{ m.started_at|local_date }}</span>
-              </a>
-            </li>
-          {% endfor %}
-        </ul>
-      {% else %}
-        <p class="lr-course__empty">
-          {% if q %}No voice memos match &ldquo;{{ q }}&rdquo;.{% else %}No voice memos yet.{% endif %}
-        </p>
-      {% endif %}
-
-      <h2>All notes</h2>
-      {% if notes %}
-        <ul class="lr-flat-list">
-          {% for n in notes %}
-            <li>
-              <a class="lr-course__lecture {% if note and n.id == note.id %}is-active{% endif %}"
-                 href="{{ url_for('pages.ui_notes', note_id=n.id) }}"
-                 data-note-link="{{ n.id }}">{{ n.title }}</a>
-            </li>
-          {% endfor %}
-        </ul>
-        <div class="lr-course__empty">
-          {{ total }} note{{ '' if total == 1 else 's' }}{% if q %} match{{ '' if total == 1 else 'es' }}{% endif %}.
-        </div>
-      {% else %}
-        <p class="lr-course__empty">
-          {% if q %}No notes match &ldquo;{{ q }}&rdquo;.{% else %}No notes yet.{% endif %}
-        </p>
-      {% endif %}
-    </aside>
-
-    <section class="lr-twopane__main">
-      {% if mode == 'memo' %}
-        <article class="lr-detail" data-session-id="{{ selected_session.id }}">
-          <header class="lr-detail__header">
-            {% import "_macros.html" as ui %}
-            <div class="lr-detail__titlerow">
-              <h2 class="lr-detail__title">{{ selected_session|rec_title }}</h2>
-              {{ ui.rename_form(selected_session, selected_session|rec_title) }}
-            </div>
-            <div class="lr-detail__meta">{{ selected_session|rec_when }}</div>
-            {{ ui.session_actions(selected_session) }}
-            <form class="lr-detail__classify" method="post"
-                  action="{{ url_for('pages.ui_set_kind', session_id=selected_session.id) }}">
-              <label for="lr-kind">Classify as</label>
-              <select class="lr-input lr-input--narrow" id="lr-kind" name="kind">
-                {% for k in kinds %}
-                  <option value="{{ k }}" {% if k == selected_session.kind %}selected{% endif %}>
-                    {{ k.replace('_', ' ') }}</option>
-                {% endfor %}
-              </select>
-              <button class="lr-btn" type="submit">Move</button>
-            </form>
-          </header>
-          {% if selected_session.full_audio_size %}
-            <section class="lr-detail__player">
-              <audio controls preload="metadata"
-                     src="{{ url_for('sessions_api.api_get_audio', session_id=selected_session.id) }}"></audio>
-            </section>
-          {% endif %}
-          <section class="lr-detail__summary">
-            <h3>Transcript</h3>
-            {% if transcript and transcript.content %}
-              {{ ui.transcript_view(transcript.content) }}
-            {% elif selected_session.status in ('done', 'failed') %}
-              <div class="lr-detail__placeholder">
-                {{ (selected_session.status_detail or 'no transcript')|capitalize }}.
+        {% if editor and editor.recording and editor.row.has_audio %}
+          <div class="player ned__player" data-player>
+            <audio preload="metadata" src="{{ url_for('sessions_api.api_get_audio', session_id=editor.recording.id) }}"></audio>
+            <input class="player__scrub" type="range" min="0" max="1000" value="0" step="1" aria-label="Position" data-scrub>
+            <div class="player__row">
+              <span class="player__time mono"><span data-time>0:00</span> / <span data-dur>{{ editor.row.length or "–:––" }}</span></span>
+              <div class="player__btns">
+                <button type="button" class="icon-btn" data-skip="-10" aria-label="Back 10 seconds">{{ icon("back10", 20) }}</button>
+                <button type="button" class="player__play" data-play aria-label="Play">{{ play(20) }}</button>
+                <button type="button" class="icon-btn" data-skip="10" aria-label="Forward 10 seconds">{{ icon("fwd10", 20) }}</button>
               </div>
-            {% else %}
-              <div class="lr-detail__placeholder">Transcribing&hellip; reload in a minute.</div>
-            {% endif %}
-          </section>
-        </article>
-      {% elif mode == 'new' or note %}
-        <div class="lr-note-editor" id="lr-note-editor"
-             data-note-id="{{ note.id if note else '' }}"
-             data-initial-title="{{ note.title if note else '' }}"
-             data-initial-body="{{ note.body_md if note else '' }}">
-          <input class="lr-note-editor__title" id="lr-note-title"
-                 placeholder="Note title" maxlength="200" autocomplete="off"
-                 value="{{ note.title if note else '' }}">
-          <textarea class="lr-note-editor__body" id="lr-note-body"
-                    placeholder="# Start typing&hellip;">{{ note.body_md if note else '' }}</textarea>
-          <div class="lr-note-editor__actions">
-            <button class="lr-btn lr-btn--primary lr-note-editor__save"
-                    id="lr-note-save" type="button" disabled>Save</button>
-            {% if note %}
-              <button class="lr-btn lr-btn--danger" id="lr-note-delete"
-                      type="button">Delete</button>
-            {% endif %}
-            <span class="lr-note-editor__saved" id="lr-note-saved"
-                  hidden>Saved &check;</span>
-            <span class="lr-note-editor__error" id="lr-note-error" hidden></span>
+              <button type="button" class="player__speed mono" data-speed aria-label="Playback speed">1×</button>
+            </div>
           </div>
-        </div>
-      {% else %}
-        <div class="lr-empty-card">
-          <div class="lr-empty-card__title">Pick a note</div>
-          <p>
-            Pick a note from the list on the left to open it in the
-            editor, or add a new one.
-          </p>
-          <p style="margin-top: var(--lr-s-3);">
-            <a class="lr-btn lr-btn--primary" href="{{ url_for('pages.ui_notes', new=1) }}">+ Add note</a>
-          </p>
-        </div>
-      {% endif %}
-    </section>
-  </div>
-</div>
+        {% endif %}
+        {% if editor and editor.lines %}
+          <details class="said-was">
+            <summary>{{ icon("right", 15, 2, cls="said-was__chev") }}What was said</summary>
+            <div class="tlines">
+              {% for line in editor.lines %}
+                <p class="tline"{% if line.t is not none %} data-t="{{ line.t }}"{% endif %}>
+                  {% if line.t is not none %}<button type="button" class="tline__ts mono" data-seek="{{ line.t * 1000 }}" aria-label="Play from {{ line.stamp }}">{{ line.stamp }}</button>{% else %}<span class="tline__ts"></span>{% endif %}
+                  <span class="tline__text">{{ line.text|search_marks }}</span>
+                </p>
+              {% endfor %}
+            </div>
+          </details>
+        {% endif %}
 
-<script src="{{ url_for('static', filename='js/legacy/notes.js') }}"
-        defer></script>
+        <div class="ned__tools" role="toolbar" aria-label="Formatting" data-tools>
+          <button type="button" class="icon-btn" data-fmt="heading" aria-label="Heading" title="Heading (##)">{{ icon("heading", 17) }}</button>
+          <button type="button" class="icon-btn" data-fmt="bold" aria-label="Bold" title="Bold (Ctrl+B)">{{ icon("bold", 17) }}</button>
+          <button type="button" class="icon-btn" data-fmt="italic" aria-label="Italic" title="Italic (Ctrl+I)">{{ icon("italic", 17) }}</button>
+          <button type="button" class="icon-btn" data-fmt="list" aria-label="List" title="List (-)">{{ icon("list", 17) }}</button>
+          <button type="button" class="icon-btn" data-fmt="check" aria-label="Checklist" title="Checklist ([])">{{ icon("checklist", 17) }}</button>
+          <button type="button" class="icon-btn" data-fmt="link" aria-label="Link" title="Link">{{ icon("link", 17) }}</button>
+          <span class="ned__hint">Type <span class="mono">##</span> for a heading, <span class="mono">-</span> for a list, <span class="mono">[]</span> for a checkbox</span>
+          <button type="button" class="ned__done" data-done>Done</button>
+        </div>
+        <div class="ned__body prose" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Note" spellcheck="true" data-body data-placeholder="Start typing"></div>
+        <textarea hidden data-md>{{ n.body_md if n else "" }}</textarea>
+      </div>
+    {% else %}
+      <div class="empty reader__empty">
+        <span class="empty__title">No note open</span>
+        <p>Pick a note from the list, or start a new one.</p>
+        <a class="btn btn--fill" href="{{ url_for('pages.ui_notes', new=1) }}">{{ icon("compose", 15) }}New note</a>
+      </div>
+    {% endif %}
+  </section>
+</div>
+<script type="application/json" id="courses-data">[{% for c in courses %}{"id": {{ c.id|tojson }}, "name": {{ c.name|tojson }}, "cc": {{ course_cls(c.color)|tojson }}}{{ "," if not loop.last }}{% endfor %}]</script>
 {% endblock %}

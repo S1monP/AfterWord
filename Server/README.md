@@ -191,7 +191,10 @@ calendar event by start time.
   are written in the recording's language if it is in
   `LR_SUMMARY_LANGUAGES`, otherwise in the first of those.
 - Voice memos keep only their transcript (no summary or extraction) and
-  are listed on the Notes page with their audio.
+  become notes: a note with the recording attached, whose text starts as
+  the transcript and can be edited (the exact words stay under "What was
+  said"). Deleting the note deletes the recording; moving the recording
+  to another page removes the note (`services/notes.py`).
 - A recording with no speech ends done ("no speech detected"), without a
   kind; it is listed on the Other page.
 - Changing a finished recording's kind by hand ("Classify as" on the

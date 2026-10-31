@@ -9,7 +9,7 @@ from flask import Blueprint, jsonify, request
 import services
 import services.notes  # noqa: F401
 import storage
-from web.common import current_app_notes_service
+from web.common import current_app_notes_service, current_app_storage
 
 
 bp = Blueprint("notes_api", __name__)
@@ -57,7 +57,8 @@ def api_list_notes() -> Any:
 
 @bp.post("/api/v1/notes")
 def api_create_note() -> Any:
-    """Create a new note. Body: ``{title, body_md?, source?, source_ref?}``."""
+    """Create a new note. Body: ``{title, body_md?, course_id?, source?,
+    source_ref?}``."""
     payload = request.get_json(silent=True) or {}
     try:
         note = current_app_notes_service().create(
@@ -65,6 +66,7 @@ def api_create_note() -> Any:
             body_md=payload.get("body_md", "") or "",
             source=payload.get("source") or "manual",
             source_ref=payload.get("source_ref"),
+            course_id=payload.get("course_id"),
         )
     except ValueError as exc:
         return jsonify({"error": "invalid_payload",
@@ -82,7 +84,8 @@ def api_get_note(note_id: str) -> Any:
 
 @bp.patch("/api/v1/notes/<note_id>")
 def api_update_note(note_id: str) -> Any:
-    """Partial update. Body: any of ``{title, body_md, pinned}``."""
+    """Partial update. Body: any of ``{title, body_md, pinned,
+    course_id}`` (``course_id`` null clears it)."""
     payload = request.get_json(silent=True) or {}
     kwargs: dict[str, Any] = {}
     if "title" in payload:
@@ -91,6 +94,8 @@ def api_update_note(note_id: str) -> Any:
         kwargs["body_md"] = payload["body_md"] or ""
     if "pinned" in payload:
         kwargs["pinned"] = bool(payload["pinned"])
+    if "course_id" in payload:
+        kwargs["course_id"] = payload["course_id"]
     try:
         note = current_app_notes_service().update(note_id, **kwargs)
     except KeyError:
@@ -103,29 +108,14 @@ def api_update_note(note_id: str) -> Any:
 
 @bp.delete("/api/v1/notes/<note_id>")
 def api_delete_note(note_id: str) -> Any:
-    deleted = current_app_notes_service().delete(note_id)
-    if not deleted:
+    """Delete a note. A voice memo's note goes with its recording (the
+    audio): they are one thing."""
+    note = current_app_notes_service().get(note_id)
+    if note is None:
         return jsonify({"error": "not_found"}), 404
+    store = current_app_storage()
+    if note.source == "voice_memo" and note.source_ref and store.get_session(note.source_ref):
+        store.delete_session(note.source_ref)     # takes the note too
+    else:
+        current_app_notes_service().delete(note_id)
     return ("", 204)
-
-
-@bp.post("/api/v1/notes/render")
-def api_render_note() -> Any:
-    """Render markdown to safe HTML. Body: ``{body_md}``.
-
-    Used by the live-preview side of the editor. The output is
-    HTML with raw HTML escaped (markdown library default).
-    """
-    payload = request.get_json(silent=True) or {}
-    body_md = payload.get("body_md", "") or ""
-    if not isinstance(body_md, str):
-        return jsonify({"error": "invalid_payload",
-                        "detail": "body_md must be a string"}), 400
-    # Hard cap to keep this endpoint cheap; same limit as the service.
-    if len(body_md) > services.notes.MAX_BODY_MD_LEN:
-        return jsonify({
-            "error": "invalid_payload",
-            "detail": f"body_md must be at most "
-                      f"{services.notes.MAX_BODY_MD_LEN} chars",
-        }), 400
-    return jsonify({"html": services.notes.render_html(body_md)})

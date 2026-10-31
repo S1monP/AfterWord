@@ -260,17 +260,28 @@ def _note_item(ctx: _Ctx, note) -> dict[str, Any]:
                   for line in (note.body_md or "").splitlines()
                   if line.strip() and not line.lstrip().startswith("#")), "")
     when = ""
-    if edited:
+    sess = ctx.store.get_session(note.source_ref) if note.source == "voice_memo" and note.source_ref else None
+    if sess is not None:
+        # A voice memo: when it was recorded, and how long.
+        started = timeutil.to_local(sess.started_at)
+        seconds = _estimate_duration_seconds(sess)
+        when = " · ".join(filter(None, [
+            f"{_day_label(started.date(), ctx.today)} {started:%H:%M}" if started else "",
+            _short_duration(seconds) if seconds >= 1 else "",
+        ]))
+    elif edited:
         day = _day_label(edited.date(), ctx.today)
         if day in ("Today", "Yesterday"):
             day = day.lower()
         when = f"Edited {day} {edited:%H:%M}"
+    course = ctx.courses.get(note.course_id or "")
     return {
-        "kind": "note", "icon": "note", "chip": "Note", "cc": "cc-0",
-        "when": when,
+        "kind": "note", "icon": "note", "chip": course.name if course else ("Voice memo" if sess else "Note"),
+        "cc": ctx.cc(note.course_id), "when": when,
         "status": "", "sc": "", "title": note.title or "Untitled note",
         "gist": _first_sentence(first, 140), "filed": [],
-        "url": f"/notes?note_id={note.id}", "sort": note.updated_at or "",
+        "url": f"/notes?note_id={note.id}",
+        "sort": (sess.started_at if sess else note.updated_at) or "",
     }
 
 
@@ -278,7 +289,8 @@ def _recent(ctx: _Ctx) -> list[dict[str, Any]]:
     sessions = [
         s for s in ctx.store.list_sessions()
         if s.status != storage.STATUS_RECEIVING
-        and (s.kind in _KIND_CHIP or (s.kind is None and s.status in PROCESSING))
+        # Voice memos show as their notes.
+        and (s.kind in ("lecture", "meeting") or (s.kind is None and s.status in PROCESSING))
     ][:RECENT_LIMIT]
     notes, _ = current_app_notes_service().list(limit=RECENT_LIMIT)
     items = [_recording_item(ctx, s) for s in sessions] + [_note_item(ctx, n) for n in notes]

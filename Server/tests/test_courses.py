@@ -585,10 +585,8 @@ class OtherUiTests(LRTestCase):
         sid = self._finished("other")
         store.add_artifact(sid, "transcript", "some lecture talk")
         store.add_artifact(sid, "summary", '{"text": "old other summary"}')
-        resp = self.client.post(f"/sessions/{sid}/kind",
-                                data={"kind": "lecture"})
-        self.assertEqual(resp.status_code, 302)
-        self.assertTrue(resp.location.endswith(f"/lectures?session={sid}"))
+        resp = self.client.post(f"/api/v1/sessions/{sid}/kind", json={"kind": "lecture"})
+        self.assertEqual(resp.status_code, 200)
         sess = store.get_session(sid)
         self.assertEqual(sess.kind, "lecture")
         self.assertEqual(sess.status, "done")
@@ -599,53 +597,70 @@ class OtherUiTests(LRTestCase):
     def test_classify_as_memo_goes_to_notes_without_summary(self):
         store = self.app.config["LR_STORAGE"]
         sid = self._finished("other")
-        store.add_artifact(sid, "transcript", "buy milk")
+        store.add_artifact(sid, "transcript", "[00:00] Speaker 1: buy milk")
         store.add_artifact(sid, "summary", '{"text": "old"}')
-        resp = self.client.post(f"/sessions/{sid}/kind",
-                                data={"kind": "voice_memo"})
-        self.assertTrue(resp.location.endswith(f"/notes?memo={sid}"))
+        self.client.post(f"/api/v1/sessions/{sid}/kind", json={"kind": "voice_memo"})
         self.assertIsNone(store.get_artifact(sid, "summary"))
         self.assertEqual(store.get_session(sid).status, "done")
+        note = store.note_for_recording(sid)
+        self.assertEqual(note.body_md, "buy milk")
 
     def test_classify_rejects_unknown_kind(self):
         sid = self._finished("other")
-        resp = self.client.post(f"/sessions/{sid}/kind", data={"kind": "x"})
+        resp = self.client.post(f"/api/v1/sessions/{sid}/kind", json={"kind": "x"})
         self.assertEqual(resp.status_code, 400)
-        resp = self.client.post("/sessions/nope/kind", data={"kind": "other"})
+        resp = self.client.post("/api/v1/sessions/nope/kind", json={"kind": "other"})
         self.assertEqual(resp.status_code, 404)
 
 
 class NotesVoiceMemoTests(LRTestCase):
-    def test_memos_listed_and_shown_with_audio_and_transcript(self):
+    def _memo(self, text="[00:01] Speaker 1: remember to buy milk"):
         store = self.app.config["LR_STORAGE"]
         memo = _seed_session(self, status="done", kind="voice_memo")
         store.full_audio_path(memo).write_bytes(self.make_wav(b"\x00" * 256))
-        store.add_artifact(memo, "transcript", "remember to buy milk")
-        store.add_artifact(memo, "summary", '{"text": "should not show"}')
-        lecture = _seed_session(self, status="done", kind="lecture")
-        body = self.client.get("/notes").get_data(as_text=True)
-        self.assertIn("Voice memos", body)
-        self.assertIn(f"memo={memo}", body)
-        self.assertNotIn(f"memo={lecture}", body)
-        body = self.client.get(f"/notes?memo={memo}").get_data(as_text=True)
-        self.assertIn("remember to buy milk", body)
+        store.add_artifact(memo, "transcript", text)
+        from services.notes import ensure_memo_note
+        return memo, ensure_memo_note(store, memo)
+
+    def test_a_memo_is_a_note_with_audio(self):
+        memo, note = self._memo()
+        self.assertEqual((note.source, note.source_ref), ("voice_memo", memo))
+        self.assertEqual(note.body_md, "remember to buy milk")
+        body = self.client.get(f"/notes?note_id={note.id}").get_data(as_text=True)
         self.assertIn("<audio", body)
-        self.assertIn("Classify as", body)
-        self.assertNotIn("should not show", body)
-        self.assertNotIn("lr-note-editor", body)
+        self.assertIn("What was said", body)
+        self.assertIn('data-seek="1000"', body)
+        self.assertIn(f'data-recording="{memo}"', body)      # Move to works on it
 
-    def test_search_filters_memos_by_transcript(self):
+    def test_memo_links_open_its_note(self):
+        memo, note = self._memo()
+        with self.app.test_request_context():
+            from web.common import recording_url
+            self.assertEqual(recording_url(memo), f"/notes?note_id={note.id}")
+
+    def test_deleting_the_note_deletes_the_recording_and_back(self):
         store = self.app.config["LR_STORAGE"]
-        milk = _seed_session(self, status="done", kind="voice_memo")
-        store.add_artifact(milk, "transcript", "remember to buy milk")
-        bread = _seed_session(self, status="done", kind="voice_memo")
-        store.add_artifact(bread, "transcript", "bake bread")
-        body = self.client.get("/notes?q=MILK").get_data(as_text=True)
-        self.assertIn(f"memo={milk}", body)
-        self.assertNotIn(f"memo={bread}", body)
+        memo, note = self._memo()
+        self.assertEqual(self.client.delete(f"/api/v1/notes/{note.id}").status_code, 204)
+        self.assertIsNone(store.get_session(memo))
+        memo2, note2 = self._memo()
+        store.delete_session(memo2)
+        self.assertIsNone(store.get_note(note2.id))
 
-    def test_unknown_memo_is_404(self):
-        self.assertEqual(self.client.get("/notes?memo=nope").status_code, 404)
+    def test_moving_a_memo_away_removes_its_note(self):
+        store = self.app.config["LR_STORAGE"]
+        memo, note = self._memo()
+        self.client.post(f"/api/v1/sessions/{memo}/kind", json={"kind": "lecture"})
+        self.assertIsNone(store.get_note(note.id))
+        self.assertEqual(store.get_session(memo).kind, "lecture")
+
+    def test_memos_made_before_get_their_notes_on_start(self):
+        store = self.app.config["LR_STORAGE"]
+        memo = _seed_session(self, status="done", kind="voice_memo")
+        from services.notes import sync_memo_notes
+        self.assertEqual(sync_memo_notes(store), 1)
+        self.assertEqual(sync_memo_notes(store), 0)
+        self.assertIsNotNone(store.note_for_recording(memo))
 
 
 class RecordingNameTests(LRTestCase):

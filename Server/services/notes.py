@@ -32,7 +32,7 @@ MAX_TITLE_LEN = 200
 MAX_BODY_MD_LEN = 200_000  # 200 KB of markdown; generous for a personal app
 MAX_SEARCH_LEN = 200
 
-VALID_SOURCES = ("manual", "extracted", "imported")
+VALID_SOURCES = ("manual", "extracted", "imported", "voice_memo")
 
 
 # Reject control characters except common whitespace (\t, \n, \r).
@@ -143,11 +143,14 @@ class NotesService:
         body_md: str = "",
         source: str = "manual",
         source_ref: Optional[str] = None,
+        course_id: Optional[str] = None,
+        created_at: Optional[str] = None,
     ) -> Note:
         title = _validate_title(title)
         body_md = _validate_body(body_md)
         source = _validate_source(source)
         source_ref = _validate_source_ref(source_ref)
+        course_id = self._validate_course(course_id)
         body_html = render_html(body_md)
         note_id = uuid.uuid4().hex
         return self._store.create_note(
@@ -157,7 +160,16 @@ class NotesService:
             body_html=body_html,
             source=source,
             source_ref=source_ref,
+            course_id=course_id,
+            created_at=created_at,
         )
+
+    def _validate_course(self, course_id: object) -> Optional[str]:
+        if course_id is None or course_id == "":
+            return None
+        if not isinstance(course_id, str) or self._store.get_course(course_id) is None:
+            raise ValueError("course_id is not a known course")
+        return course_id
 
     def update(
         self,
@@ -166,6 +178,7 @@ class NotesService:
         title: Optional[str] = None,
         body_md: Optional[str] = None,
         pinned: Optional[bool] = None,
+        course_id: object = storage._UNSET,
     ) -> Note:
         if not isinstance(note_id, str) or not note_id:
             raise ValueError("note_id is required")
@@ -179,12 +192,15 @@ class NotesService:
         if body_md is not None:
             new_body = _validate_body(body_md)
             new_body_html = render_html(new_body)
+        if course_id is not storage._UNSET:
+            course_id = self._validate_course(course_id)
         return self._store.update_note(
             note_id,
             title=new_title,
             body_md=new_body,
             body_html=new_body_html,
             pinned=pinned,
+            course_id=course_id,
         )
 
     def delete(self, note_id: str) -> bool:
@@ -216,3 +232,41 @@ class NotesService:
                 raise ValueError(f"search must be at most {MAX_SEARCH_LEN} chars")
         return self._store.list_notes(limit=limit, offset=offset, search=search)
 
+
+def memo_text(transcript: str) -> str:
+    """A voice memo's transcript as the start of its note: the spoken
+    lines without timestamps or speaker labels, one paragraph each."""
+    from services.llm import parse_transcript_lines
+    lines = [line["text"].strip() for line in parse_transcript_lines(transcript or "")]
+    return "\n\n".join(line for line in lines if line)
+
+
+def ensure_memo_note(store: storage.Storage, session_id: str) -> Optional[Note]:
+    """Give a finished voice memo its note (once). The note's text starts
+    as the transcript; its title is the recording's name."""
+    sess = store.get_session(session_id)
+    if sess is None or sess.kind != "voice_memo":
+        return None
+    existing = store.note_for_recording(session_id)
+    if existing is not None:
+        return existing
+    transcript = store.get_artifact(session_id, "transcript") or {}
+    named = sess.title if sess.title_source else ""
+    return NotesService(store).create(
+        title=(named or "Voice memo")[:MAX_TITLE_LEN],
+        body_md=memo_text(transcript.get("content") or "")[:MAX_BODY_MD_LEN],
+        source="voice_memo", source_ref=session_id,
+        course_id=sess.course_id if sess.course_id and store.get_course(sess.course_id) else None,
+        created_at=sess.started_at,
+    )
+
+
+def sync_memo_notes(store: storage.Storage) -> int:
+    """Give every finished voice memo that has none its note (on start)."""
+    made = 0
+    for sess in store.list_sessions():
+        if sess.kind == "voice_memo" and sess.status == storage.STATUS_DONE \
+                and store.note_for_recording(sess.id) is None:
+            if ensure_memo_note(store, sess.id) is not None:
+                made += 1
+    return made

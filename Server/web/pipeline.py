@@ -84,6 +84,11 @@ def set_kind_by_hand(
     if confidence is None and kind is not None:
         confidence = 1.0
     sess = store.set_kind(session_id, kind, confidence=confidence)
+    if before is not None and before.kind == "voice_memo" and kind != "voice_memo":
+        # Moved away from Notes: the memo's note goes (it was the memo).
+        note = store.note_for_recording(session_id)
+        if note is not None:
+            store.delete_note(note.id)
     if (
         kind is not None
         and before is not None

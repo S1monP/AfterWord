@@ -375,6 +375,12 @@ def run_post_finish_pipeline(
             return _mark_failed(
                 storage, session_id, "bad_transition", str(exc),
             )
+        # The memo's text lives in a note on the Notes page.
+        try:
+            from services.notes import ensure_memo_note
+            ensure_memo_note(storage, session_id)
+        except Exception:  # pragma: no cover  (defensive)
+            traceback.print_exc()
         return {"ok": True, "kind": kind, "confidence": confidence,
                 "transcript_chars": len(transcript),
                 "summary_chars": 0, "extracted_items": 0}

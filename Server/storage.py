@@ -364,6 +364,8 @@ SCHEMA_ALTERS: tuple[str, ...] = (
     # sessions: where the title came from ('calendar' | 'ai' | 'user';
     # NULL = the device's folder name, not a real title).
     "ALTER TABLE sessions ADD COLUMN title_source TEXT",
+    # A note's course (Notes page course picker).
+    "ALTER TABLE notes ADD COLUMN course_id TEXT REFERENCES courses(id) ON DELETE SET NULL",
     # tasks: the merged todos + deadlines table; nothing to alter
     # because it was created at table-creation time. Future columns
     # go here.
@@ -565,6 +567,9 @@ class Note:
     pinned: bool
     created_at: str
     updated_at: str
+    # The note's course; a voice memo's note has source 'voice_memo' and
+    # its recording's id as source_ref (the audio).
+    course_id: Optional[str] = None
 
     def to_api_dict(self) -> dict[str, Any]:
         return {
@@ -575,6 +580,7 @@ class Note:
             "source": self.source,
             "source_ref": self.source_ref,
             "pinned": self.pinned,
+            "course_id": self.course_id,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -1519,10 +1525,14 @@ class Storage:
         source: str = "manual",
         source_ref: Optional[str] = None,
         pinned: bool = False,
+        course_id: Optional[str] = None,
+        created_at: Optional[str] = None,
     ) -> Note:
         """Insert a new note. The caller is responsible for the rendered
         ``body_html`` (the service layer renders markdown and passes
         both fields in so the row is consistent in a single insert).
+        ``created_at`` defaults to now (a voice memo's note takes the
+        recording's time).
         """
         now = now_iso()
         with self._tx() as conn:
@@ -1530,11 +1540,11 @@ class Storage:
                 """
                 INSERT INTO notes
                     (id, title, body_md, body_html, source, source_ref,
-                     pinned, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     pinned, course_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (note_id, title, body_md, body_html, source, source_ref,
-                 1 if pinned else 0, now, now),
+                 1 if pinned else 0, course_id, created_at or now, now),
             )
         return self.get_note(note_id)  # type: ignore[return-value]
 
@@ -1555,8 +1565,10 @@ class Storage:
         body_md: Optional[str] = None,
         body_html: Optional[str] = None,
         pinned: Optional[bool] = None,
+        course_id: Any = _UNSET,
     ) -> Note:
-        """Partial update. Only fields that are not None are touched.
+        """Partial update. Only fields that are not None are touched
+        (``course_id``: pass None to clear it).
 
         If ``body_md`` is updated, ``body_html`` is expected to be the
         freshly-rendered version of the new markdown (caller's job).
@@ -1577,6 +1589,9 @@ class Storage:
         if pinned is not None:
             sets.append("pinned = ?")
             params.append(1 if pinned else 0)
+        if course_id is not _UNSET:
+            sets.append("course_id = ?")
+            params.append(course_id)
         if not sets:
             # No-op update: just return the existing note unchanged.
             existing = self.get_note(note_id)
@@ -1596,6 +1611,15 @@ class Storage:
         updated = self.get_note(note_id)
         assert updated is not None
         return updated
+
+    def note_for_recording(self, session_id: str) -> Optional[Note]:
+        """The note holding a voice memo's text, if any."""
+        with self._tx() as conn:
+            row = conn.execute(
+                "SELECT * FROM notes WHERE source = 'voice_memo' AND source_ref = ? "
+                "ORDER BY created_at LIMIT 1", (session_id,),
+            ).fetchone()
+        return self._row_to_note(row) if row else None
 
     def delete_note(self, note_id: str) -> bool:
         """Delete a note. Returns True if a row was removed, False if
@@ -1655,6 +1679,7 @@ class Storage:
             pinned=bool(row["pinned"]),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            course_id=row["course_id"] if "course_id" in row.keys() else None,
         )
 
     # --- tasks ------------------------------------------------------------
@@ -2310,8 +2335,13 @@ class Storage:
         self.unlink_filed(session_id)
         with self._tx() as conn:
             # artifacts and chunks cascade; matched events are unset.
-            # Its search rows go at the next search (search.py).
+            # Its search rows go at the next search (search.py). A voice
+            # memo's note goes with it: the note is the memo.
             conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+            conn.execute(
+                "DELETE FROM notes WHERE source = 'voice_memo' AND source_ref = ?",
+                (session_id,),
+            )
         shutil.rmtree(self.session_dir(session_id), ignore_errors=True)
         return True
 

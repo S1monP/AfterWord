@@ -34,7 +34,8 @@ ITEM_TYPES = ("recording", "note", "task", "event")
 
 # Recordings that are only a request ("remind me to ...") are not shown
 # anywhere but /recordings (services/filing.py), so not in search either.
-_HIDDEN_KINDS = {"command"}
+# A voice memo's text is searched as its note (Notes page).
+_HIDDEN_KINDS = {"command", "voice_memo"}
 
 # Most rows one search reads from the index.
 _MAX_ROWS = 5000

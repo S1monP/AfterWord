@@ -51,6 +51,12 @@ def create_app(config: Optional[config_mod.Config] = None) -> Flask:
     app.config["LR_NOTES_SERVICE"] = services.notes.NotesService(
         app.config["LR_STORAGE"]
     )
+    # Voice memos keep their text in a note (Notes page); give any
+    # finished memo without one its note.
+    try:
+        services.notes.sync_memo_notes(app.config["LR_STORAGE"])
+    except Exception as exc:  # pragma: no cover  (a page still loads)
+        print(f"[LR ] voice memo notes: {exc!r}", flush=True)
     app.config["LR_TASKS_SERVICE"] = services.tasks.TasksService(
         app.config["LR_STORAGE"]
     )

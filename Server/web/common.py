@@ -119,35 +119,6 @@ def _parse_summary_artifact(artifact: Optional[dict]) -> Optional[dict]:
     return out
 
 
-def _selected_session_context(session_id: str) -> dict[str, Any]:
-    """Build the right-pane context dict for a session id.
-
-    Used by the lectures/meetings templates to render the right
-    pane (audio + summary + transcript). Returns the empty-shape
-    dict if the session doesn't exist.
-    """
-    store = current_app_storage()
-    sess = store.get_session(session_id)
-    if sess is None:
-        return {
-            "selected_session": None,
-            "summary": None,
-            "transcript": None,
-        }
-    summary = _parse_summary_artifact(
-        store.get_artifact(session_id, "summary"),
-    )
-    transcript = store.get_artifact(session_id, "transcript")
-    filed_tasks, filed_events = store.filed_from(session_id)
-    return {
-        "selected_session": sess,
-        "summary": summary,
-        "transcript": transcript,
-        "filed_tasks": filed_tasks,
-        "filed_events": filed_events,
-    }
-
-
 def register_filters(app: Flask) -> None:
     @app.template_filter("human_size")
     def _human_size(num: Optional[int]) -> str:
@@ -257,6 +228,10 @@ def recording_url(
         sess = current_app_storage().get_session(sess)
     if sess is None:
         return None
+    if sess.kind == "voice_memo":
+        note = current_app_storage().note_for_recording(sess.id)
+        if note is not None:
+            return url_for("pages.ui_notes", note_id=note.id, **args)
     endpoint, param = KIND_PAGES.get(
         sess.kind or "", ("pages.ui_other", "session"),
     )
@@ -291,7 +266,7 @@ def nav_context() -> dict[str, Any]:
     return {
         "lectures": counts["lecture"],
         "meetings": counts["meeting"],
-        "notes": note_total + counts["voice_memo"],
+        "notes": note_total,
         "other": counts["other"],
         "todos": open_todos,
         "courses": [

@@ -175,9 +175,11 @@ class SearchApiTests(_Base):
     def test_memos_open_in_notes(self):
         sid = self._recording(kind="voice_memo",
                               transcript="[00:01] Speaker 1: call the plumber")
-        item = self.client.get("/api/v1/search?q=plumber").get_json()[
-            "groups"][0]["items"][0]
-        self.assertTrue(item["url"].startswith(f"/notes?memo={sid}"))
+        from services.notes import ensure_memo_note
+        note = ensure_memo_note(self.app.config["LR_STORAGE"], sid)
+        groups = self.client.get("/api/v1/search?q=plumber").get_json()["groups"]
+        self.assertEqual([g["type"] for g in groups], ["note"])     # once, as its note
+        self.assertEqual(groups[0]["items"][0]["url"], f"/notes?note_id={note.id}")
 
     def test_empty_query(self):
         body = self.client.get("/api/v1/search?q=").get_json()

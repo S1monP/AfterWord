@@ -302,33 +302,6 @@ class NotesAPITests(LRTestCase):
         resp = self.client.delete(f"/api/v1/notes/{note_id}")
         self.assertEqual(resp.status_code, 404)
 
-    def test_render_endpoint(self):
-        resp = self.client.post(
-            "/api/v1/notes/render",
-            data=json.dumps({"body_md": "# hi"}),
-            content_type="application/json",
-        )
-        self.assertEqual(resp.status_code, 200)
-        self.assertIn("<h1>", resp.get_json()["html"])
-
-    def test_render_endpoint_escapes(self):
-        resp = self.client.post(
-            "/api/v1/notes/render",
-            data=json.dumps({"body_md": "<script>x</script>"}),
-            content_type="application/json",
-        )
-        self.assertEqual(resp.status_code, 200)
-        self.assertNotIn("<script>", resp.get_json()["html"])
-
-    def test_render_endpoint_validates_body(self):
-        resp = self.client.post(
-            "/api/v1/notes/render",
-            data=json.dumps({"body_md": 123}),
-            content_type="application/json",
-        )
-        self.assertEqual(resp.status_code, 400)
-
-
 # ---------------------------------------------------------------------------
 # Web UI tests
 # ---------------------------------------------------------------------------
@@ -357,42 +330,41 @@ class NotesWebUITests(LRTestCase):
         body = resp.get_data(as_text=True)
         self.assertIn("My first note", body)
 
-    def test_notes_list_search_filters(self):
+    def test_notes_list_has_search_and_rows(self):
         self._create(title="Apples", body_md="fruit")
-        self._create(title="Cars", body_md="vehicle")
-        resp = self.client.get("/notes?q=vehicle")
-        self.assertEqual(resp.status_code, 200)
-        body = resp.get_data(as_text=True)
-        self.assertIn("Cars", body)
-        self.assertNotIn("Apples", body)
+        body = self.client.get("/notes").get_data(as_text=True)
+        self.assertIn("data-list-filter", body)               # filters as you type
+        self.assertIn('data-find="apples fruit', body)
 
     def test_notes_new_renders_editor(self):
-        resp = self.client.get("/notes?new=1")
-        self.assertEqual(resp.status_code, 200)
-        body = resp.get_data(as_text=True)
-        # The embedded editor renders in create mode.
-        self.assertIn("lr-note-editor", body)
-        self.assertIn("lr-note-title", body)
-        self.assertIn("lr-note-body", body)
+        body = self.client.get("/notes?new=1").get_data(as_text=True)
+        self.assertIn('class="rpage npage is-open"', body)
+        self.assertIn("data-body", body)
+        self.assertIn('placeholder="Title"', body)
+        self.assertIn('data-id=""', body)                     # made on first typing
+
     def test_note_detail_renders_editor_prefilled(self):
-        create = self._create(title="Hello", body_md="**world**").get_json()
-        note_id = create["note"]["id"]
-        resp = self.client.get(f"/notes?note_id={note_id}")
-        self.assertEqual(resp.status_code, 200)
-        body = resp.get_data(as_text=True)
-        self.assertIn("Hello", body)
-        self.assertIn("**world**", body)
+        note_id = self._create(title="Hello", body_md="**world**").get_json()["note"]["id"]
+        body = self.client.get(f"/notes?note_id={note_id}").get_data(as_text=True)
+        self.assertIn('data-title>Hello</textarea>', body)
+        self.assertIn("**world**", body)                      # Markdown for the live editor
+        self.assertIn(f'data-id="{note_id}"', body)
+
     def test_note_detail_404(self):
         self.assertEqual(self.client.get("/notes?note_id=zzz").status_code, 404)
 
-    def test_notes_page_renders_selected_note_editor(self):
-        create = self._create(title="Hello", body_md="body text").get_json()
-        note_id = create["note"]["id"]
-        resp = self.client.get(f"/notes?note_id={note_id}")
-        self.assertEqual(resp.status_code, 200)
-        body = resp.get_data(as_text=True)
-        self.assertIn("lr-note-editor", body)
-        self.assertIn("Hello", body)
-        self.assertIn("body text", body)
+    def test_course_and_export(self):
+        course = self.app.config["LR_COURSES_SERVICE"].create(name="Physics")
+        note_id = self._create(title="Waves / 1", body_md="- [x] read").get_json()["note"]["id"]
+        resp = self.client.patch(f"/api/v1/notes/{note_id}", json={"course_id": course.id})
+        self.assertEqual(resp.get_json()["note"]["course_id"], course.id)
+        self.assertEqual(self.client.patch(f"/api/v1/notes/{note_id}", json={"course_id": "nope"}).status_code, 400)
+        self.assertIn("Physics", self.client.get("/notes").get_data(as_text=True))
+        resp = self.client.get(f"/notes/{note_id}/export.md")
+        self.assertIn("Waves  1.md", resp.headers["Content-Disposition"])
+        self.assertEqual(resp.get_data(as_text=True), "# Waves / 1\n\n- [x] read\n")
+        self.assertEqual(self.client.patch(f"/api/v1/notes/{note_id}", json={"course_id": None}).get_json()["note"]["course_id"], None)
+
+
 if __name__ == "__main__":
     unittest.main()
