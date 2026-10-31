@@ -27,3 +27,6 @@ Hardware/firmware/main/secrets.h
 # Host test build output (Hardware/firmware/test).
 Hardware/firmware/test/*.exe
 Hardware/firmware/test/*.tmp
+
+# Impeccable design skill: local working files (early drafts, state)
+.impeccable/
