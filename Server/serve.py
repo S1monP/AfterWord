@@ -12,11 +12,20 @@ VPS, put Caddy in front for HTTPS, bind to localhost, and set:
     LR_WEB_PASSWORD=...            # login for the web UI
     LR_DEVICE_TOKEN=...            # same value as DEVICE_TOKEN in secrets.h
 
+On the home network (a test drive before the VPS):
+
+    LR_MDNS_NAME=afterword         # http://afterword.local (mdns.py)
+    LR_EXTRA_PORTS=80              # also on port 80, so no ":8000" in the
+                                   # address; the recorder keeps LR_PORT
+    LR_LOG_FILE=data/server.log    # when started in the background
+
 Run one process: the AI pipeline worker lives inside it.
 """
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
 
 from waitress import serve
 
@@ -24,8 +33,30 @@ import config as config_mod
 from app import create_app
 
 
+def _log_to_file() -> None:
+    """``LR_LOG_FILE``: everything printed goes to that file (appended),
+    for running without a console window."""
+    path = os.environ.get("LR_LOG_FILE", "").strip()
+    if not path:
+        return
+    log = Path(path)
+    if not log.is_absolute():
+        log = Path(__file__).resolve().parent / log
+    log.parent.mkdir(parents=True, exist_ok=True)
+    sys.stdout = sys.stderr = open(log, "a", encoding="utf-8", buffering=1)
+
+
+def _ports(cfg) -> list[int]:
+    ports = [cfg.port]
+    for part in os.environ.get("LR_EXTRA_PORTS", "").replace(",", " ").split():
+        if part.isdigit() and int(part) not in ports:
+            ports.append(int(part))
+    return ports
+
+
 def main() -> None:
     cfg = config_mod.load()
+    _log_to_file()
     app = create_app(cfg)
     if not cfg.web_password:
         print("[LR ] WARNING: LR_WEB_PASSWORD is not set; the web UI is open "
@@ -39,10 +70,17 @@ def main() -> None:
                                      "x-forwarded-host",
             "clear_untrusted_proxy_headers": True,
         }
-    print(f"[LR ] waitress on http://{cfg.host}:{cfg.port}"
+    ports = _ports(cfg)
+    listen = " ".join(f"{cfg.host}:{p}" for p in ports)
+    print(f"[LR ] waitress on {listen}"
           + (f" (behind proxy {proxy})" if proxy else ""), flush=True)
+    name = os.environ.get("LR_MDNS_NAME", "").strip()
+    if name:
+        import mdns
+        # The friendliest port: 80 when it's served (no ":8000" to type).
+        mdns.announce(name, 80 if 80 in ports else cfg.port)
     serve(
-        app, host=cfg.host, port=cfg.port, threads=8,
+        app, listen=listen, threads=8,
         # Body limit matches Flask's MAX_CONTENT_LENGTH (create_app).
         max_request_body_size=app.config["MAX_CONTENT_LENGTH"],
         **extra,
