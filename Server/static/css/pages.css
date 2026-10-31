@@ -26,6 +26,18 @@
   display: grid; grid-template-columns: 340px minmax(0, 1fr) 340px; gap: 1px;
   background: var(--seam); min-height: 0;
 }
+/* Home's own width (it shrinks with the window and when the sidebar is
+   kept open): slimmer side columns, then Schedule on the left and Recent
+   over the lists on the right. */
+.home { container: home / inline-size; }
+@container home (max-width: 1120px) { .home__grid { grid-template-columns: 300px minmax(0, 1fr) 300px; } }
+@container home (max-width: 940px) {
+  .home__grid { grid-template-columns: 300px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
+  .home__grid .sched { grid-row: span 2; }
+  .home__grid .lists { grid-template-rows: auto auto; overflow-y: auto; }
+  .home__grid .lists__todo { display: block; }
+  .home__grid .lists__todo > * { overflow: visible; }
+}
 .hpanel { background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
 
 /* Schedule */

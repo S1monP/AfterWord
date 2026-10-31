@@ -108,6 +108,7 @@ class DeviceFlowTests(LRTestCase):
         audio = self.client.get("/api/v1/sessions/abcdef1234567890/audio")
         self.assertEqual(audio.status_code, 200)
         self.assertIn(b"BBBB", audio.get_data())
+        audio.close()
 
     def test_out_of_order_uploads(self) -> None:
         self.client.post(
@@ -136,12 +137,14 @@ class DeviceFlowTests(LRTestCase):
         r = self.client.get("/api/v1/sessions/abcdef1234567890/audio")
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.mimetype, "audio/aac")
+        r.close()   # the file is streamed; close it so it isn't left open
         r2 = self.client.get(
             "/api/v1/sessions/abcdef1234567890/audio",
             headers={"Range": "bytes=0-99"},
         )
         self.assertEqual(r2.status_code, 206)
         self.assertEqual(len(r2.get_data()), 100)
+        r2.close()
 
     def test_audio_409_when_not_ready(self) -> None:
         self.client.post(

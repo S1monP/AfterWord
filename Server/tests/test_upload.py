@@ -127,6 +127,7 @@ class WavUploadTests(LRTestCase):
             audio.mimetype, "audio/aac",
             audio.get_data(as_text=False)[:16],
         )
+        audio.close()
 
     @skip_without_ffmpeg
     def test_canonical_wav_default_title(self) -> None:
