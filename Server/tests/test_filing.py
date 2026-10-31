@@ -139,15 +139,27 @@ class FilingTests(LRTestCase):
                     classifier=provider, llm_provider=provider,
                 )
                 self.assertEqual(len(self._all_tasks()), expect)
-                sess = self.store.get_session(sid)
-                self.assertEqual(sess.status, storage.STATUS_DONE)
                 if kind in ("lecture", "command"):
                     self.assertEqual(provider.recorded_at,
                                      "Thursday 15 January 2026, 10:00")
                 if kind == "command":
-                    # No summary; named; nothing linked to the audio.
-                    self.assertIsNone(self.store.get_artifact(sid, "summary"))
+                    # The to-do stays, unlinked; the recording is not kept.
                     self.assertEqual(self._all_tasks()[0].source_ref, None)
+                    self.assertIsNone(self.store.get_session(sid))
+                    self.assertFalse(self.store.session_dir(sid).exists())
+                else:
+                    sess = self.store.get_session(sid)
+                    self.assertEqual(sess.status, storage.STATUS_DONE)
+
+    def test_a_request_that_files_nothing_moves_to_other(self):
+        sid = self._session(None)
+        provider = _Provider("command", [])
+        processing.run_post_finish_pipeline(
+            self.store, sid, transcript_provider=provider,
+            classifier=provider, llm_provider=provider,
+        )
+        sess = self.store.get_session(sid)
+        self.assertEqual((sess.kind, sess.status), ("other", storage.STATUS_DONE))
 
     def test_moving_a_lecture_to_memos_drops_its_untouched_items(self):
         sid = self._session("lecture")

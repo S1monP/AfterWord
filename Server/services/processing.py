@@ -477,7 +477,7 @@ def run_post_finish_pipeline(
             json.dumps({"items": list(items)}),
             model=getattr(llm_provider, "name", None),
         )
-        _file_items(storage, session_id, kind, items)
+        filed = _file_items(storage, session_id, kind, items)
         _set_status(storage, session_id, STATUS_DONE)
     except _PipelineError as exc:
         return _mark_failed(
@@ -489,6 +489,16 @@ def run_post_finish_pipeline(
             f"persist extraction: {exc!r}",
         )
 
+    # 9. A request recording ("remind me to ...") is not kept once
+    # what it asked for is filed. If nothing could be filed it was
+    # probably misheard, so it moves to Other instead of vanishing.
+    deleted = False
+    if kind in filing.UNLINKED_KINDS:
+        if filed:
+            deleted = storage.delete_session(session_id)
+        else:
+            storage.set_kind(session_id, "other", confidence=confidence)
+
     return {
         "ok": True,
         "kind": kind,
@@ -496,6 +506,7 @@ def run_post_finish_pipeline(
         "transcript_chars": len(transcript),
         "summary_chars": len(summary.text),
         "extracted_items": len(items),
+        "deleted": deleted,
     }
 
 
@@ -521,17 +532,20 @@ def _recorded_at(sess) -> Optional[str]:
 
 def _file_items(
     storage: Storage, session_id: str, kind: Optional[str], items: list,
-) -> None:
+) -> int:
     """Copy deadlines / to-dos / events into the user's lists (only for
     :data:`filing.FILING_KINDS`; other kinds just drop what an earlier
-    run filed). Never fails the pipeline."""
+    run filed) and return how many were filed. Never fails the
+    pipeline."""
     try:
-        filing.refile(
+        counts = filing.refile(
             storage, session_id,
             list(items) if kind in filing.FILING_KINDS else [],
         )
     except Exception:  # pragma: no cover  (defensive)
         traceback.print_exc()
+        return 0
+    return sum(counts.values())
 
 
 def _apply_title(storage: Storage, session_id: str, topic: str) -> None:
