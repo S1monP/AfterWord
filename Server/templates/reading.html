@@ -1,0 +1,220 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon, kebab, play %}
+{% block title %}{{ page_title }} · AfterWord{% endblock %}
+{% block extrahead %}<link rel="stylesheet" href="{{ asset('css/reading.css') }}">{% endblock %}
+{% block extrascripts %}<script defer src="{{ asset('js/reading.js') }}"></script>{% endblock %}
+{% set opened = reader and not auto_selected %}
+
+{% macro rec_data(row) -%}
+  data-rec-menu data-id="{{ row.id }}" data-title="{{ row.title }}" data-kind="{{ row.kind }}"
+  data-course="{{ row.course_id }}" data-audio="{{ '1' if row.has_audio else '' }}" aria-haspopup="menu" aria-expanded="false"
+{%- endmacro %}
+
+{% block pbar %}
+  {% if opened %}
+    <header class="pbar">
+      <a class="pbar__back" href="{{ url_for(request.endpoint) }}">{{ icon("back", 22, 2) }}{{ page_title }}</a>
+      <span class="pbar__spacer"></span>
+      <button type="button" class="icon-btn" {{ rec_data(reader.row) }} aria-label="Actions">{{ kebab(20) }}</button>
+    </header>
+  {% else %}
+    {{ super() }}
+  {% endif %}
+{% endblock %}
+{% block pbar_title %}{{ page_title }}{% endblock %}
+
+{% block content %}
+<div class="rpage{% if opened %} is-open{% endif %}" data-page="{{ page }}" data-noun="{{ noun }}">
+  <aside class="lcol" aria-label="{{ page_title }}">
+    <div class="lcol__head">
+      <h1>{{ page_title }} <span class="mono lcol__count">{{ total }}</span></h1>
+      {% if page == "lectures" %}
+        {# Course settings: used once a semester, so small and quiet; desktop only. #}
+        <a class="lcol__gear" href="{{ url_for('pages.ui_courses_admin') }}" title="Course settings" aria-label="Course settings">{{ icon("gear", 15) }}</a>
+      {% endif %}
+    </div>
+    <div class="lcol__tools">
+      <div class="lsearch">
+        {{ icon("search", 15, cls="lsearch__ic") }}
+        <label class="sr-only" for="list-filter">Search {{ page_title|lower }}</label>
+        <input class="field" id="list-filter" type="search" placeholder="Search {{ page_title|lower }}" autocomplete="off" data-list-filter>
+      </div>
+      {% if page == "lectures" %}
+        <div class="seg lcol__modes" role="group" aria-label="Group">
+          <a href="{{ url_for('pages.ui_lectures', mode='course', session=request.args.get('session')) }}" {% if mode == 'course' %}aria-current="page"{% endif %}>By course</a>
+          <a href="{{ url_for('pages.ui_lectures', mode='date', session=request.args.get('session')) }}" {% if mode == 'date' %}aria-current="page"{% endif %}>By date</a>
+        </div>
+      {% endif %}
+    </div>
+    <div class="lcol__rows" data-rows>
+      {% for g in groups %}
+        <section class="lgroup" data-group="{{ g.key }}">
+          <button type="button" class="lgroup__head" aria-expanded="true" data-toggle-group>
+            {% if g.cc %}<span class="sq {{ g.cc }}"></span>{% endif %}<span>{{ g.name }}</span><span class="mono lgroup__n">{{ g.rows|length }}</span>
+            {{ icon("down", 15, 2, cls="lgroup__chev") }}
+          </button>
+          <ul class="lgroup__rows">
+            {% for r in g.rows %}
+              <li class="lrow{% if r.id == selected_id and opened %} is-selected{% elif r.id == selected_id %} is-selected is-auto{% endif %}" data-row data-find="{{ (r.title ~ ' ' ~ r.course)|lower }}">
+                <a class="lrow__main" href="{{ r.url }}"{% if r.id == selected_id %} aria-current="true"{% endif %}>
+                  <span class="lrow__title">{{ r.title }}</span>
+                  <span class="lrow__meta">
+                    {% if page != "lectures" and r.course %}<span class="lrow__course {{ r.cc }}"><span class="sq"></span>{{ r.course }}</span>{% endif %}
+                    {% if page == "lectures" and mode == "date" and r.course %}<span class="lrow__course {{ r.cc }}"><span class="sq"></span>{{ r.course }}</span>{% endif %}
+                    <span class="mono">{{ r.when }}</span>
+                    {% if r.status %}<span class="lrow__status {{ r.sc }}"><span class="dot"></span>{{ r.status }}</span>{% endif %}
+                  </span>
+                </a>
+                <button type="button" class="icon-btn lrow__dots" {{ rec_data(r) }} aria-label="Actions for {{ r.title }}">{{ kebab(18) }}</button>
+              </li>
+            {% endfor %}
+            {% if not g.rows %}<li class="lgroup__none">No {{ noun }}s yet</li>{% endif %}
+          </ul>
+        </section>
+      {% endfor %}
+      {% if not total %}
+        <div class="empty">
+          <span class="empty__icon">{{ icon({"lectures": "lecture", "meetings": "meeting"}.get(page, "other"), 28) }}</span>
+          <span class="empty__title">No {{ noun }}s yet</span>
+          {% if page == "other" %}
+            <p>Recordings that are not lectures, meetings or notes land here, and so do ones still being sorted.</p>
+          {% else %}
+            <p>Recordings the AI recognises as {{ noun }}s appear here. Anything else can be moved here with “Move to”.</p>
+          {% endif %}
+        </div>
+      {% endif %}
+      <p class="lcol__nomatch" data-no-match hidden>Nothing matches.</p>
+    </div>
+  </aside>
+
+  <section class="reader" aria-label="{{ noun|capitalize }}"{% if reader %} data-reader="{{ reader.sess.id }}"{% if reader.processing %} data-processing="1"{% endif %}{% endif %}>
+    {% if reader %}
+      {% set s = reader.sess %}
+      {% set row = reader.row %}
+      <header class="reader__head">
+        <div class="reader__titles">
+          <span class="reader__chip {{ row.cc }}"><span class="sq"></span>{{ reader.chip }}</span>
+          <h2 class="reader__title" data-reader-title>{{ row.title }}</h2>
+          <form class="reader__rename" data-rename hidden>
+            <label class="sr-only" for="rename-input">Name</label>
+            <input class="field" id="rename-input" type="text" maxlength="200" value="{{ row.title }}">
+            <button type="submit" class="btn btn--fill">Save</button>
+            <button type="button" class="btn" data-rename-cancel>Cancel</button>
+          </form>
+          <p class="reader__meta mono">{{ reader.meta }}</p>
+        </div>
+        <button type="button" class="icon-btn reader__dots" {{ rec_data(row) }} aria-label="Actions">{{ kebab(20) }}</button>
+      </header>
+
+      {% if reader.failed %}
+        <div class="notice notice--bad reader__notice">
+          <div>
+            <span class="notice__title">Processing failed</span>
+            {{ reader.status_detail or "The AI could not finish this recording." }}
+          </div>
+          <button type="button" class="btn" data-retry="{{ s.id }}">{{ icon("retry", 15) }}Retry</button>
+        </div>
+      {% elif s.status == "receiving" %}
+        <div class="notice reader__notice"><div><span class="notice__title">Still uploading</span>The device is sending this recording; it will be processed when it is complete.</div></div>
+      {% endif %}
+
+      <div class="reader__sticky">
+        {% if row.has_audio %}
+          <div class="player" data-player>
+            <audio preload="metadata" src="{{ url_for('sessions_api.api_get_audio', session_id=s.id) }}"></audio>
+            <input class="player__scrub" type="range" min="0" max="1000" value="0" step="1" aria-label="Position" data-scrub>
+            <div class="player__row">
+              <span class="player__time mono"><span data-time>0:00</span> / <span data-dur>–:––</span></span>
+              <div class="player__btns">
+                <button type="button" class="icon-btn" data-skip="-10" aria-label="Back 10 seconds">{{ icon("back10", 20) }}</button>
+                <button type="button" class="player__play" data-play aria-label="Play">{{ play(20) }}</button>
+                <button type="button" class="icon-btn" data-skip="10" aria-label="Forward 10 seconds">{{ icon("fwd10", 20) }}</button>
+              </div>
+              <button type="button" class="player__speed mono" data-speed aria-label="Playback speed">1×</button>
+            </div>
+          </div>
+        {% endif %}
+      </div>
+      <div class="reader__tabs">
+        <div class="seg" role="group" aria-label="Show">
+          <button type="button" data-tab="summary" aria-pressed="true">Summary</button>
+          <button type="button" data-tab="transcript" aria-pressed="false">Transcript</button>
+        </div>
+      </div>
+
+      <div class="reader__cols">
+        <section class="rpane rsum" data-pane="summary" aria-label="Summary">
+          <h3 class="rpane__h">Summary</h3>
+          {% if reader.summary and reader.summary.content %}
+            <div class="prose">
+              <p>{{ reader.summary.content|search_marks }}</p>
+              {% for sec in reader.summary.sections %}
+                {% if sec.heading %}<h4>{{ sec.heading|search_marks }}</h4>{% endif %}
+                <p>{{ sec.text|search_marks }}</p>
+              {% endfor %}
+              {% if reader.summary.key_points %}
+                <h4>{{ reader.points_label }}</h4>
+                <ul>{% for p in reader.summary.key_points %}<li>{{ p|search_marks }}</li>{% endfor %}</ul>
+              {% endif %}
+            </div>
+          {% elif reader.processing %}
+            <p class="rsum__busy st-busy"><span class="dot"></span>The summary is being written…</p>
+            {% if reader.lines %}<p class="muted">The transcript is ready already.</p>{% endif %}
+            <div class="skel" style="width: 92%"></div><div class="skel" style="width: 78%"></div><div class="skel" style="width: 85%"></div>
+          {% elif reader.note %}
+            <p class="muted">{{ reader.note }}.</p>
+          {% elif not reader.failed %}
+            <p class="muted">No summary for this recording.</p>
+          {% endif %}
+          {% if reader.filed %}
+            <h4 class="rsum__filed-h">Added to your lists</h4>
+            <div class="rsum__filed">
+              {% for f in reader.filed %}
+                {% if f.ms is not none %}
+                  <button type="button" class="moment{% if f.done %} is-done{% endif %}" data-seek="{{ f.ms }}"><span class="mono">{{ f.at }}</span>{{ f.label }}</button>
+                {% else %}
+                  <span class="moment">{{ f.label }}</span>
+                {% endif %}
+              {% endfor %}
+            </div>
+          {% endif %}
+        </section>
+
+        <section class="rpane rtr" data-pane="transcript" aria-label="Transcript">
+          <div class="rtr__head">
+            <h3 class="rpane__h">Transcript</h3>
+            {% if reader.lines %}
+              <div class="lsearch rtr__find">
+                {{ icon("search", 14, cls="lsearch__ic") }}
+                <label class="sr-only" for="find">Find in transcript</label>
+                <input class="field" id="find" type="search" placeholder="Find in transcript" autocomplete="off" data-find>
+              </div>
+            {% endif %}
+          </div>
+          {% if reader.lines %}
+            <div class="tlines" data-lines>
+              {% for line in reader.lines %}
+                <p class="tline spk-{{ line.spk }}"{% if line.t is not none %} data-t="{{ line.t }}"{% endif %}>
+                  {% if line.t is not none %}<button type="button" class="tline__ts mono" data-seek="{{ line.t * 1000 }}" aria-label="Play from {{ line.stamp }}">{{ line.stamp }}</button>{% else %}<span class="tline__ts"></span>{% endif %}
+                  <span class="tline__text">{% if line.speaker %}<span class="tline__who">{{ line.speaker }}</span>{% endif %}{{ line.text|search_marks }}</span>
+                </p>
+              {% endfor %}
+            </div>
+            <p class="muted" data-find-none hidden>Not in this transcript.</p>
+          {% elif reader.processing %}
+            <p class="muted">Being transcribed…</p>
+          {% else %}
+            <p class="muted">No transcript.</p>
+          {% endif %}
+        </section>
+      </div>
+    {% else %}
+      <div class="empty reader__empty">
+        <span class="empty__title">Nothing to show yet</span>
+        <p>When there is a {{ noun }}, pick it from the list to read its summary and transcript.</p>
+      </div>
+    {% endif %}
+  </section>
+</div>
+<script type="application/json" id="courses-data">[{% for c in courses %}{"id": {{ c.id|tojson }}, "name": {{ c.name|tojson }}, "cc": {{ course_cls(c.color)|tojson }}}{{ "," if not loop.last }}{% endfor %}]</script>
+{% endblock %}

@@ -256,8 +256,25 @@
     if (themePop && !themePop.hidden) { themePop.hidden = true; return; }
     if (nav && nav.classList.contains("is-open")) setNavOpen(false);
   });
-  window.addEventListener("resize", function () { if (openMenu) closeMenu(); });
+  // Close menus when the width changes (not when a phone's address bar
+  // slides away, which only changes the height).
+  var lastWidth = window.innerWidth;
+  window.addEventListener("resize", function () {
+    if (window.innerWidth === lastWidth) return;
+    lastWidth = window.innerWidth;
+    if (openMenu) closeMenu();
+  });
 
   // #menu in the address opens the menu (phone).
   if (location.hash === "#menu") setNavOpen(true);
+
+  /* A message to show once the next page has loaded (after an action
+     that reloads, like moving or deleting a recording). */
+  AW.toastNext = function (text) {
+    try { sessionStorage.setItem("aw-toast", text); } catch (e) { AW.toast(text); }
+  };
+  try {
+    var pending = sessionStorage.getItem("aw-toast");
+    if (pending) { sessionStorage.removeItem("aw-toast"); AW.toast(pending); }
+  } catch (e) {}
 })();

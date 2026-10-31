@@ -151,7 +151,8 @@ html[data-theme="light"] .dot-btn--copper i { background: #b4541e; }
 
 /* --- Phone ---------------------------------------------------------------- */
 @media (max-width: 899px) {
-  body { font-size: 16px; }
+  /* On the phone everything sits on the panel colour (white in light mode). */
+  body { font-size: 16px; background: var(--panel); }
   .app { display: block; height: auto; min-height: 100dvh; }
   .app__main { min-height: 100dvh; }
 

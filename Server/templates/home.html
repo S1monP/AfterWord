@@ -2,7 +2,7 @@
 {% from "_icons.html" import icon, logo %}
 {% block title %}AfterWord{% endblock %}
 {% block pbar %}{% endblock %}{# Home draws its own phone header #}
-{% block extrascripts %}<script defer src="{{ url_for('static', filename='js/home.js') }}"></script>{% endblock %}
+{% block extrascripts %}<script defer src="{{ asset('js/home.js') }}"></script>{% endblock %}
 
 {% macro event_row(ev) -%}
   <a class="evt {{ ev.cc }}{% if ev.is_past %} is-past{% endif %}" href="{{ ev.url }}">

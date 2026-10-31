@@ -2315,6 +2315,15 @@ class Storage:
         shutil.rmtree(self.session_dir(session_id), ignore_errors=True)
         return True
 
+    def event_for_session(self, session_id: str) -> Optional[Event]:
+        """The calendar event a recording was matched to, if any."""
+        with self._tx() as conn:
+            row = conn.execute(
+                "SELECT * FROM events WHERE matched_session_id = ? "
+                "ORDER BY starts_at LIMIT 1", (session_id,),
+            ).fetchone()
+        return self._row_to_event(row) if row else None
+
     def filed_from(self, session_id: str) -> tuple[list[Task], list[Event]]:
         """The tasks/deadlines and events a recording filed."""
         with self._tx() as conn:

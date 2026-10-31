@@ -406,81 +406,52 @@ class SessionCourseAssignApiTests(LRTestCase):
         )
         self.assertEqual(resp.status_code, 400)
 class LecturesUiTests(LRTestCase):
-    def test_lectures_renders_with_two_pane(self):
-        resp = self.client.get("/lectures")
-        self.assertEqual(resp.status_code, 200)
-        body = resp.get_data(as_text=True)
-        self.assertIn("lr-twopane", body)
-        self.assertIn("Courses", body)
-        self.assertIn("courses admin", body)
+    def test_lectures_page_has_list_reader_and_course_settings(self):
+        body = self.client.get("/lectures").get_data(as_text=True)
+        self.assertIn('class="rpage', body)
+        self.assertIn('class="lcol"', body)
+        self.assertIn("/courses/admin", body)               # the small gear
+        self.assertIn("No lectures yet", body)
 
-    def test_lectures_renders_courses_in_sidebar(self):
+    def test_lectures_are_grouped_by_course(self):
         svc = self.app.config["LR_COURSES_SERVICE"]
-        svc.create(name="Calc II", code="MBX101", color="#ff0000")
+        calc = svc.create(name="Calc II", code="MBX101")
         svc.create(name="Biology EP3456")
-        resp = self.client.get("/lectures")
-        body = resp.get_data(as_text=True)
+        _seed_session(self, status="done", course_id=calc.id)
+        body = self.client.get("/lectures").get_data(as_text=True)
         self.assertIn("Calc II", body)
         self.assertIn("Biology EP3456", body)
-        self.assertIn("(MBX101)", body)
+        self.assertIn("Calc II · Lecture 1", body)     # the reader's chip
+        body = self.client.get("/lectures?mode=date").get_data(as_text=True)
+        self.assertIn("January 2026", body)
 
-    def test_lectures_renders_selected_session_in_right_pane(self):
+    def test_lectures_opens_the_selected_one(self):
         svc = self.app.config["LR_COURSES_SERVICE"]
         course = svc.create(name="X")
         sid = _seed_session(self, course_id=course.id)
-        resp = self.client.get(f"/lectures?session={sid}")
-        body = resp.get_data(as_text=True)
-        self.assertIn("lr-detail", body)
-        self.assertIn(sid[:8], body)
+        body = self.client.get(f"/lectures?session={sid}").get_data(as_text=True)
+        self.assertIn(f'data-reader="{sid}"', body)
+        self.assertIn('class="rpage is-open"', body)        # full screen on the phone
 
-    def test_lectures_soft_nav_returns_only_detail_partial(self):
-        sid = _seed_session(self)
-        resp = self.client.get(
-            f"/lectures?session={sid}",
-            headers={"X-Soft-Nav": "1"},
-        )
-        self.assertEqual(resp.status_code, 200)
-        body = resp.get_data(as_text=True)
-        # The detail block is rendered (a real session was passed).
-        self.assertIn("lr-detail", body)
-        self.assertIn(sid[:8], body)
-        # The sidebar markup is NOT rendered at all (soft-nav
-        # strips everything except the right pane).
-        self.assertNotIn("lr-twopane__sidebar", body)
-        self.assertNotIn("Courses", body)
+    def test_without_a_choice_the_newest_opens_on_desktop_only(self):
+        sid = _seed_session(self, status="done")
+        body = self.client.get("/lectures").get_data(as_text=True)
+        self.assertIn(f'data-reader="{sid}"', body)
+        self.assertIn("is-selected is-auto", body)          # the phone shows the list
+        self.assertNotIn('class="rpage is-open"', body)
 
 
 class MeetingsUiTests(LRTestCase):
-    def test_meetings_renders_with_two_pane(self):
-        resp = self.client.get("/meetings")
-        self.assertEqual(resp.status_code, 200)
-        body = resp.get_data(as_text=True)
-        self.assertIn("lr-twopane", body)
-        self.assertIn("Meetings", body)
+    def test_meetings_page_renders(self):
+        body = self.client.get("/meetings").get_data(as_text=True)
+        self.assertIn('class="rpage', body)
+        self.assertIn("No meetings yet", body)
+        self.assertIn("Nothing to show yet", body)
 
-    def test_meetings_soft_nav_returns_only_detail_partial(self):
-        sid = _seed_session(self, kind="meeting")
-        resp = self.client.get(
-            f"/meetings?session={sid}",
-            headers={"X-Soft-Nav": "1"},
-        )
-        self.assertEqual(resp.status_code, 200)
-        body = resp.get_data(as_text=True)
-        self.assertIn("lr-detail", body)
-        self.assertIn(sid[:8], body)
-        self.assertNotIn("lr-twopane__sidebar", body)
-
-    def test_meetings_soft_nav_with_unknown_session_shows_empty(self):
-        # When the session id is unknown, the right pane renders
-        # the empty-state placeholder (no lr-detail block).
-        resp = self.client.get(
-            "/meetings?session=nope",
-            headers={"X-Soft-Nav": "1"},
-        )
-        self.assertEqual(resp.status_code, 200)
-        body = resp.get_data(as_text=True)
-        self.assertNotIn("lr-detail", body)
-        self.assertIn("Pick a meeting", body)
+    def test_unknown_meeting_opens_the_newest(self):
+        sid = _seed_session(self, status="done", kind="meeting")
+        body = self.client.get("/meetings?session=nope").get_data(as_text=True)
+        self.assertIn(f'data-reader="{sid}"', body)
 
 
 class CoursesAdminUiTests(LRTestCase):
@@ -601,12 +572,13 @@ class OtherUiTests(LRTestCase):
             self.assertIn(f"?session={sid}", body)
         for sid in (lecture, memo):
             self.assertNotIn(f"?session={sid}", body)
-        self.assertIn("no speech detected", body)
-        detail = self.client.get(
-            f"/other?session={silent}", headers={"X-Soft-Nav": "1"},
-        ).get_data(as_text=True)
-        self.assertIn("Classify as", detail)
+        self.assertIn("Not sorted", body)
+        detail = self.client.get(f"/other?session={silent}").get_data(as_text=True)
         self.assertIn("No speech detected.", detail)
+        self.assertIn(f'data-rec-menu data-id="{silent}"', detail)   # Move to sorts it
+        failed = self.client.get(f"/other?session={broken}").get_data(as_text=True)
+        self.assertIn("Processing failed", failed)
+        self.assertIn(f'data-retry="{broken}"', failed)
 
     def test_classify_moves_and_rewrites_summary(self):
         store = self.app.config["LR_STORAGE"]
@@ -685,28 +657,24 @@ class RecordingNameTests(LRTestCase):
                          "WHERE id = ?", (sid,))
         body = self.client.get("/meetings").get_data(as_text=True)
         self.assertNotIn("rec_2026-01-15T1000", body)
-        self.assertIn(">Meeting<span class=\"lr-rec__when\">Thu 15 Jan 2026, 10:00", body)
+        self.assertIn('class="lrow__title">Meeting<', body)
+        self.assertIn("Thu 15 Jan 2026, 10:00", body)
 
     def test_rename_by_hand(self):
         store = self.app.config["LR_STORAGE"]
         sid = _seed_session(self, status="done", kind="meeting")
-        resp = self.client.post(
-            f"/sessions/{sid}/title",
-            data={"title": "  Budget review ", "next": f"/meetings?session={sid}"},
-        )
-        self.assertEqual(resp.status_code, 302)
-        self.assertTrue(resp.location.endswith(f"/meetings?session={sid}"))
+        resp = self.client.post(f"/api/v1/sessions/{sid}/title",
+                                json={"title": "  Budget review "})
+        self.assertEqual(resp.status_code, 200)
         sess = store.get_session(sid)
         self.assertEqual((sess.title, sess.title_source), ("Budget review", "user"))
         detail = self.client.get(f"/meetings?session={sid}").get_data(as_text=True)
         self.assertIn("Budget review", detail)
-        self.assertIn("lr-rename", detail)
-        # Off-site next is ignored; empty titles are refused.
-        resp = self.client.post(f"/sessions/{sid}/title",
-                                data={"title": "x", "next": "//evil.example"})
-        self.assertTrue(resp.location.endswith("/"))
-        self.assertEqual(self.client.post(f"/sessions/{sid}/title",
-                                          data={"title": " "}).status_code, 400)
+        self.assertIn("data-rename", detail)
+        self.assertEqual(self.client.post(f"/api/v1/sessions/{sid}/title",
+                                          json={"title": " "}).status_code, 400)
+        self.assertEqual(self.client.post("/api/v1/sessions/nope/title",
+                                          json={"title": "x"}).status_code, 404)
 
 
 class ClickableTranscriptTests(LRTestCase):
@@ -718,11 +686,10 @@ class ClickableTranscriptTests(LRTestCase):
         store = self.app.config["LR_STORAGE"]
         sid = _seed_session(self, status="done", kind="meeting")
         store.add_artifact(sid, "transcript", self.TRANSCRIPT)
-        body = self.client.get(f"/meetings?session={sid}",
-                               headers={"X-Soft-Nav": "1"}).get_data(as_text=True)
-        self.assertIn('<button class="lr-ts" type="button" data-t="5"', body)
+        body = self.client.get(f"/meetings?session={sid}").get_data(as_text=True)
+        self.assertIn('data-seek="5000"', body)
         self.assertIn('data-t="3723"', body)                    # 1:02:03
-        self.assertIn('<span class="lr-tline__who">Speaker 2</span>', body)
+        self.assertIn('<span class="tline__who">Speaker 2</span>', body)
         self.assertIn("a line without a marker", body)
 
     def test_recording_page_has_the_transcript_and_player(self):
@@ -768,13 +735,13 @@ class DeleteExportTests(LRTestCase):
             self.assertIn(part, md)
         self.assertEqual(self.client.get("/sessions/nope/export.md").status_code, 404)
 
-    def test_detail_pane_has_the_actions(self):
+    def test_reader_has_the_actions_menu(self):
         _, sid, _ = self._recording()
-        body = self.client.get(f"/lectures?session={sid}",
-                               headers={"X-Soft-Nav": "1"}).get_data(as_text=True)
-        self.assertIn(f"/sessions/{sid}/export.md", body)
-        self.assertIn("Download audio", body)
-        self.assertIn(f'class="lr-btn lr-btn--danger lr-delete-rec" type="button"\n            data-session-id="{sid}"', body)
+        body = self.client.get(f"/lectures?session={sid}").get_data(as_text=True)
+        self.assertIn(f'data-rec-menu data-id="{sid}"', body)
+        self.assertIn('data-audio="1"', body)
+        self.assertIn('data-seek="5000"', body)                 # "Added to your lists"
+        self.assertIn("Deadline · Submit essay", body)
 
     def test_delete_keeps_filed_items_unlinked(self):
         store, sid, task = self._recording()

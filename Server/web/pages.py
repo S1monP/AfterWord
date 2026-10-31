@@ -12,7 +12,6 @@ import services.events  # noqa: F401
 import services.classification  # noqa: F401
 import timeutil
 from services import transcode
-from auth import _safe_next
 from web.pipeline import set_kind_by_hand
 from web.common import (
     _selected_session_context,
@@ -21,7 +20,6 @@ from web.common import (
     current_app_notes_service,
     current_app_storage,
     current_app_tasks_service,
-    is_other,
     recording_url,
 )
 
@@ -42,114 +40,33 @@ def ui_dashboard() -> Any:
     return render_template("home.html", **home_context(week))
 
 
+def _reading_page(page: str, mode: str = "date") -> Any:
+    """Lectures, Meetings and Other: a list and a reader (web/recordings.py)."""
+    from web.recordings import page_context
+    ctx = page_context(page, request.args.get("session", "").strip(), mode)
+    return render_template("reading.html", **ctx)
+
+
 @bp.get("/lectures")
 def ui_lectures() -> Any:
-    """Two-pane layout: left sidebar lists courses (each
-    expandable to show its lectures); right pane shows the
-    selected session's audio + summary + transcript.
-    """
-    store = current_app_storage()
-    courses, _ = current_app_courses_service().list()
-    # After the M8 post-finish pipeline, a finished session
-    # can be in status='ready' (pipeline not run / no-op) or
-    # 'done' (pipeline ran successfully). The sidebar should
-    # show both.
-    _DISPLAY_STATUSES = ("ready", "done")
-    course_groups: list[dict[str, Any]] = []
-    for c in courses:
-        course_groups.append({
-            "course": c,
-            "lecture_count": store.count_sessions_by_course(c.id),
-            "lectures": store.list_sessions_by_course(
-                c.id, status=_DISPLAY_STATUSES, kind="lecture",
-            ),
-        })
-    uncategorised_lectures = store.list_sessions_by_course(
-        None, status=_DISPLAY_STATUSES, kind="lecture",
-    )
-    selected_id = request.args.get("session", "").strip()
-    right_ctx = (_selected_session_context(selected_id)
-                 if selected_id else {
-                     "selected_session": None,
-                     "summary": None, "transcript": None,
-                 })
-    # Soft-nav: when the JS client requests just the right
-    # pane, render only the partial (saves bandwidth and keeps
-    # the sidebar state). Falls back to the full page otherwise.
-    if request.headers.get("X-Soft-Nav") == "1":
-        return render_template(
-            "_session_detail.html",
-            kind_label="Lecture",
-            **right_ctx,
-        )
-    return render_template(
-        "lectures.html",
-        course_groups=course_groups,
-        uncategorised_lectures=uncategorised_lectures,
-        selected_id=selected_id,
-        **right_ctx,
-    )
+    """``?mode=course|date`` groups the list; ``?course=<id>`` (from the
+    sidebar) shows that course's lectures."""
+    mode = request.args.get("mode", "course")
+    if mode not in ("course", "date"):
+        mode = "course"
+    return _reading_page("lectures", mode)
 
 
 @bp.get("/meetings")
 def ui_meetings() -> Any:
-    """Two-pane layout: left sidebar lists all meetings;
-    right pane shows the selected session's audio + summary
-    + transcript.
-    """
-    store = current_app_storage()
-    # Show ready + done sessions (M8 pipeline can land in
-    # either state).
-    meetings = store.list_sessions_by_course(
-        None, status=("ready", "done"), kind="meeting",
-    )
-    selected_id = request.args.get("session", "").strip()
-    right_ctx = (_selected_session_context(selected_id)
-                 if selected_id else {
-                     "selected_session": None,
-                     "summary": None, "transcript": None,
-                 })
-    # Soft-nav: render only the right pane when the JS client
-    # asks for it via the X-Soft-Nav header.
-    if request.headers.get("X-Soft-Nav") == "1":
-        return render_template(
-            "_session_detail.html",
-            kind_label="Meeting",
-            **right_ctx,
-        )
-    return render_template(
-        "meetings.html",
-        meetings=meetings,
-        selected_id=selected_id,
-        **right_ctx,
-    )
+    return _reading_page("meetings")
 
 
 @bp.get("/other")
 def ui_other() -> Any:
-    """Two-pane page for recordings that are not lectures, meetings
-    or voice memos, with a control to classify each by hand."""
-    store = current_app_storage()
-    recordings = [s for s in store.list_sessions() if is_other(s)]
-    selected_id = request.args.get("session", "").strip()
-    right_ctx = (_selected_session_context(selected_id)
-                 if selected_id else {
-                     "selected_session": None,
-                     "summary": None, "transcript": None,
-                 })
-    right_ctx.update(
-        show_classify=True,
-        kinds=sorted(services.classification.SELECTABLE_KINDS),
-        kind_label="Recording",
-    )
-    if request.headers.get("X-Soft-Nav") == "1":
-        return render_template("_session_detail.html", **right_ctx)
-    return render_template(
-        "other.html",
-        recordings=recordings,
-        selected_id=selected_id,
-        **right_ctx,
-    )
+    """Recordings that are not lectures, meetings or notes, and ones not
+    sorted yet; "Move to" in the actions menu sorts them."""
+    return _reading_page("other")
 
 
 @bp.get("/sessions/<session_id>/export.md")
@@ -165,22 +82,6 @@ def ui_export_session(session_id: str) -> Any:
         io.BytesIO(text.encode("utf-8")), as_attachment=True,
         download_name=name, mimetype="text/markdown",
     )
-
-
-@bp.post("/sessions/<session_id>/title")
-def ui_set_title(session_id: str) -> Any:
-    """Form post from a recording's pencil: rename it. A name given by
-    hand is never replaced by the AI or the calendar."""
-    store = current_app_storage()
-    if store.get_session(session_id) is None:
-        abort(404)
-    try:
-        store.set_session_title(
-            session_id, request.form.get("title", ""), source="user",
-        )
-    except ValueError:
-        abort(400)
-    return redirect(_safe_next(request.form.get("next")))
 
 
 @bp.post("/sessions/<session_id>/kind")

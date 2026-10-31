@@ -194,6 +194,7 @@ def register_filters(app: Flask) -> None:
     app.template_filter("rec_title")(rec_title)
     app.template_filter("rec_when")(rec_when)
     app.add_template_global(recording_url)
+    app.add_template_global(asset)
     app.add_template_global(course_color)
     app.add_template_global(course_cls)
 
@@ -260,6 +261,17 @@ def recording_url(
         sess.kind or "", ("pages.ui_other", "session"),
     )
     return url_for(endpoint, **{param: sess.id}, **args)
+
+
+def asset(filename: str) -> str:
+    """URL of a static file with its modification time attached, so
+    browsers fetch it again whenever it changes."""
+    path = Path(current_app.static_folder or "") / filename
+    try:
+        version = int(path.stat().st_mtime)
+    except OSError:
+        version = 0
+    return url_for("static", filename=filename, v=version)
 
 
 def nav_context() -> dict[str, Any]:

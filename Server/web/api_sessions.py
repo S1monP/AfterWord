@@ -409,6 +409,23 @@ def api_classify_session(session_id: str) -> Any:
     })
 
 
+@bp.post("/api/v1/sessions/<session_id>/title")
+def api_set_title(session_id: str) -> Any:
+    """Rename a recording. Body: ``{"title": "..."}``. A name given by
+    hand is never replaced by the AI or the calendar."""
+    store = current_app_storage()
+    if store.get_session(session_id) is None:
+        return jsonify({"error": "not_found"}), 404
+    payload = request.get_json(silent=True) or {}
+    try:
+        sess = store.set_session_title(
+            session_id, str(payload.get("title") or ""), source="user",
+        )
+    except ValueError as exc:
+        return jsonify({"error": "invalid_payload", "detail": str(exc)}), 400
+    return jsonify({"session": sess.to_api_dict()})
+
+
 @bp.post("/api/v1/sessions/<session_id>/course")
 def api_assign_course(session_id: str) -> Any:
     """Assign or unassign a course on a session.
