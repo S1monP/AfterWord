@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import re
 import shutil
@@ -35,6 +36,8 @@ import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Protocol
+
+log = logging.getLogger(__name__)
 
 
 # --- Classifier result type -------------------------------------------------
@@ -520,15 +523,12 @@ class TranscriptionProvider(LLMProvider):
             raise FileNotFoundError(str(audio_path))
         # Segment long stitched recordings into ~25-minute pieces
         # (stream copy); short files come back as a single piece.
-        tmp_dir = Path(tempfile.mkdtemp(prefix="lr-stt-"))
+        tmp_dir = Path(tempfile.mkdtemp(prefix="afterword-stt-"))
         try:
             pieces = self._segment_audio(audio_path, tmp_dir)
             total = len(pieces)
             if total > 1:
-                print(
-                    f"[LR ] transcribing: {total} pieces to send",
-                    flush=True,
-                )
+                log.info("transcribing: %d pieces to send", total)
             seg_parts: list[dict] = []
             text_parts: list[str] = []
             all_had_segments = True
@@ -536,15 +536,12 @@ class TranscriptionProvider(LLMProvider):
                 pieces, start=1,
             ):
                 if total > 1:
-                    # Console progress: a long multi-piece run is
+                    # Progress in the log: a long multi-piece run is
                     # completely silent otherwise (the dev server
                     # only logs the HTTP request once it completes),
                     # which makes it look hung.
-                    print(
-                        f"[LR ] transcribing: piece {piece_no}/"
-                        f"{total} (starts at {int(offset)} s)",
-                        flush=True,
-                    )
+                    log.info("transcribing: piece %d/%d (starts at %d s)",
+                             piece_no, total, int(offset))
                 had, segs, texts = self._transcribe_piece(
                     piece_path, offset, tmp_dir,
                 )
@@ -552,10 +549,7 @@ class TranscriptionProvider(LLMProvider):
                 seg_parts.extend(segs)
                 text_parts.extend(texts)
             if total > 1:
-                print(
-                    f"[LR ] transcribing: merged {total} piece(s)",
-                    flush=True,
-                )
+                log.info("transcribing: merged %d piece(s)", total)
             if all_had_segments and seg_parts:
                 rendered = _segments_to_transcript(
                     seg_parts, annotate_speakers=self._annotate_speakers,
@@ -848,11 +842,8 @@ class TranscriptionProvider(LLMProvider):
                 and self._probe_ffmpeg()
                 and self._is_transient_failure(exc)
             ):
-                print(
-                    f"[LR ] transcribing: piece failed ({exc}); "
-                    "cutting it in half and retrying",
-                    flush=True,
-                )
+                log.warning("transcribing: piece failed (%s); cutting it in "
+                            "half and retrying", exc)
                 # Sub-pieces go into their own directory so retry
                 # generations never overwrite each other's files.
                 sub_dir = Path(work_dir) / (

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import hmac
+import logging
 import secrets
 import time
 from pathlib import Path
@@ -34,6 +35,8 @@ from flask import (
     session,
     url_for,
 )
+
+log = logging.getLogger(__name__)
 
 #: Endpoints the recorder calls. Token-checked; never behind the login.
 DEVICE_ENDPOINTS = frozenset({
@@ -61,9 +64,9 @@ def init_app(app: Flask) -> None:
     app.before_request(_guard)
     app.context_processor(lambda: {"auth_enabled": bool(cfg.web_password)})
     if cfg.web_password and not cfg.device_token:
-        print("[LR ] WARNING: AFTERWORD_WEB_PASSWORD is set but AFTERWORD_DEVICE_TOKEN is "
-              "not; device uploads are open to anyone who can reach the "
-              "server.", flush=True)
+        log.warning("AFTERWORD_WEB_PASSWORD is set but AFTERWORD_DEVICE_TOKEN "
+                    "is not; device uploads are open to anyone who can reach "
+                    "the server.")
 
 
 def _persistent_secret(data_dir: Path) -> str:

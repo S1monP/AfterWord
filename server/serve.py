@@ -15,35 +15,28 @@ VPS, put Caddy in front for HTTPS, bind to localhost, and set:
 On the home network (a test drive before the VPS):
 
     AFTERWORD_MDNS_NAME=afterword         # http://afterword.local (mdns.py)
-    AFTERWORD_EXTRA_PORTS=80              # also on port 80, so no ":8000" in the
-                                   # address; the recorder keeps AFTERWORD_PORT
+    AFTERWORD_EXTRA_PORTS=80              # also on port 80, so no ":8000" in
+                                          # the address; the recorder keeps
+                                          # AFTERWORD_PORT
     AFTERWORD_LOG_FILE=data/server.log    # when started in the background
+                                          # (rotated at 5 MB, logsetup.py)
 
 Run one process: the AI pipeline worker lives inside it.
 """
 from __future__ import annotations
 
+import logging
 import os
 import sys
-from pathlib import Path
 
 from waitress import serve
 
 import config as config_mod
+import logsetup
 from app import create_app
 
-
-def _log_to_file() -> None:
-    """``AFTERWORD_LOG_FILE``: everything printed goes to that file (appended),
-    for running without a console window."""
-    path = os.environ.get("AFTERWORD_LOG_FILE", "").strip()
-    if not path:
-        return
-    log = Path(path)
-    if not log.is_absolute():
-        log = Path(__file__).resolve().parent / log
-    log.parent.mkdir(parents=True, exist_ok=True)
-    sys.stdout = sys.stderr = open(log, "a", encoding="utf-8", buffering=1)
+# Named, not __name__: ``python serve.py`` would log as "__main__".
+log = logging.getLogger("serve")
 
 
 def _ports(cfg) -> list[int]:
@@ -56,15 +49,15 @@ def _ports(cfg) -> list[int]:
 
 def main() -> None:
     cfg = config_mod.load()
-    _log_to_file()
+    logsetup.setup()
     problem = config_mod.exposure_problem(cfg)
     if problem:
-        print(f"[LR ] NOT STARTING: {problem}", flush=True)
+        log.error("not starting: %s", problem)
         sys.exit(2)
     app = create_app(cfg)
     if not cfg.web_password and not config_mod.is_loopback(cfg.host):
-        print("[LR ] WARNING: AFTERWORD_ALLOW_OPEN is set; the web UI is open "
-              "to anyone who can reach the server.", flush=True)
+        log.warning("AFTERWORD_ALLOW_OPEN is set; the web UI is open to "
+                    "anyone who can reach the server.")
     proxy = os.environ.get("AFTERWORD_TRUSTED_PROXY", "").strip()
     extra = {}
     if proxy:
@@ -76,8 +69,8 @@ def main() -> None:
         }
     ports = _ports(cfg)
     listen = " ".join(f"{cfg.host}:{p}" for p in ports)
-    print(f"[LR ] waitress on {listen}"
-          + (f" (behind proxy {proxy})" if proxy else ""), flush=True)
+    log.info("waitress on %s%s", listen,
+             f" (behind proxy {proxy})" if proxy else "")
     name = os.environ.get("AFTERWORD_MDNS_NAME", "").strip()
     if name:
         import mdns

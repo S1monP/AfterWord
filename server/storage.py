@@ -21,6 +21,7 @@ Concurrency model:
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 import sqlite3
@@ -37,6 +38,8 @@ from typing import Any, Iterator, Optional, Union
 
 import timeutil
 from config import Config
+
+log = logging.getLogger(__name__)
 
 
 # Status values describing the server-side lifecycle. Phase A uses
@@ -899,7 +902,7 @@ class Storage:
                 pass
 
     def _log(self, msg: str) -> None:
-        print(f"[LR ] {msg}", flush=True)
+        log.info(msg)
 
     # --- per-thread connection -------------------------------------------
 

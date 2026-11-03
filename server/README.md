@@ -96,6 +96,8 @@ Relative paths are taken from the `server` folder.
 | `AFTERWORD_COOKIE_SECURE` | off | Login cookie over HTTPS only |
 | `AFTERWORD_ALLOW_OPEN` | off | Listen on the network without a password (trusted networks only) |
 | `AFTERWORD_TRUSTED_PROXY` | off | `serve.py`: trust X-Forwarded-* from this address |
+| `AFTERWORD_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING` or `ERROR` |
+| `AFTERWORD_LOG_FILE` | console | Log to this file instead (rotated at 5 MB, 3 old files kept) |
 
 Settings with the old `LR_` prefix (`LR_TEXT_API_KEY` and so on) are
 still read; the `AFTERWORD_` name wins when both are set.
@@ -133,6 +135,7 @@ server/
 ├── serve.py          production entry point (waitress)
 ├── config.py         settings from env / .env
 ├── auth.py           device token, web login, session key
+├── logsetup.py       log format, level, rotating log file
 ├── timeutil.py       UTC storage / local display rules
 ├── storage.py        SQLite + files: sessions, chunks, stitching, artifacts
 ├── search.py         search index and queries (see Search)

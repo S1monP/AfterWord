@@ -3,6 +3,7 @@ pipeline retry, classification and web audio upload.
 """
 from __future__ import annotations
 
+import logging
 import shutil
 from pathlib import Path
 from typing import Any, Optional
@@ -32,6 +33,7 @@ from web.pipeline import (
     set_kind_by_hand,
 )
 
+log = logging.getLogger(__name__)
 
 bp = Blueprint("sessions_api", __name__)
 
@@ -170,8 +172,8 @@ def api_finish_session(session_id: str) -> Any:
         # response reflects the final status.
         try:
             processing.run_post_finish_pipeline(store, session_id)
-        except Exception as exc:  # pragma: no cover
-            print(f"[LR ] post-finish pipeline error: {exc!r}", flush=True)
+        except Exception:  # pragma: no cover
+            log.exception("post-finish pipeline failed for %s", session_id)
     sess = store.get_session(session_id)
     return jsonify({
         "ok": True,
@@ -595,8 +597,8 @@ def api_upload_audio() -> Any:
                 classifier=text_provider,
                 llm_provider=text_provider,
             )
-        except Exception as exc:  # pragma: no cover
-            print(f"[LR ] post-upload pipeline error: {exc!r}", flush=True)
+        except Exception:  # pragma: no cover
+            log.exception("post-upload pipeline failed for %s", sess.id)
     sess = store.get_session(sess.id) or sess
 
     return jsonify({

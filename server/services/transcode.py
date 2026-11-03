@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Optional
 
 
-log = logging.getLogger("lr.transcode")
+log = logging.getLogger(__name__)
 
 #: Canonical AAC encoding parameters (speech-grade, transparent for
 #: ASR; ~2.4 MB per 5-minute chunk instead of ~13 MB of WAV).
@@ -414,7 +414,7 @@ def ingest_audio_file(
     if is_canonical_aac(fmt):
         return src, fmt
 
-    work = Path(work_dir) if work_dir else Path(tempfile.mkdtemp(prefix="lr-tx-"))
+    work = Path(work_dir) if work_dir else Path(tempfile.mkdtemp(prefix="afterword-tx-"))
     work.mkdir(parents=True, exist_ok=True)
     dst = work / f"{src.stem}.aac"
     transcode_to_aac(src, dst, ffmpeg_path=ffmpeg_path)

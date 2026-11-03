@@ -25,6 +25,7 @@ keys, so importing a file twice updates instead of duplicating.
 from __future__ import annotations
 
 import datetime as _dt
+import logging
 import re
 import threading
 import time
@@ -38,6 +39,8 @@ from typing import Optional
 import storage
 import timeutil
 from storage import Event, Storage, Subscription
+
+log = logging.getLogger(__name__)
 
 KINDS = ("lecture", "meeting", "other")
 WINDOW_BACK = _dt.timedelta(days=90)
@@ -370,9 +373,9 @@ class SubscriptionsService:
             try:
                 self.sync(sub.id)
             except FeedError as exc:
-                print(f"[LR ] calendar {sub.name!r}: {exc}", flush=True)
-            except Exception as exc:  # pragma: no cover  (keep the loop alive)
-                print(f"[LR ] calendar {sub.name!r}: {exc!r}", flush=True)
+                log.warning("calendar %r: %s", sub.name, exc)
+            except Exception:  # pragma: no cover  (keep the loop alive)
+                log.exception("calendar %r: sync failed", sub.name)
 
     def _apply_subscription(self, sub: Subscription, feed: Feed) -> SyncResult:
         store, result = self._store, SyncResult(total=len(feed.events))
@@ -501,10 +504,10 @@ def start_scheduler(app) -> threading.Thread:
             if app.config.get("AFTERWORD_SUBSCRIPTION_SYNC", True):
                 try:
                     app.config["AFTERWORD_SUBSCRIPTIONS_SERVICE"].sync_due()
-                except Exception as exc:  # pragma: no cover
-                    print(f"[LR ] calendar sync: {exc!r}", flush=True)
+                except Exception:  # pragma: no cover
+                    log.exception("calendar sync failed")
             time.sleep(300)
 
-    t = threading.Thread(target=run, name="lr-calendar-sync", daemon=True)
+    t = threading.Thread(target=run, name="afterword-calendar-sync", daemon=True)
     t.start()
     return t

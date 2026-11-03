@@ -36,7 +36,7 @@ class LRTestCase(unittest.TestCase):
     """Base test case: each test gets its own temp data dir + Flask app."""
 
     def setUp(self) -> None:
-        self._tmpdir = Path(tempfile.mkdtemp(prefix="lr-test-"))
+        self._tmpdir = Path(tempfile.mkdtemp(prefix="afterword-test-"))
         self._cfg = config_mod.Config(
             data_dir=self._tmpdir,
             host="127.0.0.1",

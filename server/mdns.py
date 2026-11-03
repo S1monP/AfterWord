@@ -13,10 +13,13 @@ router.
 """
 from __future__ import annotations
 
+import logging
 import socket
 import threading
 import time
 from typing import Optional
+
+log = logging.getLogger(__name__)
 
 RECHECK_S = 300
 
@@ -39,8 +42,8 @@ def announce(name: str, port: int) -> Optional[threading.Thread]:
     try:
         from zeroconf import IPVersion, ServiceInfo, Zeroconf
     except ImportError:
-        print("[LR ] AFTERWORD_MDNS_NAME is set but zeroconf isn't installed "
-              "(pip install -r requirements.txt)", flush=True)
+        log.warning("AFTERWORD_MDNS_NAME is set but zeroconf isn't installed "
+                    "(pip install -r requirements.txt)")
         return None
     name = name.strip().lower().removesuffix(".local")
 
@@ -65,13 +68,13 @@ def announce(name: str, port: int) -> Optional[threading.Thread]:
                         zc = Zeroconf(interfaces=[ip], ip_version=IPVersion.V4Only)
                         info = info_for(ip)
                         zc.register_service(info, allow_name_change=True)
-                        print(f"[LR ] on the network as http://{name}.local"
-                              + ("" if port == 80 else f":{port}") + f" ({ip})", flush=True)
+                        log.info("on the network as http://%s.local%s (%s)", name,
+                                 "" if port == 80 else f":{port}", ip)
                 except Exception as exc:  # pragma: no cover  (try again later)
-                    print(f"[LR ] network name: {exc!r}", flush=True)
+                    log.warning("network name: %r", exc)
                     zc, info, ip = None, None, None
             time.sleep(RECHECK_S)
 
-    t = threading.Thread(target=run, name="lr-mdns", daemon=True)
+    t = threading.Thread(target=run, name="afterword-mdns", daemon=True)
     t.start()
     return t

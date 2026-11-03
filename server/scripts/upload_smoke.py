@@ -52,7 +52,7 @@ def make_wav(payload: bytes = b"\x00\x00\x00\x00" * 800,
 def build_multipart(file_bytes: bytes, filename: str,
                     title: str | None = None) -> tuple[bytes, str]:
     """Return (body, content_type) for a multipart/form-data with one file."""
-    boundary = "----lr-smoke-boundary-7c4f8a2e"
+    boundary = "----afterword-smoke-boundary-7c4f8a2e"
     parts: list[bytes] = []
     if title is not None:
         parts.append(
@@ -78,7 +78,7 @@ def main() -> int:
     import config as config_mod
     from app import create_app
 
-    tmp = Path(tempfile.mkdtemp(prefix="lr-upload-smoke-"))
+    tmp = Path(tempfile.mkdtemp(prefix="afterword-upload-smoke-"))
     cfg = config_mod.Config(
         data_dir=tmp, host="127.0.0.1", port=0,
         transcription_api_key="", text_api_key="",
@@ -144,7 +144,7 @@ def main() -> int:
         )
         print("5. Bogus media -> 503 OK")
 
-        boundary = "----lr-smoke-empty"
+        boundary = "----afterword-smoke-empty"
         empty = f"--{boundary}--\r\n".encode()
         s, b, _ = req("POST", "/api/v1/uploads/audio",
                        data=empty,

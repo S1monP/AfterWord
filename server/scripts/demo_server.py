@@ -20,6 +20,7 @@ from pathlib import Path
 SERVER = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SERVER))
 import config as config_mod  # noqa: E402
+import logsetup  # noqa: E402
 import timeutil  # noqa: E402
 
 DATA = Path(tempfile.gettempdir()) / "afterword-demo-data"
@@ -32,6 +33,8 @@ timeutil.local_now = lambda: NOW
 timeutil.local_today = lambda: TODAY
 
 from app import create_app  # noqa: E402
+
+logsetup.setup(log_file="")
 
 cfg = dataclasses.replace(config_mod.load(), data_dir=DATA, port=8010, transcription_api_key="",
                           text_api_key="", web_password="")

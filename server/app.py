@@ -12,6 +12,7 @@ the :mod:`web` package as blueprints.
 """
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any, Optional
 
@@ -25,6 +26,7 @@ import services.classification  # noqa: F401
 import services.courses  # noqa: F401
 import services.llm  # noqa: F401
 import auth
+import logsetup
 import config as config_mod
 import storage
 from services import transcode
@@ -37,6 +39,9 @@ from web.common import _default_title_from_iso, _normalise_title  # noqa: F401
 from web.pipeline import (  # noqa: F401
     _PIPELINE_LOCK, _PIPELINES_IN_FLIGHT, _enqueue_pipeline,
 )
+
+# Named, not __name__: ``python app.py`` would log as "__main__".
+log = logging.getLogger("app")
 
 
 def create_app(config: Optional[config_mod.Config] = None) -> Flask:
@@ -55,8 +60,8 @@ def create_app(config: Optional[config_mod.Config] = None) -> Flask:
     # finished memo without one its note.
     try:
         services.notes.sync_memo_notes(app.config["AFTERWORD_STORAGE"])
-    except Exception as exc:  # pragma: no cover  (a page still loads)
-        print(f"[LR ] voice memo notes: {exc!r}", flush=True)
+    except Exception:  # pragma: no cover  (a page still loads)
+        log.exception("could not give finished voice memos their notes")
     app.config["AFTERWORD_TASKS_SERVICE"] = services.tasks.TasksService(
         app.config["AFTERWORD_STORAGE"]
     )
@@ -88,23 +93,17 @@ def create_app(config: Optional[config_mod.Config] = None) -> Flask:
     )
     # Boot diagnostic: say loudly whether the API keys from .env /
     # env vars were actually picked up, so "the AI didn't work" is
-    # diagnosable from the console alone. Prints provider names
-    # only — never key material.
+    # diagnosable from the log alone. Logs provider names only —
+    # never key material.
     _t = app.config["AFTERWORD_LLM_PROVIDERS"]["transcript"]
     _x = app.config["AFTERWORD_LLM_PROVIDERS"]["text"]
-    print(
-        f"[LR ] LLM providers: transcript={_t.name}"
-        + (
-            "  <- no AFTERWORD_TRANSCRIPTION_API_KEY set!"
-            if _t.name == "noop" else ""
-        )
-        + f", text={_x.name}"
-        + (
-            "  <- no AFTERWORD_TEXT_API_KEY set!"
-            if _x.name == "noop" else ""
-        ),
-        flush=True,
-    )
+    log.info("LLM providers: transcript=%s, text=%s", _t.name, _x.name)
+    if _t.name == "noop":
+        log.warning("AFTERWORD_TRANSCRIPTION_API_KEY is not set; recordings "
+                    "will not be transcribed")
+    if _x.name == "noop":
+        log.warning("AFTERWORD_TEXT_API_KEY is not set; recordings will not "
+                    "be summarised")
     auth.init_app(app)
     # Refuse oversized bodies before reading them (the upload handlers
     # used to buffer the whole body, then check). The margin covers
@@ -119,15 +118,14 @@ def create_app(config: Optional[config_mod.Config] = None) -> Flask:
         }), 413
 
     if not transcode.ffmpeg_available(cfg.ffmpeg_path):
-        print(
-            f"[LR ] WARNING: ffmpeg not found at {cfg.ffmpeg_path!r}; "
-            "non-AAC uploads (iPhone M4A, etc.) will be rejected. "
-            "Install ffmpeg or set AFTERWORD_FFMPEG_PATH.",
-            flush=True,
+        log.warning(
+            "ffmpeg not found at %r; non-AAC uploads (iPhone M4A, etc.) "
+            "will be rejected. Install ffmpeg or set AFTERWORD_FFMPEG_PATH.",
+            cfg.ffmpeg_path,
         )
     else:
         v = transcode.ffmpeg_version(cfg.ffmpeg_path)
-        print(f"[LR ] ffmpeg: {v}", flush=True)
+        log.info("ffmpeg: %s", v)
 
     # Background pipeline worker + boot sweep. Always started: in
     # tests the queue stays empty (sync mode runs pipelines inline
@@ -146,8 +144,8 @@ def create_app(config: Optional[config_mod.Config] = None) -> Flask:
     calendar_feeds.start_scheduler(app)
     try:
         sweep_stranded_sessions(app)
-    except Exception as exc:  # pragma: no cover
-        print(f"[LR ] boot sweep error: {exc!r}", flush=True)
+    except Exception:  # pragma: no cover
+        log.exception("boot sweep failed")
 
     @app.context_processor
     def _inject_globals():
@@ -175,11 +173,13 @@ def create_app(config: Optional[config_mod.Config] = None) -> Flask:
 
 def main() -> None:
     cfg = config_mod.load()
+    logsetup.setup()
     problem = config_mod.exposure_problem(cfg)
     if problem:
-        raise SystemExit(f"[LR ] NOT STARTING: {problem}")
+        log.error("not starting: %s", problem)
+        raise SystemExit(2)
     app = create_app(cfg)
-    print(f"[LR ] listening on http://{cfg.host}:{cfg.port}", flush=True)
+    log.info("development server on http://%s:%s", cfg.host, cfg.port)
     app.run(host=cfg.host, port=cfg.port, debug=False, threaded=True)
 
 

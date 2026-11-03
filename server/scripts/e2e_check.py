@@ -50,7 +50,7 @@ def make_wav(payload: bytes, sr: int = 22050, ch: int = 1, bps: int = 32) -> byt
 def make_aac(payload: bytes) -> bytes:
     """Canonical ADTS AAC chunk (as the device would upload)."""
     from services import transcode
-    with tempfile.TemporaryDirectory(prefix="lr-e2e-enc-") as d:
+    with tempfile.TemporaryDirectory(prefix="afterword-e2e-enc-") as d:
         src = Path(d) / "in.wav"
         src.write_bytes(make_wav(payload))
         dst = Path(d) / "out.aac"
@@ -149,7 +149,7 @@ def main() -> int:
     import config as config_mod
     from app import create_app
 
-    tmp = Path(tempfile.mkdtemp(prefix="lr-e2e-"))
+    tmp = Path(tempfile.mkdtemp(prefix="afterword-e2e-"))
     cfg = config_mod.Config(
         data_dir=tmp, host="127.0.0.1", port=0,
         transcription_api_key="", text_api_key="",

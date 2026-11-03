@@ -2,6 +2,7 @@
 """
 from __future__ import annotations
 
+import logging
 import queue
 import threading
 
@@ -9,6 +10,8 @@ from flask import Flask
 
 import storage
 from services import processing
+
+log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -136,18 +139,15 @@ def _start_pipeline_worker(app: Flask) -> threading.Thread:
                     llm_provider=providers.get("text"),
                     resume=True,
                 )
-            except Exception as exc:  # pragma: no cover
-                print(
-                    f"[LR ] background pipeline error: {exc!r}",
-                    flush=True,
-                )
+            except Exception:  # pragma: no cover
+                log.exception("pipeline failed for %s", session_id)
             finally:
                 with _PIPELINE_LOCK:
                     _PIPELINES_IN_FLIGHT.discard(session_id)
                 q.task_done()
 
     t = threading.Thread(
-        target=_worker, name="lr-pipeline-worker", daemon=True,
+        target=_worker, name="afterword-pipeline-worker", daemon=True,
     )
     t.start()
     return t
@@ -193,11 +193,7 @@ def sweep_stranded_sessions(app: Flask) -> list[str]:
         if _enqueue_pipeline(app, sess.id):
             requeued.append(sess.id)
     if requeued:
-        print(
-            f"[LR ] boot sweep: requeued {len(requeued)} stranded "
-            "session(s)",
-            flush=True,
-        )
+        log.info("boot sweep: requeued %d stranded session(s)", len(requeued))
     return requeued
 
 
