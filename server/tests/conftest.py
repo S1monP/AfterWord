@@ -63,7 +63,7 @@ class LRTestCase(unittest.TestCase):
             pass
         # Best-effort cleanup. On Windows, WAL files may still be locked
         # briefly; ignore failures.
-        for attempt in range(3):
+        for _attempt in range(3):
             try:
                 shutil.rmtree(self._tmpdir)
                 break

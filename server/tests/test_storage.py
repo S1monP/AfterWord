@@ -15,7 +15,6 @@ from tests.conftest import LRTestCase
 class InitialiseTests(LRTestCase):
 
     def test_initialise_creates_dirs(self) -> None:
-        store = self.app.config["AFTERWORD_STORAGE"]
         self.assertTrue(self._tmpdir.exists())
         self.assertTrue((self._tmpdir / "db").exists())
         self.assertTrue((self._tmpdir / "sessions").exists())

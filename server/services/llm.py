@@ -736,7 +736,7 @@ class TranscriptionProvider(LLMProvider):
         if not files:
             return [(audio_path, 0.0)]
         if starts is not None and len(starts) == len(files):
-            return list(zip(files, starts))
+            return list(zip(files, starts, strict=True))
         offset = 0.0
         for p in files:
             pieces.append((p, offset))

@@ -1034,7 +1034,7 @@ class DefaultProvidersTests(unittest.TestCase):
         self.assertEqual(capture["url"], llm.OPENROUTER_CHAT_URL)
 
     def test_get_provider_default(self):
-        providers = llm.default_providers(
+        llm.default_providers(
             transcription_key="", text_key="",
         )
         p = llm.get_provider("transcript")

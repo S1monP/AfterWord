@@ -136,9 +136,9 @@ class CoursesServiceTests(LRTestCase):
         self.assertIsNone(self._service().get("nope"))
 
     def test_list_orders_by_sort_order_then_created(self):
-        a = self._service().create(name="Z", sort_order=5)
-        b = self._service().create(name="A", sort_order=0)
-        c = self._service().create(name="M", sort_order=0)
+        self._service().create(name="Z", sort_order=5)
+        self._service().create(name="A", sort_order=0)
+        self._service().create(name="M", sort_order=0)
         names = [x.name for x in self._service().list()[0]]
         self.assertEqual(names, ["A", "M", "Z"])
 

@@ -154,7 +154,7 @@ class SearchApiTests(_Base):
             "[02:00] Speaker 1: Lenses again."))
         task = TasksService(self.store).create(
             title="Revise lenses", kind="deadline", due_at="2026-01-20T17:00:00Z")
-        event = EventsService(self.store).create(
+        EventsService(self.store).create(
             title="Lens lab", kind="other", starts_at="2026-01-21T09:00:00Z")
         body = self.client.get("/api/v1/search?q=lens").get_json()
         groups = {g["type"]: g for g in body["groups"]}

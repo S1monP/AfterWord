@@ -227,14 +227,14 @@ class TasksServiceTests(LRTestCase):
 
     def test_get_returns_todo(self):
         create = self._create(title="A").get_json()
-        resp = self.client.get(f"/api/v1/tasks/{create["task"]['id']}")
+        resp = self.client.get(f"/api/v1/tasks/{create['task']['id']}")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.get_json()["task"]["title"], "A")
 
-    def test_update_partial(self):
+    def test_update_partial_via_api(self):
         create = self._create(title="A", priority="low").get_json()
         resp = self.client.patch(
-            f"/api/v1/tasks/{create["task"]['id']}",
+            f"/api/v1/tasks/{create['task']['id']}",
             data=json.dumps({"title": "B", "priority": "high"}),
             content_type="application/json",
         )
@@ -255,7 +255,7 @@ class TasksServiceTests(LRTestCase):
     def test_update_validates(self):
         create = self._create(title="A").get_json()
         resp = self.client.patch(
-            f"/api/v1/tasks/{create["task"]['id']}",
+            f"/api/v1/tasks/{create['task']['id']}",
             data=json.dumps({"title": ""}),
             content_type="application/json",
         )
@@ -285,7 +285,7 @@ class TasksServiceTests(LRTestCase):
     def test_status_missing_field(self):
         create = self._create(title="A").get_json()
         resp = self.client.post(
-            f"/api/v1/tasks/{create["task"]['id']}/status",
+            f"/api/v1/tasks/{create['task']['id']}/status",
             data=json.dumps({}),
             content_type="application/json",
         )
@@ -302,7 +302,7 @@ class TasksServiceTests(LRTestCase):
     def test_status_bad_value(self):
         create = self._create(title="A").get_json()
         resp = self.client.post(
-            f"/api/v1/tasks/{create["task"]['id']}/status",
+            f"/api/v1/tasks/{create['task']['id']}/status",
             data=json.dumps({"status": "weird"}),
             content_type="application/json",
         )
@@ -571,7 +571,7 @@ class TasksDueAtAPITests(LRTestCase):
     def test_api_update_due_at(self):
         create = self._create(title="A").get_json()
         resp = self.client.patch(
-            f"/api/v1/tasks/{create["task"]['id']}",
+            f"/api/v1/tasks/{create['task']['id']}",
             data=json.dumps({"due_at": "2027-06-15"}),
             content_type="application/json",
         )
@@ -583,7 +583,7 @@ class TasksDueAtAPITests(LRTestCase):
         create = self._create(title="A", due_at="2027-06-15").get_json()
         self.assertIsNotNone(create["task"]["due_at"])
         resp = self.client.patch(
-            f"/api/v1/tasks/{create["task"]['id']}",
+            f"/api/v1/tasks/{create['task']['id']}",
             data=json.dumps({"due_at": None}),
             content_type="application/json",
         )
@@ -593,7 +593,7 @@ class TasksDueAtAPITests(LRTestCase):
     def test_api_update_omitted_due_at_preserves(self):
         create = self._create(title="A", due_at="2027-06-15").get_json()
         resp = self.client.patch(
-            f"/api/v1/tasks/{create["task"]['id']}",
+            f"/api/v1/tasks/{create['task']['id']}",
             data=json.dumps({"title": "B"}),
             content_type="application/json",
         )

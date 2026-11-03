@@ -176,7 +176,7 @@ class EventsServiceTests(LRTestCase):
 
     def test_list_filter_by_kind(self):
         a = self._create(title="Lecture", kind="lecture", ends_at=None)
-        b = self._create(title="Meeting", kind="meeting", ends_at=None)
+        self._create(title="Meeting", kind="meeting", ends_at=None)
         events, total = self._service().list(kind="lecture")
         self.assertEqual(total, 1)
         self.assertEqual(events[0].id, a.id)
