@@ -46,7 +46,10 @@ transcribed.
 .venv\Scripts\python.exe serve.py    # production (waitress)
 ```
 
-Then open `http://localhost:8000`. For the device, `SERVER_URL` in the
+Then open `http://localhost:8000`. By default the server only listens on
+this machine. For the recorder (or a phone) to reach it, set
+`AFTERWORD_HOST=0.0.0.0` and a password (`AFTERWORD_WEB_PASSWORD`): the
+server refuses to listen on the network without one. `SERVER_URL` in the
 firmware's `secrets.h` must point at this machine's LAN address
 (`ipconfig`), and on Windows the network must be set to **Private** or the
 firewall blocks port 8000.
@@ -73,7 +76,7 @@ Relative paths are taken from the `server` folder.
 | Variable | Default | Purpose |
 |---|---|---|
 | `AFTERWORD_DATA_DIR` | `./data` | Database and audio |
-| `AFTERWORD_HOST` / `AFTERWORD_PORT` | `0.0.0.0` / `8000` | Bind address |
+| `AFTERWORD_HOST` / `AFTERWORD_PORT` | `127.0.0.1` / `8000` | Bind address; anything but loopback needs a password |
 | `AFTERWORD_TRANSCRIPTION_API_KEY` | — | OpenRouter key for transcription |
 | `AFTERWORD_TEXT_API_KEY` | — | OpenRouter key for the text model |
 | `AFTERWORD_TRANSCRIPTION_MODEL` | `microsoft/mai-transcribe-2` | Speaker labels need `verbose_json` support |
@@ -91,6 +94,7 @@ Relative paths are taken from the `server` folder.
 | `AFTERWORD_WEB_PASSWORD` | off | Login for the web UI and the non-device API |
 | `AFTERWORD_SECRET` | generated | Login cookie key (else kept in `data/db/secret_key`) |
 | `AFTERWORD_COOKIE_SECURE` | off | Login cookie over HTTPS only |
+| `AFTERWORD_ALLOW_OPEN` | off | Listen on the network without a password (trusted networks only) |
 | `AFTERWORD_TRUSTED_PROXY` | off | `serve.py`: trust X-Forwarded-* from this address |
 
 Settings with the old `LR_` prefix (`LR_TEXT_API_KEY` and so on) are
@@ -268,6 +272,9 @@ Deleting `data/` resets the server.
 
 - **The device cannot connect:** check `SERVER_URL`, the Windows network
   profile (Private), and that the server listens on `0.0.0.0`.
+- **`NOT STARTING: AFTERWORD_HOST=0.0.0.0 ...`:** the server is set to be
+  reachable from other devices but has no password; set
+  `AFTERWORD_WEB_PASSWORD`.
 - **`Provider returned 400` on transcription:** the model rejected the
   audio or an option. MP3 is accepted by the default model; check
   `AFTERWORD_TRANSCRIPTION_PROVIDER_OPTIONS` when changing models.

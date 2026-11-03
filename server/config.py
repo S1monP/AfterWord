@@ -7,6 +7,7 @@ tests) without risk of import side effects.
 from __future__ import annotations
 
 import codecs
+import ipaddress
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -129,6 +130,7 @@ class Config:
     web_password: str = ""      # one password for the web UI
     secret_key: str = ""        # session cookie key; empty = generated + kept
     cookie_secure: bool = False  # True behind HTTPS (Caddy)
+    allow_open: bool = False    # serve beyond this PC without a password
 
     # Convenience paths derived from data_dir.
     @property
@@ -159,7 +161,7 @@ def load() -> Config:
     apply_legacy_names()
     return Config(
         data_dir=_resolve_dir(_env("AFTERWORD_DATA_DIR", default="data"), here),
-        host=_env("AFTERWORD_HOST", default="0.0.0.0"),
+        host=_env("AFTERWORD_HOST", default="127.0.0.1"),
         port=_env_int("AFTERWORD_PORT", 8000),
         # Both providers go through OpenRouter; the same key works
         # for both.
@@ -170,5 +172,39 @@ def load() -> Config:
         device_token=_env("AFTERWORD_DEVICE_TOKEN"),
         web_password=_env("AFTERWORD_WEB_PASSWORD"),
         secret_key=_env("AFTERWORD_SECRET"),
-        cookie_secure=_env("AFTERWORD_COOKIE_SECURE").lower() in ("1", "true", "yes", "on"),
+        cookie_secure=_flag("AFTERWORD_COOKIE_SECURE"),
+        allow_open=_flag("AFTERWORD_ALLOW_OPEN"),
+    )
+
+
+def _flag(key: str) -> bool:
+    return _env(key).strip().lower() in ("1", "true", "yes", "on")
+
+
+def is_loopback(host: str) -> bool:
+    """True when ``host`` only accepts connections from this machine."""
+    host = host.strip().strip("[]")
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def exposure_problem(cfg: Config) -> str:
+    """Why the server must not start with ``cfg``, or "" when it may.
+
+    Listening beyond this machine (e.g. ``0.0.0.0``) without a web
+    password would leave every recording open to the network, so it
+    needs ``AFTERWORD_WEB_PASSWORD``, or ``AFTERWORD_ALLOW_OPEN=1`` as a
+    deliberate choice on a trusted network.
+    """
+    if is_loopback(cfg.host) or cfg.web_password or cfg.allow_open:
+        return ""
+    return (
+        f"AFTERWORD_HOST={cfg.host} makes the server reachable from other "
+        "devices, but AFTERWORD_WEB_PASSWORD is not set. Set a password, "
+        "use AFTERWORD_HOST=127.0.0.1, or set AFTERWORD_ALLOW_OPEN=1 to "
+        "run without a password on a network you trust."
     )

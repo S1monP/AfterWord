@@ -57,9 +57,13 @@ def _ports(cfg) -> list[int]:
 def main() -> None:
     cfg = config_mod.load()
     _log_to_file()
+    problem = config_mod.exposure_problem(cfg)
+    if problem:
+        print(f"[LR ] NOT STARTING: {problem}", flush=True)
+        sys.exit(2)
     app = create_app(cfg)
-    if not cfg.web_password:
-        print("[LR ] WARNING: AFTERWORD_WEB_PASSWORD is not set; the web UI is open "
+    if not cfg.web_password and not config_mod.is_loopback(cfg.host):
+        print("[LR ] WARNING: AFTERWORD_ALLOW_OPEN is set; the web UI is open "
               "to anyone who can reach the server.", flush=True)
     proxy = os.environ.get("AFTERWORD_TRUSTED_PROXY", "").strip()
     extra = {}

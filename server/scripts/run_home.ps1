@@ -8,6 +8,8 @@ $ErrorActionPreference = "Stop"
 $server = Split-Path -Parent $PSScriptRoot
 Set-Location $server
 
+# Reachable from the network, so AFTERWORD_WEB_PASSWORD must be set in .env.
+$env:AFTERWORD_HOST = "0.0.0.0"
 $env:AFTERWORD_MDNS_NAME = "afterword"     # http://afterword.local (mdns.py)
 $env:AFTERWORD_EXTRA_PORTS = "80"          # so the address needs no ":8000"
 $env:AFTERWORD_LOG_FILE = "data/server.log"

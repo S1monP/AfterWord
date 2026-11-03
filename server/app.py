@@ -175,6 +175,9 @@ def create_app(config: Optional[config_mod.Config] = None) -> Flask:
 
 def main() -> None:
     cfg = config_mod.load()
+    problem = config_mod.exposure_problem(cfg)
+    if problem:
+        raise SystemExit(f"[LR ] NOT STARTING: {problem}")
     app = create_app(cfg)
     print(f"[LR ] listening on http://{cfg.host}:{cfg.port}", flush=True)
     app.run(host=cfg.host, port=cfg.port, debug=False, threaded=True)

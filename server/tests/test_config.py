@@ -159,5 +159,39 @@ class LegacyNamesTests(unittest.TestCase):
             self.assertEqual(config_mod.load().port, 9123)
 
 
+class ExposureTests(unittest.TestCase):
+    """Listening beyond this machine needs a password (or an explicit opt-out)."""
+
+    def cfg(self, host: str, **kw) -> config_mod.Config:
+        return config_mod.Config(
+            data_dir=Path("."), host=host, port=8000, transcription_api_key="",
+            text_api_key="", ffmpeg_path="ffmpeg", max_upload_bytes=1, **kw,
+        )
+
+    def test_loopback_needs_no_password(self) -> None:
+        for host in ("127.0.0.1", "localhost", "::1", "[::1]", "127.0.0.2"):
+            self.assertEqual(config_mod.exposure_problem(self.cfg(host)), "", host)
+
+    def test_network_without_password_is_refused(self) -> None:
+        for host in ("0.0.0.0", "::", "192.168.1.20", "afterword.local"):
+            problem = config_mod.exposure_problem(self.cfg(host))
+            self.assertIn("AFTERWORD_WEB_PASSWORD", problem, host)
+
+    def test_network_with_password_is_allowed(self) -> None:
+        self.assertEqual(
+            config_mod.exposure_problem(self.cfg("0.0.0.0", web_password="pw")), "")
+
+    def test_allow_open_is_an_explicit_opt_out(self) -> None:
+        self.assertEqual(
+            config_mod.exposure_problem(self.cfg("0.0.0.0", allow_open=True)), "")
+
+    def test_default_host_is_this_machine(self) -> None:
+        with mock.patch.object(config_mod, "_load_dotenv", lambda path: None), \
+                mock.patch.dict(os.environ, {}, clear=True):
+            cfg = config_mod.load()
+        self.assertEqual(cfg.host, "127.0.0.1")
+        self.assertFalse(cfg.allow_open)
+
+
 if __name__ == "__main__":
     unittest.main()
