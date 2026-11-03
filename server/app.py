@@ -78,7 +78,7 @@ def create_app(config: Optional[config_mod.Config] = None) -> Flask:
     )
     # LLM providers. The factory reads ``AFTERWORD_TRANSCRIPTION_API_KEY``
     # / ``AFTERWORD_TEXT_API_KEY`` from the process env (a `.env` file in
-    # the Server directory is loaded by ``config.load()``, which also
+    # the server directory is loaded by ``config.load()``, which also
     # accepts the old ``LR_*`` names). Absent keys yield no-op
     # providers so the server can boot and the API surface still
     # works (it just returns no-op stub data).

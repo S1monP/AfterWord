@@ -1,7 +1,7 @@
 // =============================================================================
 //  sync.h  --  uploads finished sessions to the server, then deletes them.
 //
-//  Protocol (Server/README.md, "ESP32 device protocol contract"):
+//  Protocol (server/README.md, "Device protocol"):
 //    POST /api/v1/sessions                    announce {id, expected_count, ...}
 //    PUT  /api/v1/sessions/<id>/chunks/<k>    raw ADTS bytes, k = 1..N
 //    POST /api/v1/sessions/<id>/finish        200 stitched | already_ready

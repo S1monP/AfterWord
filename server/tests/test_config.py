@@ -91,7 +91,7 @@ class LoadDotenvTests(unittest.TestCase):
 
 
 class ResolveDirTests(unittest.TestCase):
-    """AFTERWORD_DATA_DIR: relative paths belong to the Server folder."""
+    """AFTERWORD_DATA_DIR: relative paths belong to the server folder."""
 
     def test_relative_path_is_taken_from_base_not_cwd(self) -> None:
         with tempfile.TemporaryDirectory() as base, \

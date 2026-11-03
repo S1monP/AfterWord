@@ -104,7 +104,7 @@ def _env_int(key: str, default: int) -> int:
 
 def _resolve_dir(raw: str, base: Path) -> Path:
     """``raw`` as an absolute path; relative paths are taken from
-    ``base`` (the Server folder), not the current directory, so
+    ``base`` (the server folder), not the current directory, so
     starting ``app.py`` from elsewhere cannot create a second,
     empty data dir."""
     p = Path(raw).expanduser()

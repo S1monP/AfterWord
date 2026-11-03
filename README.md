@@ -15,7 +15,7 @@ Hardware/            the recorder
 ├── firmware/        ESP-IDF v6.1 project (C)
 ├── tools/           serial logger, chunk-seam and audio checks
 └── README.md        wiring, build/flash, using the device, test plan
-Server/              the server
+server/              the server
 └── README.md        setup, configuration, API, deployment
 ```
 
@@ -24,7 +24,7 @@ Server/              the server
 **Server** (Windows):
 
 ```powershell
-cd Server
+cd server
 setup.cmd                          # venv, dependencies, ffmpeg
 copy .env.example .env             # then add your OpenRouter key
 .venv\Scripts\python.exe app.py    # http://localhost:8000
@@ -41,7 +41,7 @@ idf.py -p COM3 flash monitor
 ```
 
 Details: [Hardware/README.md](Hardware/README.md) and
-[Server/README.md](Server/README.md).
+[server/README.md](server/README.md).
 
 ## Status
 

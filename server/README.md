@@ -22,7 +22,7 @@ one search box across all of it.
 Needs Python 3.11 or newer and ffmpeg.
 
 ```powershell
-cd Server
+cd server
 setup.cmd                     # Windows: venv, pip install, ffmpeg via winget
 ```
 
@@ -67,8 +67,8 @@ Use one process: the AI pipeline worker runs inside it.
 
 ## Configuration
 
-All settings are environment variables, read from `Server/.env` too.
-Relative paths are taken from the `Server` folder.
+All settings are environment variables, read from `server/.env` too.
+Relative paths are taken from the `server` folder.
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -124,7 +124,7 @@ To try the web UI with made-up data, without touching real data:
 ## Layout
 
 ```
-Server/
+server/
 ├── app.py            create_app(): wiring; python app.py = dev server
 ├── serve.py          production entry point (waitress)
 ├── config.py         settings from env / .env

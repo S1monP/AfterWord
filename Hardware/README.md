@@ -2,7 +2,7 @@
 
 ESP32-S3 lecture recorder (ESP32-S3-DevKitC-1 N16R8). Records from an
 INMP441 microphone, encodes AAC live, writes 5-minute chunks to the SD card,
-and uploads them to the server in `../Server` once on Wi-Fi. Local files are
+and uploads them to the server in `../server` once on Wi-Fi. Local files are
 deleted only after the server confirms.
 
 The firmware is the ESP-IDF project in [`firmware/`](firmware/).
@@ -129,7 +129,7 @@ clipping and noise in recordings.
    so there is usually nothing to trim; a `trimming` line appears only
    when the cut lands mid-save. After the cold boot, expect
    `clock set by NTP` within a few seconds of `connected`.
-4. **Upload.** Start `python app.py` in `Server/`. `SERVER_URL` in
+4. **Upload.** Start `python app.py` in `server/`. `SERVER_URL` in
    `secrets.h` must match the PC's IP (`ipconfig`), and the Windows network
    must be Private (firewall). End a session: it should upload, flash
    green, and appear in the web UI. Include a session with full 5-minute

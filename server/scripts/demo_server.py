@@ -5,7 +5,7 @@ Throwaway data dir (%TEMP%/afterword-demo-data, rebuilt each start), no AI
 keys, no calendar syncing, and "now" pinned to today 13:42 local so the
 schedules look like a normal day.
 
-    cd Server
+    cd server
     .venv\Scripts\python.exe scripts\demo_server.py
 """
 import dataclasses

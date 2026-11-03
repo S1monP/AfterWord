@@ -1,6 +1,6 @@
 """Storage-layer unit tests.
 
-Run from the Server directory: ``python -m unittest discover -s tests -v``.
+Run from the server directory: ``python -m unittest discover -s tests -v``.
 """
 from __future__ import annotations
 

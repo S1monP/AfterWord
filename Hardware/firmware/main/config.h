@@ -77,7 +77,7 @@
 // -----------------------------------------------------------------------------
 //  Server / sync
 // -----------------------------------------------------------------------------
-// Local development: the PC running `python app.py` in Server/ (`ipconfig`
+// Local development: the PC running `python app.py` in server/ (`ipconfig`
 // shows its IPv4 address).  For the VPS set an https:// URL in secrets.h;
 // certificates are checked against the built-in CA bundle.
 #ifndef SERVER_URL

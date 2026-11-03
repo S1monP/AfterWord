@@ -1,5 +1,5 @@
-# Repo root: AI_NoteTaker monorepo (Server/ + Hardware/).
-# Server/ has its own .gitignore for Python/data rules.
+# Repo root: AI_NoteTaker monorepo (server/ + Hardware/).
+# server/ has its own .gitignore for Python/data rules.
 
 # Editor / OS
 *.code-workspace
