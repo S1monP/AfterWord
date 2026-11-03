@@ -106,17 +106,6 @@ uv run --no-project --with ziglang python -m ziglang cc -O2 -Wall -I ../main tes
 .\test_adts.exe [some\chunk.aac ...]
 ```
 
-**Norton Antivirus:** Norton inspects HTTPS and re-signs it with its own
-certificate, which ESP-IDF's Python tools reject. The first build downloads
-components, so if you see `CERTIFICATE_VERIFY_FAILED`, set
-
-```powershell
-$env:REQUESTS_CA_BUNDLE = 'C:\Espressif\tools\ca-bundle-norton.pem'
-```
-
-(the standard CA list plus Norton's certificate), or turn off Norton's
-"encrypted connection scanning".
-
 ## Test plan
 
 Watch the monitor output for each step. [`tools/`](tools/) has a serial
