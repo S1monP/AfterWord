@@ -28,5 +28,3 @@ Hardware/firmware/main/secrets.h
 Hardware/firmware/test/*.exe
 Hardware/firmware/test/*.tmp
 
-# Impeccable design skill: local working files (early drafts, state)
-.impeccable/
