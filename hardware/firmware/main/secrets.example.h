@@ -6,8 +6,12 @@
 // =============================================================================
 #pragma once
 
-// Shared upload token; must match the server once server auth is enabled.
+// Shared upload token; must match AFTERWORD_DEVICE_TOKEN on the server.
 #define DEVICE_TOKEN   "change-me"
 
-// Override the server, e.g. the VPS:
+// Where the server is: the PC on your network, or a VPS.
+// #define SERVER_URL  "http://192.168.1.10:8000"
 // #define SERVER_URL  "https://notes.example.com"
+
+// Password of the Wi-Fi setup portal (8 to 63 characters).
+#define AP_PASSWORD    "change-me-too"

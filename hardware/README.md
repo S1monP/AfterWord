@@ -63,8 +63,8 @@ A long press counts once the button has been held for 1 s: the LED changes
 while it is still down, then let go.
 
 - **Wi-Fi setup:** hold the button while powering on (or boot with no
-  saved networks). Join `AI_NoteTaker-Setup` (password `afterword-setup`), and the
-  setup page opens. Networks saved by the Arduino firmware carry over.
+  saved networks). Join `AfterWord-Setup` with the password set as
+  `AP_PASSWORD` in `secrets.h`, and the setup page opens. Networks saved by the Arduino firmware carry over.
   The ESP32-S3 only uses **2.4 GHz** networks (for an iPhone hotspot, turn
   on Maximise Compatibility).
 - **Offline:** recording never needs Wi-Fi. Without NTP time, sessions are

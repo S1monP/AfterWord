@@ -1,5 +1,5 @@
 // =============================================================================
-//  portal.h  --  WiFi setup portal (AP "AI_NoteTaker-Setup" + captive pages).
+//  portal.h  --  WiFi setup portal (its own AP + captive pages).
 // =============================================================================
 #pragma once
 

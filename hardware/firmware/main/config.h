@@ -66,8 +66,14 @@
 //  WiFi
 // -----------------------------------------------------------------------------
 #define MAX_SAVED_NETWORKS      5
-#define AP_SSID                 "AI_NoteTaker-Setup"
+// The setup portal's own network. Set your own password in secrets.h
+// (WPA2: 8 to 63 characters); the default is only a placeholder.
+#ifndef AP_SSID
+#define AP_SSID                 "AfterWord-Setup"
+#endif
+#ifndef AP_PASSWORD
 #define AP_PASSWORD             "afterword-setup"
+#endif
 #define AP_PORTAL_TIMEOUT_S     300
 #define WIFI_TRY_MS             10000       // per network, per attempt
 #define WIFI_RETRY_INTERVAL_MS  60000       // pause between full rounds
