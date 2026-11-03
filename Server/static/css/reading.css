@@ -1,6 +1,5 @@
-/* Reading pages: Lectures, Meetings, Other (REDESIGN.md sections 5, 6;
-   phone: section 14). A list column and a reader with the player, then
-   Summary and Transcript side by side, each scrolling on its own. */
+/* Reading pages: Lectures, Meetings, Other. A list column and a reader with
+   the player, then Summary and Transcript side by side, each scrolling on its own. */
 .rpage { flex: 1; min-height: 0; display: grid; grid-template-columns: var(--list) minmax(0, 1fr); }
 
 .lcol { display: flex; flex-direction: column; min-height: 0; background: var(--panel); border-right: 1px solid var(--seam); }

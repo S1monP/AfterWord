@@ -25,7 +25,7 @@ bp = Blueprint("pages", __name__)
 # --- Web UI ----------------------------------------------------------
 @bp.get("/")
 def ui_dashboard() -> Any:
-    """Home (REDESIGN.md section 3; phone: Home I, section 14).
+    """Home.
     ``?week=`` moves the week schedule by that many weeks."""
     from web.home import home_context
     try:
@@ -123,7 +123,7 @@ def _iso_date(raw: str | None):
 
 @bp.get("/calendar")
 def ui_calendar() -> Any:
-    """Calendar (REDESIGN.md section 8; phone: section 14).
+    """Calendar.
     ``?view=month|week``, ``?date=`` the month or week shown (today by
     default), ``?day=`` the chosen day: the day panel on desktop, the
     full-screen day on the phone."""

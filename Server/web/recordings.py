@@ -1,6 +1,5 @@
-"""The reading pages: Lectures, Meetings and Other (REDESIGN.md sections
-5 and 6; phone: section 14). A list column and a reader; on the phone
-the list fills the screen and a recording opens full screen.
+"""The reading pages: Lectures, Meetings and Other. A list column and a
+reader; on the phone the list fills the screen and a recording opens full screen.
 """
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-/* Simple pages (REDESIGN.md section 10): course settings, upload and
+/* Simple pages: course settings, upload and
    login. One column on the panel colour. */
 .spage { flex: 1; min-height: 0; overflow-y: auto; background: var(--panel); }
 .spage__inner { max-width: 680px; padding: 22px 28px 48px; }

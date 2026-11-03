@@ -1,4 +1,4 @@
-/* Notes (REDESIGN.md section 7; phone: section 14). The list column,
+/* Notes. The list column,
    player and transcript lines come from reading.css; this is the editor:
    one live editor, formatting shown as you type, stored as Markdown. */
 .lcol__new { margin-left: auto; height: 30px; padding: 0 10px; font-size: 13px; }

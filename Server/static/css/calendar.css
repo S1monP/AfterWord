@@ -1,4 +1,4 @@
-/* Calendar (REDESIGN.md section 8; phone: section 14). Month or Week on
+/* Calendar. Month or Week on
    the left, the chosen day in a panel on the right; on the phone the
    month shows dots and rings, and a day opens as its own screen. */
 .cal { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--panel); }

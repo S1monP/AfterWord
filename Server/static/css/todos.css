@@ -1,4 +1,4 @@
-/* To-dos and Deadlines (REDESIGN.md section 9; phone: section 14). Two
+/* To-dos and Deadlines. Two
    panels side by side on desktop, a switch between them on the phone.
    Nothing here may scroll sideways. */
 .tpage { flex: 1; min-height: 0; display: flex; flex-direction: column; }

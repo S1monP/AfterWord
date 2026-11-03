@@ -1,4 +1,4 @@
-/* The app shell (REDESIGN.md sections 2 and 14).
+/* The app shell.
 
    Desktop (>= 900px): the window is a fixed frame; only panels scroll.
    Home shows the full sidebar (.nav--home); every other page the 60px

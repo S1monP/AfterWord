@@ -1,4 +1,4 @@
-"""What Home shows (REDESIGN.md section 3, phone: section 14, Home I).
+"""What Home shows.
 
 Everything is worked out here, in local time, so the template only lays
 it out: the week and today's schedule with each event's status, the next

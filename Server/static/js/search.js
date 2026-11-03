@@ -1,4 +1,4 @@
-/* Search (REDESIGN.md section 4): the same results in Home's dropdown,
+/* Search: the same results in Home's dropdown,
    the popup over any other page (rail magnifier or "/"), and the phone's
    full-screen search. Results come from /api/v1/search, grouped; each
    opens the item at its moment. */

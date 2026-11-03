@@ -1,4 +1,4 @@
-"""The Notes page (REDESIGN.md section 7; phone: section 14).
+"""The Notes page.
 
 Notes and voice memos are one thing: a voice memo is a note with its
 recording attached (source 'voice_memo', source_ref = the recording).

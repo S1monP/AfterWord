@@ -2,7 +2,7 @@
    live in components.css, the frame in shell.css. */
 
 /* ======================================================================
-   Home (REDESIGN.md section 3; phone: Home I, section 14)
+   Home
    ====================================================================== */
 .home { flex: 1; min-height: 0; display: grid; grid-template-rows: var(--topbar) minmax(0, 1fr); }
 .hp { display: none; }

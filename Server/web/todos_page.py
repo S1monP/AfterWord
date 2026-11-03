@@ -1,4 +1,4 @@
-"""To-dos and Deadlines (REDESIGN.md section 9; phone: section 14).
+"""To-dos and Deadlines.
 
 Two lists, each in groups: to-dos by when they are due (Overdue, Today,
 Upcoming, No date) with High urgency first in a group, deadlines by week

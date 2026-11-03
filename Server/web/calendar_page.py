@@ -1,4 +1,4 @@
-"""The Calendar page (REDESIGN.md section 8; phone: section 14).
+"""The Calendar page.
 
 Month or Week, stepping by month or week; a day panel on the right on
 desktop (the chosen day, today by default), and on the phone a chosen
