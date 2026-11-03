@@ -163,7 +163,7 @@ def api_finish_session(session_id: str) -> Any:
             "error": result.reason,
             "detail": sess.status_detail,
         }), 500
-    if current_app.config.get("LR_PIPELINE_BACKGROUND", True):
+    if current_app.config.get("AFTERWORD_PIPELINE_BACKGROUND", True):
         _enqueue_pipeline(current_app._get_current_object(), session_id)
     else:
         # Deterministic mode (used by tests): run inline so the
@@ -258,7 +258,7 @@ def api_transcribe_session(session_id: str) -> Any:
                 }), 409
         # Run the pipeline synchronously. Uses the env-var-driven
         # providers unless the test harness replaced them via
-        # ``app.config['LR_LLM_PROVIDERS']``.
+        # ``app.config['AFTERWORD_LLM_PROVIDERS']``.
         result = processing.run_post_finish_pipeline(
             store, session_id,
             transcript_provider=current_app_transcript_provider(),
@@ -373,7 +373,7 @@ def api_classify_session(session_id: str) -> Any:
 
     Looks up the session's most recent ``transcript`` artifact
     and asks the configured text model (via OpenRouter when
-    ``LR_TEXT_API_KEY`` is set, no-op otherwise) for a
+    ``AFTERWORD_TEXT_API_KEY`` is set, no-op otherwise) for a
     kind + confidence. On success the kind is persisted on
     the session.
 
@@ -463,7 +463,7 @@ def api_upload_audio() -> Any:
       - file: the audio bytes (any format the browser or ffmpeg can read)
       - title: optional string; defaults to rec_YYYY-MM-DDTHHMM
     """
-    cfg = current_app.config["LR_CONFIG"]
+    cfg = current_app.config["AFTERWORD_CONFIG"]
     store = current_app_storage()
 
     if "file" not in request.files:
@@ -528,7 +528,7 @@ def api_upload_audio() -> Any:
                         f"this file is {fmt.kind} and needs to be "
                         f"transcoded, but ffmpeg was not found at "
                         f"{cfg.ffmpeg_path!r}. Install ffmpeg or set "
-                        "LR_FFMPEG_PATH."
+                        "AFTERWORD_FFMPEG_PATH."
                     ),
                 }), 503
             work_dir = cfg.inbox_dir / f"work-{inbox_token}"
@@ -576,12 +576,12 @@ def api_upload_audio() -> Any:
     # upload returns immediately and the browser lands on the
     # session page (which polls the live status) instead of
     # babysitting a request that can take many minutes for long
-    # lectures. Tests pin LR_PIPELINE_BACKGROUND=False and get
+    # lectures. Tests pin AFTERWORD_PIPELINE_BACKGROUND=False and get
     # the deterministic inline run.
     transcript_provider = current_app_transcript_provider()
     text_provider = current_app_text_provider()
     run_in_background = current_app.config.get(
-        "LR_PIPELINE_BACKGROUND", True,
+        "AFTERWORD_PIPELINE_BACKGROUND", True,
     )
     if run_in_background:
         _enqueue_pipeline(current_app._get_current_object(), sess.id)

@@ -12,9 +12,9 @@ one search box across all of it.
 - **AI:** OpenRouter for both models. Transcription:
   `microsoft/mai-transcribe-2` (with speaker labels). Text: `minimax/minimax-m3`.
   Both can be changed in `.env`, and the text model can be called on any
-  OpenAI-compatible API instead (`LR_TEXT_BASE_URL`), e.g. with a MiniMax
+  OpenAI-compatible API instead (`AFTERWORD_TEXT_BASE_URL`), e.g. with a MiniMax
   subscription.
-- **Times:** stored in UTC, shown in local time (`LR_TIMEZONE`, default
+- **Times:** stored in UTC, shown in local time (`AFTERWORD_TIMEZONE`, default
   Europe/London).
 
 ## Setup
@@ -35,7 +35,7 @@ winget install Gyan.FFmpeg    # or: apt install ffmpeg / brew install ffmpeg
 ```
 
 Copy `.env.example` to `.env` and add your OpenRouter key
-(`LR_TRANSCRIPTION_API_KEY` and `LR_TEXT_API_KEY`, which can be the same
+(`AFTERWORD_TRANSCRIPTION_API_KEY` and `AFTERWORD_TEXT_API_KEY`, which can be the same
 key). Without keys, recordings are still stored and playable, just not
 transcribed.
 
@@ -56,11 +56,11 @@ firewall blocks port 8000.
 Run `serve.py` behind Caddy (HTTPS) with:
 
 ```ini
-LR_HOST=127.0.0.1
-LR_TRUSTED_PROXY=127.0.0.1
-LR_COOKIE_SECURE=1
-LR_WEB_PASSWORD=...        # login for the web UI
-LR_DEVICE_TOKEN=...        # = DEVICE_TOKEN in the firmware's secrets.h
+AFTERWORD_HOST=127.0.0.1
+AFTERWORD_TRUSTED_PROXY=127.0.0.1
+AFTERWORD_COOKIE_SECURE=1
+AFTERWORD_WEB_PASSWORD=...        # login for the web UI
+AFTERWORD_DEVICE_TOKEN=...        # = DEVICE_TOKEN in the firmware's secrets.h
 ```
 
 Use one process: the AI pipeline worker runs inside it.
@@ -72,29 +72,29 @@ Relative paths are taken from the `Server` folder.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `LR_DATA_DIR` | `./data` | Database and audio |
-| `LR_HOST` / `LR_PORT` | `0.0.0.0` / `8000` | Bind address |
-| `LR_TRANSCRIPTION_API_KEY` | — | OpenRouter key for transcription |
-| `LR_TEXT_API_KEY` | — | OpenRouter key for the text model |
-| `LR_TRANSCRIPTION_MODEL` | `microsoft/mai-transcribe-2` | Speaker labels need `verbose_json` support |
-| `LR_TEXT_MODEL` | `minimax/minimax-m3` | Classification, summaries, extraction |
-| `LR_SUMMARY_LANGUAGES` | `English, Russian` | Summaries keep these languages; others are written in the first |
-| `LR_TEXT_BASE_URL` | OpenRouter | Text model API, e.g. `https://api.minimax.io/v1` (then `LR_TEXT_MODEL=MiniMax-M3`) |
-| `LR_TRANSCRIBE_SPEAKERS` | `1` | `0` = plain transcript without speaker lines |
-| `LR_TRANSCRIBE_CHUNK_SECONDS` | `1500` | Long recordings are sent in pieces this long |
-| `LR_TRANSCRIBE_PROVIDER_OPTIONS` | Azure diarization on | JSON passed as `provider.options` |
-| `LR_PIPELINE_BACKGROUND` | `1` | `0` = run the AI pipeline inside the request (debugging) |
-| `LR_FFMPEG_PATH` | `ffmpeg` | ffmpeg binary |
-| `LR_MAX_UPLOAD_BYTES` | 500 MB | Largest web upload; bigger requests get 413 |
-| `LR_TIMEZONE` | `Europe/London` | Zone for times without an offset, and for display |
-| `LR_DEVICE_TOKEN` | off | Device uploads need `Authorization: Bearer <token>` |
-| `LR_WEB_PASSWORD` | off | Login for the web UI and the non-device API |
-| `LR_SECRET` | generated | Login cookie key (else kept in `data/db/secret_key`) |
-| `LR_COOKIE_SECURE` | off | Login cookie over HTTPS only |
-| `LR_TRUSTED_PROXY` | off | `serve.py`: trust X-Forwarded-* from this address |
+| `AFTERWORD_DATA_DIR` | `./data` | Database and audio |
+| `AFTERWORD_HOST` / `AFTERWORD_PORT` | `0.0.0.0` / `8000` | Bind address |
+| `AFTERWORD_TRANSCRIPTION_API_KEY` | — | OpenRouter key for transcription |
+| `AFTERWORD_TEXT_API_KEY` | — | OpenRouter key for the text model |
+| `AFTERWORD_TRANSCRIPTION_MODEL` | `microsoft/mai-transcribe-2` | Speaker labels need `verbose_json` support |
+| `AFTERWORD_TEXT_MODEL` | `minimax/minimax-m3` | Classification, summaries, extraction |
+| `AFTERWORD_SUMMARY_LANGUAGES` | `English, Russian` | Summaries keep these languages; others are written in the first |
+| `AFTERWORD_TEXT_BASE_URL` | OpenRouter | Text model API, e.g. `https://api.minimax.io/v1` (then `AFTERWORD_TEXT_MODEL=MiniMax-M3`) |
+| `AFTERWORD_TRANSCRIBE_SPEAKERS` | `1` | `0` = plain transcript without speaker lines |
+| `AFTERWORD_TRANSCRIBE_CHUNK_SECONDS` | `1500` | Long recordings are sent in pieces this long |
+| `AFTERWORD_TRANSCRIBE_PROVIDER_OPTIONS` | Azure diarization on | JSON passed as `provider.options` |
+| `AFTERWORD_PIPELINE_BACKGROUND` | `1` | `0` = run the AI pipeline inside the request (debugging) |
+| `AFTERWORD_FFMPEG_PATH` | `ffmpeg` | ffmpeg binary |
+| `AFTERWORD_MAX_UPLOAD_BYTES` | 500 MB | Largest web upload; bigger requests get 413 |
+| `AFTERWORD_TIMEZONE` | `Europe/London` | Zone for times without an offset, and for display |
+| `AFTERWORD_DEVICE_TOKEN` | off | Device uploads need `Authorization: Bearer <token>` |
+| `AFTERWORD_WEB_PASSWORD` | off | Login for the web UI and the non-device API |
+| `AFTERWORD_SECRET` | generated | Login cookie key (else kept in `data/db/secret_key`) |
+| `AFTERWORD_COOKIE_SECURE` | off | Login cookie over HTTPS only |
+| `AFTERWORD_TRUSTED_PROXY` | off | `serve.py`: trust X-Forwarded-* from this address |
 
-`LR_OPENROUTER_API_KEY` and `LR_MINIMAX_API_KEY` are still read as fallbacks
-for the two keys.
+Settings with the old `LR_` prefix (`LR_TEXT_API_KEY` and so on) are
+still read; the `AFTERWORD_` name wins when both are set.
 
 ## Tests
 
@@ -149,7 +149,7 @@ Server/
 
 ## Device protocol
 
-All under `/api/v1/`. With `LR_DEVICE_TOKEN` set, every call needs
+All under `/api/v1/`. With `AFTERWORD_DEVICE_TOKEN` set, every call needs
 `Authorization: Bearer <token>`.
 
 1. **Announce**: `POST /sessions`
@@ -201,7 +201,7 @@ calendar event by start time.
 - Summaries are sized to the transcript (a few sentences for a short memo,
   headed sections for an hour-long lecture) and structured by kind. They
   are written in the recording's language if it is in
-  `LR_SUMMARY_LANGUAGES`, otherwise in the first of those.
+  `AFTERWORD_SUMMARY_LANGUAGES`, otherwise in the first of those.
 - Voice memos keep only their transcript (no summary or extraction) and
   become notes: a note with the recording attached, whose text starts as
   the transcript and can be edited (the exact words stay under "What was
@@ -255,7 +255,7 @@ jumps to the box.
 ```
 data/
 ├── db/metadata.db        SQLite (WAL)
-├── db/secret_key         login cookie key, when LR_SECRET is unset
+├── db/secret_key         login cookie key, when AFTERWORD_SECRET is unset
 └── sessions/<id>/
     ├── full.aac          stitched audio
     ├── meta.json         copy of the database row, for debugging
@@ -270,7 +270,7 @@ Deleting `data/` resets the server.
   profile (Private), and that the server listens on `0.0.0.0`.
 - **`Provider returned 400` on transcription:** the model rejected the
   audio or an option. MP3 is accepted by the default model; check
-  `LR_TRANSCRIPTION_PROVIDER_OPTIONS` when changing models.
+  `AFTERWORD_TRANSCRIPTION_PROVIDER_OPTIONS` when changing models.
 - **`404 ... unavailable for free`:** the text model's free tier was
-  withdrawn; set `LR_TEXT_MODEL`.
-- **Port 8000 in use:** set `LR_PORT`.
+  withdrawn; set `AFTERWORD_TEXT_MODEL`.
+- **Port 8000 in use:** set `AFTERWORD_PORT`.

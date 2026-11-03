@@ -144,7 +144,7 @@ def api_import_events_ics() -> Any:
 
     Returns ``{"imported": N, "added", "updated", "summary"}``; a file
     that isn't a calendar is a 400 with a ``detail`` for the user."""
-    cfg = current_app.config["LR_CONFIG"]
+    cfg = current_app.config["AFTERWORD_CONFIG"]
     if "file" not in request.files:
         return jsonify({
             "error": "missing_file",

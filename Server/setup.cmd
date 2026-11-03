@@ -78,7 +78,7 @@ if errorlevel 1 (
     ) else (
         echo WARNING: neither ffmpeg nor winget is on PATH.
         echo Install ffmpeg manually from https://www.gyan.dev/ffmpeg/builds/
-        echo or set LR_FFMPEG_PATH to the binary location.
+        echo or set AFTERWORD_FFMPEG_PATH to the binary location.
     )
 ) else (
     ffmpeg -version

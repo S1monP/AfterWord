@@ -2,15 +2,15 @@
 
 Both are off unless configured, so local development needs no setup.
 
-* ``LR_DEVICE_TOKEN``: the device upload endpoints (announce, chunk PUT,
+* ``AFTERWORD_DEVICE_TOKEN``: the device upload endpoints (announce, chunk PUT,
   finish) require ``Authorization: Bearer <token>``. The firmware sends
   it when ``DEVICE_TOKEN`` is set in secrets.h.
-* ``LR_WEB_PASSWORD``: every other page and API needs a login (one
+* ``AFTERWORD_WEB_PASSWORD``: every other page and API needs a login (one
   user). Device endpoints never need the login; they rely on the token.
-* ``LR_SECRET``: key for the login cookie. Without it a random key is
+* ``AFTERWORD_SECRET``: key for the login cookie. Without it a random key is
   generated once and kept in ``<data>/db/secret_key``, so logins
   survive restarts.
-* ``LR_COOKIE_SECURE=1``: send the cookie over HTTPS only (behind Caddy).
+* ``AFTERWORD_COOKIE_SECURE=1``: send the cookie over HTTPS only (behind Caddy).
 
 The cookie is SameSite=Lax, so other sites cannot post forms with it.
 """
@@ -49,7 +49,7 @@ bp = Blueprint("auth", __name__)
 
 
 def init_app(app: Flask) -> None:
-    cfg = app.config["LR_CONFIG"]
+    cfg = app.config["AFTERWORD_CONFIG"]
     app.secret_key = cfg.secret_key or _persistent_secret(cfg.data_dir)
     app.config.update(
         SESSION_COOKIE_HTTPONLY=True,
@@ -61,7 +61,7 @@ def init_app(app: Flask) -> None:
     app.before_request(_guard)
     app.context_processor(lambda: {"auth_enabled": bool(cfg.web_password)})
     if cfg.web_password and not cfg.device_token:
-        print("[LR ] WARNING: LR_WEB_PASSWORD is set but LR_DEVICE_TOKEN is "
+        print("[LR ] WARNING: AFTERWORD_WEB_PASSWORD is set but AFTERWORD_DEVICE_TOKEN is "
               "not; device uploads are open to anyone who can reach the "
               "server.", flush=True)
 
@@ -95,7 +95,7 @@ def _device_token_ok(expected: str) -> bool:
 
 
 def _guard() -> Optional[Any]:
-    cfg = current_app.config["LR_CONFIG"]
+    cfg = current_app.config["AFTERWORD_CONFIG"]
     endpoint = request.endpoint
     if endpoint in DEVICE_ENDPOINTS:
         if cfg.device_token and not _device_token_ok(cfg.device_token):
@@ -122,7 +122,7 @@ def _safe_next(target: Optional[str]) -> str:
 
 @bp.route("/login", methods=["GET", "POST"])
 def login() -> Any:
-    cfg = current_app.config["LR_CONFIG"]
+    cfg = current_app.config["AFTERWORD_CONFIG"]
     next_url = _safe_next(request.values.get("next"))
     if not cfg.web_password:
         return redirect(next_url)

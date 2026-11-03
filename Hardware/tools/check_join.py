@@ -9,7 +9,7 @@ result with ffmpeg and looks at the audio right at the seam:
   * level per 1024-sample frame around the seam (a gap shows as a dip)
   * largest sample-to-sample jump at the seam vs. the whole file (a click)
 
-Needs ffmpeg on PATH (or LR_FFMPEG_PATH).  Standard library only.
+Needs ffmpeg on PATH (or AFTERWORD_FFMPEG_PATH).  Standard library only.
 """
 import array
 import os
@@ -21,7 +21,7 @@ from pathlib import Path
 
 SR = 22050
 N = 1024
-FFMPEG = os.environ.get("LR_FFMPEG_PATH", "ffmpeg")
+FFMPEG = os.environ.get("AFTERWORD_FFMPEG_PATH", "ffmpeg")
 
 
 def decode(path):

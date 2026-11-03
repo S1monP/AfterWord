@@ -83,7 +83,7 @@ else
     else
         echo "WARNING: no supported package manager found (apt/dnf/yum/brew)."
         echo "Install ffmpeg manually and ensure it is on PATH, or set"
-        echo "LR_FFMPEG_PATH to the binary location."
+        echo "AFTERWORD_FFMPEG_PATH to the binary location."
     fi
 fi
 

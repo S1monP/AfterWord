@@ -7,7 +7,7 @@ Android's Chrome does too. The machine's own Windows resolver doesn't
 ask other responders on the same machine, so on the server itself use
 http://localhost.
 
-Used by serve.py when ``LR_MDNS_NAME`` is set. The LAN address is
+Used by serve.py when ``AFTERWORD_MDNS_NAME`` is set. The LAN address is
 checked every few minutes, so the name follows a new address from the
 router.
 """
@@ -39,7 +39,7 @@ def announce(name: str, port: int) -> Optional[threading.Thread]:
     try:
         from zeroconf import IPVersion, ServiceInfo, Zeroconf
     except ImportError:
-        print("[LR ] LR_MDNS_NAME is set but zeroconf isn't installed "
+        print("[LR ] AFTERWORD_MDNS_NAME is set but zeroconf isn't installed "
               "(pip install -r requirements.txt)", flush=True)
         return None
     name = name.strip().lower().removesuffix(".local")

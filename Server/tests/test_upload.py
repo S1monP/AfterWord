@@ -61,7 +61,7 @@ class UploadPageTests(LRTestCase):
         # configured with (conftest points at a dummy path), not
         # the host PATH.
         from services import transcode
-        cfg = self.app.config["LR_CONFIG"]
+        cfg = self.app.config["AFTERWORD_CONFIG"]
         r = self.client.get("/upload")
         body = r.get_data()
         if transcode.ffmpeg_available(cfg.ffmpeg_path):
@@ -95,7 +95,7 @@ class WavUploadTests(LRTestCase):
         pre-pipeline status while the pipeline runs in a background
         thread, then the session reaches 'done'."""
         import time
-        self.app.config["LR_PIPELINE_BACKGROUND"] = True
+        self.app.config["AFTERWORD_PIPELINE_BACKGROUND"] = True
         wav = _make_wav_bytes()
         r = self.client.post(
             "/api/v1/uploads/audio",
@@ -109,7 +109,7 @@ class WavUploadTests(LRTestCase):
         self.assertEqual(body["session"]["status"], "ready")
         # Wait for the background pipeline to finish (no-op
         # providers complete quickly without API keys).
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         sid = body["session"]["id"]
         deadline = time.time() + 10
         status = None
@@ -183,12 +183,12 @@ class WavUploadTests(LRTestCase):
         self.assertEqual(r.get_json()["error"], "missing_file")
 
     def test_oversize_file_rejected(self) -> None:
-        cfg = self.app.config["LR_CONFIG"]
+        cfg = self.app.config["AFTERWORD_CONFIG"]
         original = cfg.max_upload_bytes
         # Config is frozen; build a new dataclass with the smaller cap.
         from dataclasses import replace
         new_cfg = replace(cfg, max_upload_bytes=100)
-        self.app.config["LR_CONFIG"] = new_cfg
+        self.app.config["AFTERWORD_CONFIG"] = new_cfg
         try:
             wav = _make_wav_bytes(b"X" * 1000)
             r = self.client.post(
@@ -199,7 +199,7 @@ class WavUploadTests(LRTestCase):
             self.assertEqual(r.status_code, 413)
             self.assertEqual(r.get_json()["error"], "file_too_large")
         finally:
-            self.app.config["LR_CONFIG"] = cfg
+            self.app.config["AFTERWORD_CONFIG"] = cfg
             _ = original
 
 
@@ -210,8 +210,8 @@ class NonCanonicalUploadTests(LRTestCase):
 
     def test_upload_without_ffmpeg_returns_503(self) -> None:
         from dataclasses import replace
-        cfg = self.app.config["LR_CONFIG"]
-        self.app.config["LR_CONFIG"] = replace(
+        cfg = self.app.config["AFTERWORD_CONFIG"]
+        self.app.config["AFTERWORD_CONFIG"] = replace(
             cfg, ffmpeg_path="ffmpeg-nonexistent-test-binary",
         )
         try:
@@ -224,7 +224,7 @@ class NonCanonicalUploadTests(LRTestCase):
             self.assertEqual(r.status_code, 503)
             self.assertEqual(r.get_json()["error"], "ffmpeg_missing")
         finally:
-            self.app.config["LR_CONFIG"] = cfg
+            self.app.config["AFTERWORD_CONFIG"] = cfg
 
     @skip_without_ffmpeg
     def test_non_aac_with_ffmpeg_succeeds(self) -> None:
@@ -236,8 +236,8 @@ class NonCanonicalUploadTests(LRTestCase):
         # Point the app at the real ffmpeg binary for this test —
         # conftest deliberately configures a dummy path so the 503
         # flow can be tested without ffmpeg.
-        cfg = self.app.config["LR_CONFIG"]
-        self.app.config["LR_CONFIG"] = replace(cfg, ffmpeg_path=real_ffmpeg)
+        cfg = self.app.config["AFTERWORD_CONFIG"]
+        self.app.config["AFTERWORD_CONFIG"] = replace(cfg, ffmpeg_path=real_ffmpeg)
         try:
             src = self._tmpdir / "src.wav"
             src.write_bytes(_make_wav_bytes(b"\x00\x00\x00\x00" * 500))
@@ -260,7 +260,7 @@ class NonCanonicalUploadTests(LRTestCase):
             # Pipeline ran (no-op without keys) → session is 'done'.
             self.assertEqual(r.get_json()["session"]["status"], "done")
         finally:
-            self.app.config["LR_CONFIG"] = cfg
+            self.app.config["AFTERWORD_CONFIG"] = cfg
 
 
 class TranscodeUnitTests(unittest.TestCase):

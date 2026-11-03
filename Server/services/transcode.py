@@ -296,7 +296,7 @@ def _encode(
         raise TranscodeError(
             TranscodeError.REASON_FFMPEG_MISSING,
             f"ffmpeg not found at {ffmpeg_path!r}; install ffmpeg or set "
-            "LR_FFMPEG_PATH to a valid binary",
+            "AFTERWORD_FFMPEG_PATH to a valid binary",
         )
 
     dst.parent.mkdir(parents=True, exist_ok=True)

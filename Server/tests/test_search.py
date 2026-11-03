@@ -48,7 +48,7 @@ class QueryTests(LRTestCase):
 class _Base(LRTestCase):
     def setUp(self):
         super().setUp()
-        self.store = self.app.config["LR_STORAGE"]
+        self.store = self.app.config["AFTERWORD_STORAGE"]
 
     def _recording(self, *, title=None, kind="lecture", transcript="",
                    summary=None):
@@ -178,7 +178,7 @@ class SearchApiTests(_Base):
         sid = self._recording(kind="voice_memo",
                               transcript="[00:01] Speaker 1: call the plumber")
         from services.notes import ensure_memo_note
-        note = ensure_memo_note(self.app.config["LR_STORAGE"], sid)
+        note = ensure_memo_note(self.app.config["AFTERWORD_STORAGE"], sid)
         groups = self.client.get("/api/v1/search?q=plumber").get_json()["groups"]
         self.assertEqual([g["type"] for g in groups], ["note"])     # once, as its note
         item = groups[0]["items"][0]

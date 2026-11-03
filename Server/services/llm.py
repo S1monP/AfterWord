@@ -237,12 +237,12 @@ OPENROUTER_TRANSCRIPTIONS_URL = (
 )
 TRANSCRIPTION_MODEL = "microsoft/mai-transcribe-2"
 #: Env override for the transcription model (an OpenRouter slug).
-TRANSCRIPTION_MODEL_ENV = "LR_TRANSCRIPTION_MODEL"
+TRANSCRIPTION_MODEL_ENV = "AFTERWORD_TRANSCRIPTION_MODEL"
 
 #: Env flag: render speaker annotations in the transcript when the
 #: transcription model returns diarization data. Set to
 #: ``0``/``false``/``no``/``off`` to always get plain text.
-TRANSCRIBE_SPEAKERS_ENV = "LR_TRANSCRIBE_SPEAKERS"
+TRANSCRIBE_SPEAKERS_ENV = "AFTERWORD_TRANSCRIBE_SPEAKERS"
 
 #: OpenRouter caps inline transcription uploads at 25 MB (multipart)
 #: and JSON request bodies at 50 MB, and upstream providers time out
@@ -250,7 +250,7 @@ TRANSCRIBE_SPEAKERS_ENV = "LR_TRANSCRIBE_SPEAKERS"
 #: (~8 KB/s), so a 1500 s (25 min) piece is ~12 MB — comfortably
 #: under the body caps. Longer stitched recordings are segmented to
 #: this length (stream copy, no re-encode) before transcription.
-TRANSCRIBE_CHUNK_SECONDS_ENV = "LR_TRANSCRIBE_CHUNK_SECONDS"
+TRANSCRIBE_CHUNK_SECONDS_ENV = "AFTERWORD_TRANSCRIBE_CHUNK_SECONDS"
 DEFAULT_TRANSCRIBE_CHUNK_SECONDS = 1500
 
 #: Provider-specific options passed as ``provider.options`` on the
@@ -258,10 +258,10 @@ DEFAULT_TRANSCRIBE_CHUNK_SECONDS = 1500
 #: ``microsoft/mai-transcribe-2`` (hosted by Azure) returns segment
 #: speaker labels — without this option the model emits no
 #: ``speaker`` fields at all. Override with the
-#: ``LR_TRANSCRIBE_PROVIDER_OPTIONS`` env var (a JSON object) when
+#: ``AFTERWORD_TRANSCRIBE_PROVIDER_OPTIONS`` env var (a JSON object) when
 #: using a model served by a different provider; set it to ``{}``
 #: to send no provider options.
-TRANSCRIBE_PROVIDER_OPTIONS_ENV = "LR_TRANSCRIBE_PROVIDER_OPTIONS"
+TRANSCRIBE_PROVIDER_OPTIONS_ENV = "AFTERWORD_TRANSCRIBE_PROVIDER_OPTIONS"
 DEFAULT_TRANSCRIBE_PROVIDER_OPTIONS: dict = {
     "azure": {"diarization": {"enabled": True}},
 }
@@ -417,7 +417,7 @@ def parse_transcript_lines(text: Optional[str]) -> list[dict]:
 def _speakers_enabled() -> bool:
     """Resolve the speaker-annotation flag from the environment.
 
-    Defaults to on; set ``LR_TRANSCRIBE_SPEAKERS`` to
+    Defaults to on; set ``AFTERWORD_TRANSCRIBE_SPEAKERS`` to
     ``0``/``false``/``no``/``off`` (case-insensitive) to disable.
     """
     raw = os.environ.get(TRANSCRIBE_SPEAKERS_ENV, "")
@@ -438,7 +438,7 @@ class TranscriptionProvider(LLMProvider):
     Storage is canonical AAC (the device encodes before upload and
     web uploads are transcoded at ingest), so requests stay small
     (~12 MB per 25-minute piece). A stitched recording longer than
-    ``LR_TRANSCRIBE_CHUNK_SECONDS`` (default 1500 s) is segmented
+    ``AFTERWORD_TRANSCRIBE_CHUNK_SECONDS`` (default 1500 s) is segmented
     with ffmpeg stream-copy (no re-encode, no quality loss) and the
     pieces are transcribed with cumulative offsets so the merged
     transcript has continuous times. If a piece hits a transient
@@ -470,7 +470,7 @@ class TranscriptionProvider(LLMProvider):
     ) -> None:
         if not api_key:
             raise LLMConfigError(
-                "TranscriptionProvider requires LR_TRANSCRIPTION_API_KEY"
+                "TranscriptionProvider requires AFTERWORD_TRANSCRIPTION_API_KEY"
             )
         self._api_key = api_key
         self._model = (
@@ -508,7 +508,7 @@ class TranscriptionProvider(LLMProvider):
         # ffmpeg path for segmentation/cutting; same env var the app
         # config uses so one setting covers both.
         self._ffmpeg_path = (
-            ffmpeg_path or os.environ.get("LR_FFMPEG_PATH", "ffmpeg")
+            ffmpeg_path or os.environ.get("AFTERWORD_FFMPEG_PATH", "ffmpeg")
         )
         self._ffmpeg_ok: Optional[bool] = None
         self._http = http_transport or _urllib_transport
@@ -601,7 +601,7 @@ class TranscriptionProvider(LLMProvider):
             raise LLMError(
                 f"transcription request body is {len(body)} bytes, "
                 f"over the {MAX_TRANSCRIBE_BODY_BYTES} byte safety "
-                "cap; lower LR_TRANSCRIBE_CHUNK_SECONDS (current "
+                "cap; lower AFTERWORD_TRANSCRIBE_CHUNK_SECONDS (current "
                 f"piece limit: {self._chunk_max_seconds} s)"
             )
         headers = {
@@ -922,10 +922,10 @@ OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 #: "unavailable for free"); free tiers can go at any time.
 TEXT_MODEL = "minimax/minimax-m3"
 #: Env override for the text model (an OpenRouter slug).
-TEXT_MODEL_ENV = "LR_TEXT_MODEL"
+TEXT_MODEL_ENV = "AFTERWORD_TEXT_MODEL"
 #: Env override for the text API's OpenAI-compatible base URL, e.g.
 #: ``https://api.minimax.io/v1`` for a MiniMax subscription key.
-TEXT_BASE_URL_ENV = "LR_TEXT_BASE_URL"
+TEXT_BASE_URL_ENV = "AFTERWORD_TEXT_BASE_URL"
 
 # Reasoning models served directly (not through OpenRouter) may put
 # their thinking inside the message as <think>...</think>.
@@ -1380,7 +1380,7 @@ _KIND_GUIDE: dict[str, str] = {
 #: Env: languages a summary is written in when the recording is in
 #: one of them (comma-separated). Recordings in any other language
 #: get the first one.
-SUMMARY_LANGUAGES_ENV = "LR_SUMMARY_LANGUAGES"
+SUMMARY_LANGUAGES_ENV = "AFTERWORD_SUMMARY_LANGUAGES"
 SUMMARY_LANGUAGES = "English, Russian"
 
 
@@ -1669,7 +1669,7 @@ class TextProvider(LLMProvider):
     ) -> None:
         if not api_key:
             raise LLMConfigError(
-                "TextProvider requires LR_TEXT_API_KEY"
+                "TextProvider requires AFTERWORD_TEXT_API_KEY"
             )
         self._api_key = api_key
         self._model = (
@@ -1771,7 +1771,7 @@ class TextProvider(LLMProvider):
 
     def _output_language(self, transcript: str) -> str:
         """The language to write in: the transcript's own language if
-        it is one of ``LR_SUMMARY_LANGUAGES``, else the first of those.
+        it is one of ``AFTERWORD_SUMMARY_LANGUAGES``, else the first of those.
         Costs one short model call per transcript (cached); if that
         call fails, the first language is used."""
         langs = _summary_languages()
@@ -1929,10 +1929,10 @@ def default_providers(
     Pulls the keys from env vars when the explicit arguments are
     not supplied:
 
-    * transcription key: ``LR_TRANSCRIPTION_API_KEY`` (fallback:
-      legacy ``LR_OPENROUTER_API_KEY``)
-    * text key: ``LR_TEXT_API_KEY`` (fallbacks: legacy
-      ``LR_MINIMAX_API_KEY``, then ``LR_OPENROUTER_API_KEY``)
+    * transcription key: ``AFTERWORD_TRANSCRIPTION_API_KEY``
+    * text key: ``AFTERWORD_TEXT_API_KEY``
+
+    (``config.load()`` copies the old ``LR_*`` names onto these.)
 
     Absent keys yield a no-op provider rather than an error — this
     keeps the test suite (and any local install without keys)
@@ -1945,17 +1945,14 @@ def default_providers(
         transcription_key
         if transcription_key is not None
         else (
-            os.environ.get("LR_TRANSCRIPTION_API_KEY", "")
-            or os.environ.get("LR_OPENROUTER_API_KEY", "")
+            os.environ.get("AFTERWORD_TRANSCRIPTION_API_KEY", "")
         )
     )
     txt_key = (
         text_key
         if text_key is not None
         else (
-            os.environ.get("LR_TEXT_API_KEY", "")
-            or os.environ.get("LR_MINIMAX_API_KEY", "")
-            or os.environ.get("LR_OPENROUTER_API_KEY", "")
+            os.environ.get("AFTERWORD_TEXT_API_KEY", "")
         )
     )
     return {

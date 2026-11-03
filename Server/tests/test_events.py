@@ -50,7 +50,7 @@ END:VCALENDAR
 
 class EventsServiceTests(LRTestCase):
     def _service(self):
-        return self.app.config["LR_EVENTS_SERVICE"]
+        return self.app.config["AFTERWORD_EVENTS_SERVICE"]
 
     def _create(self, **overrides):
         payload = {
@@ -275,10 +275,10 @@ class SuggestMatchConfidenceTests(unittest.TestCase):
         )
 class MatchSessionTests(LRTestCase):
     def _service(self):
-        return self.app.config["LR_EVENTS_SERVICE"]
+        return self.app.config["AFTERWORD_EVENTS_SERVICE"]
 
     def _store(self):
-        return self.app.config["LR_STORAGE"]
+        return self.app.config["AFTERWORD_STORAGE"]
 
     def _seed_session(self) -> str:
         sess_id = "s" + "0" * 31
@@ -377,7 +377,7 @@ class MatchSessionTests(LRTestCase):
         self.assertIsNone(self._service().suggest_match(sid))
 class ImportIcsTests(LRTestCase):
     def _service(self):
-        return self.app.config["LR_EVENTS_SERVICE"]
+        return self.app.config["AFTERWORD_EVENTS_SERVICE"]
 
     def test_import_ics_returns_count_and_persists(self):
         count = self._service().import_ics(_SAMPLE_ICS)
@@ -442,7 +442,7 @@ class RecurringEventTests(LRTestCase):
         body = resp.get_json()
         self.assertEqual(body["created_count"], 3)
         first_id = body["event"]["id"]
-        events, total = self.app.config["LR_EVENTS_SERVICE"].list(
+        events, total = self.app.config["AFTERWORD_EVENTS_SERVICE"].list(
             limit=500,
         )
         self.assertEqual(total, 3)
@@ -466,7 +466,7 @@ class RecurringEventTests(LRTestCase):
         })
         self.assertEqual(resp.status_code, 201)
         self.assertEqual(resp.get_json()["created_count"], 1)
-        _, total = self.app.config["LR_EVENTS_SERVICE"].list(limit=500)
+        _, total = self.app.config["AFTERWORD_EVENTS_SERVICE"].list(limit=500)
         self.assertEqual(total, 1)
 
     def test_repeat_until_before_start_rejected(self):

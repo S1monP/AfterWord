@@ -17,7 +17,7 @@ from tests.conftest import LRTestCase
 
 class TasksServiceTests(LRTestCase):
     def _service(self):
-        return self.app.config["LR_TASKS_SERVICE"]
+        return self.app.config["AFTERWORD_TASKS_SERVICE"]
 
     def test_create_persists_defaults(self):
         svc = self._service()
@@ -400,7 +400,7 @@ if __name__ == "__main__":
 
 class TasksDueAtTests(LRTestCase):
     def _service(self):
-        return self.app.config["LR_TASKS_SERVICE"]
+        return self.app.config["AFTERWORD_TASKS_SERVICE"]
 
     def test_create_with_due_at_persists(self):
         svc = self._service()
@@ -697,7 +697,7 @@ class DeadlinesDeepLinkTests(LRTestCase):
         return resp.get_json()["task"]
 
     def test_deadline_with_source_ref_renders_as_link(self):
-        self.app.config["LR_STORAGE"].upsert_session(
+        self.app.config["AFTERWORD_STORAGE"].upsert_session(
             "abcdef1234567890", title="t", expected_count=1, sample_rate=22050,
             channels=1, bits_per_sample=32, started_at="2026-01-15T10:00:00Z",
         )

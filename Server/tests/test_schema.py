@@ -17,7 +17,7 @@ from tests.conftest import LRTestCase
 
 class SchemaShapeTests(LRTestCase):
     def test_new_tables_exist(self) -> None:
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         with store._connect() as conn:  # type: ignore[attr-defined]
             tables = {
                 r["name"]
@@ -29,7 +29,7 @@ class SchemaShapeTests(LRTestCase):
             self.assertIn(t, tables, f"missing table {t}")
 
     def test_sessions_kind_columns(self) -> None:
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         with store._connect() as conn:  # type: ignore[attr-defined]
             cols = {
                 r["name"]
@@ -41,7 +41,7 @@ class SchemaShapeTests(LRTestCase):
             self.assertIn(c, cols, f"sessions missing column {c}")
 
     def test_notes_columns(self) -> None:
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         with store._connect() as conn:  # type: ignore[attr-defined]
             cols = {
                 r["name"]
@@ -56,7 +56,7 @@ class SchemaShapeTests(LRTestCase):
 
     def test_tasks_columns(self) -> None:
         """The merged tasks table has the union of todos + deadlines columns."""
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         with store._connect() as conn:  # type: ignore[attr-defined]
             cols = {
                 r["name"]
@@ -81,7 +81,7 @@ class SchemaShapeTests(LRTestCase):
             self.assertIsNone(cur.fetchone())
 
     def test_events_columns(self) -> None:
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         with store._connect() as conn:  # type: ignore[attr-defined]
             cols = {
                 r["name"]
@@ -98,7 +98,7 @@ class SchemaShapeTests(LRTestCase):
     def test_schema_idempotent(self) -> None:
         """Re-running initialise on the same DB must not raise or
         duplicate columns / tables."""
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         store.initialise()  # second call
         store.initialise()  # third call
         with store._connect() as conn:  # type: ignore[attr-defined]

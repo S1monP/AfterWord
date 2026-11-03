@@ -43,47 +43,46 @@ def create_app(config: Optional[config_mod.Config] = None) -> Flask:
     """Build and configure a Flask app. ``config`` is injectable for tests."""
     cfg = config or config_mod.load()
     app = Flask(__name__, template_folder="templates", static_folder="static")
-    app.config["LR_CONFIG"] = cfg
-    app.config["LR_STORAGE"] = storage.Storage(cfg)
-    app.config["LR_STORAGE"].initialise()
+    app.config["AFTERWORD_CONFIG"] = cfg
+    app.config["AFTERWORD_STORAGE"] = storage.Storage(cfg)
+    app.config["AFTERWORD_STORAGE"].initialise()
     # NotesService is constructed once per app and cached. It holds a
     # reference to the storage layer, which itself is per-app.
-    app.config["LR_NOTES_SERVICE"] = services.notes.NotesService(
-        app.config["LR_STORAGE"]
+    app.config["AFTERWORD_NOTES_SERVICE"] = services.notes.NotesService(
+        app.config["AFTERWORD_STORAGE"]
     )
     # Voice memos keep their text in a note (Notes page); give any
     # finished memo without one its note.
     try:
-        services.notes.sync_memo_notes(app.config["LR_STORAGE"])
+        services.notes.sync_memo_notes(app.config["AFTERWORD_STORAGE"])
     except Exception as exc:  # pragma: no cover  (a page still loads)
         print(f"[LR ] voice memo notes: {exc!r}", flush=True)
-    app.config["LR_TASKS_SERVICE"] = services.tasks.TasksService(
-        app.config["LR_STORAGE"]
+    app.config["AFTERWORD_TASKS_SERVICE"] = services.tasks.TasksService(
+        app.config["AFTERWORD_STORAGE"]
     )
-    app.config["LR_EVENTS_SERVICE"] = services.events.EventsService(
-        app.config["LR_STORAGE"]
+    app.config["AFTERWORD_EVENTS_SERVICE"] = services.events.EventsService(
+        app.config["AFTERWORD_STORAGE"]
     )
     # Calendar subscriptions (synced hourly by start_scheduler below).
     from services import calendar_feeds
-    app.config["LR_SUBSCRIPTIONS_SERVICE"] = calendar_feeds.SubscriptionsService(
-        app.config["LR_STORAGE"]
+    app.config["AFTERWORD_SUBSCRIPTIONS_SERVICE"] = calendar_feeds.SubscriptionsService(
+        app.config["AFTERWORD_STORAGE"]
     )
-    app.config["LR_CLASSIFICATION_SERVICE"] = (
+    app.config["AFTERWORD_CLASSIFICATION_SERVICE"] = (
         services.classification.ClassificationService(
-            app.config["LR_STORAGE"]
+            app.config["AFTERWORD_STORAGE"]
         )
     )
-    app.config["LR_COURSES_SERVICE"] = services.courses.CoursesService(
-        app.config["LR_STORAGE"]
+    app.config["AFTERWORD_COURSES_SERVICE"] = services.courses.CoursesService(
+        app.config["AFTERWORD_STORAGE"]
     )
-    # LLM providers. The factory reads ``LR_TRANSCRIPTION_API_KEY``
-    # / ``LR_TEXT_API_KEY`` from the process env (a `.env` file in
-    # the Server directory is loaded by ``config.load()``; the
-    # legacy ``LR_OPENROUTER_API_KEY`` / ``LR_MINIMAX_API_KEY``
-    # names are accepted as fallbacks). Absent keys yield no-op
+    # LLM providers. The factory reads ``AFTERWORD_TRANSCRIPTION_API_KEY``
+    # / ``AFTERWORD_TEXT_API_KEY`` from the process env (a `.env` file in
+    # the Server directory is loaded by ``config.load()``, which also
+    # accepts the old ``LR_*`` names). Absent keys yield no-op
     # providers so the server can boot and the API surface still
     # works (it just returns no-op stub data).
-    app.config["LR_LLM_PROVIDERS"] = services.llm.default_providers(
+    app.config["AFTERWORD_LLM_PROVIDERS"] = services.llm.default_providers(
         transcription_key=cfg.transcription_api_key,
         text_key=cfg.text_api_key,
     )
@@ -91,17 +90,17 @@ def create_app(config: Optional[config_mod.Config] = None) -> Flask:
     # env vars were actually picked up, so "the AI didn't work" is
     # diagnosable from the console alone. Prints provider names
     # only — never key material.
-    _t = app.config["LR_LLM_PROVIDERS"]["transcript"]
-    _x = app.config["LR_LLM_PROVIDERS"]["text"]
+    _t = app.config["AFTERWORD_LLM_PROVIDERS"]["transcript"]
+    _x = app.config["AFTERWORD_LLM_PROVIDERS"]["text"]
     print(
         f"[LR ] LLM providers: transcript={_t.name}"
         + (
-            "  <- no LR_TRANSCRIPTION_API_KEY set!"
+            "  <- no AFTERWORD_TRANSCRIPTION_API_KEY set!"
             if _t.name == "noop" else ""
         )
         + f", text={_x.name}"
         + (
-            "  <- no LR_TEXT_API_KEY set!"
+            "  <- no AFTERWORD_TEXT_API_KEY set!"
             if _x.name == "noop" else ""
         ),
         flush=True,
@@ -123,7 +122,7 @@ def create_app(config: Optional[config_mod.Config] = None) -> Flask:
         print(
             f"[LR ] WARNING: ffmpeg not found at {cfg.ffmpeg_path!r}; "
             "non-AAC uploads (iPhone M4A, etc.) will be rejected. "
-            "Install ffmpeg or set LR_FFMPEG_PATH.",
+            "Install ffmpeg or set AFTERWORD_FFMPEG_PATH.",
             flush=True,
         )
     else:
@@ -136,11 +135,11 @@ def create_app(config: Optional[config_mod.Config] = None) -> Flask:
     # directory. In production this is what survives a restart: any
     # session stranded mid-pipeline is requeued automatically.
     # The flag is env-wired here so operators can run fully
-    # synchronous pipelines with LR_PIPELINE_BACKGROUND=0; tests
+    # synchronous pipelines with AFTERWORD_PIPELINE_BACKGROUND=0; tests
     # override app.config directly, which still wins.
     app.config.setdefault(
-        "LR_PIPELINE_BACKGROUND",
-        os.environ.get("LR_PIPELINE_BACKGROUND", "").strip().lower()
+        "AFTERWORD_PIPELINE_BACKGROUND",
+        os.environ.get("AFTERWORD_PIPELINE_BACKGROUND", "").strip().lower()
         not in ("0", "false", "no", "off"),
     )
     _start_pipeline_worker(app)

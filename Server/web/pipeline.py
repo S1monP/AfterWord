@@ -63,7 +63,7 @@ def _enqueue_pipeline(app: Flask, session_id: str) -> bool:
         if session_id in _PIPELINES_IN_FLIGHT:
             return False
         _PIPELINES_IN_FLIGHT.add(session_id)
-    app.config["LR_PIPELINE_QUEUE"].put(session_id)
+    app.config["AFTERWORD_PIPELINE_QUEUE"].put(session_id)
     return True
 
 
@@ -79,7 +79,7 @@ def set_kind_by_hand(
     (a voice memo just loses them). Raises ``ValueError`` for a bad
     kind, like :meth:`storage.Storage.set_kind`.
     """
-    store = app.config["LR_STORAGE"]
+    store = app.config["AFTERWORD_STORAGE"]
     before = store.get_session(session_id)
     if confidence is None and kind is not None:
         confidence = 1.0
@@ -98,10 +98,10 @@ def set_kind_by_hand(
     ):
         store.delete_artifacts(session_id, "summary", "extraction")
         store.set_status(session_id, storage.STATUS_READY, status_detail=None)
-        if app.config.get("LR_PIPELINE_BACKGROUND", True):
+        if app.config.get("AFTERWORD_PIPELINE_BACKGROUND", True):
             _enqueue_pipeline(app, session_id)
         else:
-            providers = app.config["LR_LLM_PROVIDERS"]
+            providers = app.config["AFTERWORD_LLM_PROVIDERS"]
             processing.run_post_finish_pipeline(
                 store, session_id,
                 transcript_provider=providers.get("transcript"),
@@ -117,18 +117,18 @@ def _start_pipeline_worker(app: Flask) -> threading.Thread:
     """Start the FIFO pipeline worker for ``app`` (one per app, daemon).
 
     The worker resolves providers from ``app.config`` on every
-    iteration (cheap), so tests can swap ``LR_LLM_PROVIDERS`` and
+    iteration (cheap), so tests can swap ``AFTERWORD_LLM_PROVIDERS`` and
     the next queued run picks up the stubs. Runs the pipeline with
     ``resume=True``: artifacts persisted before a crash are reused.
     """
-    q = app.config["LR_PIPELINE_QUEUE"] = queue.Queue()
+    q = app.config["AFTERWORD_PIPELINE_QUEUE"] = queue.Queue()
 
     def _worker() -> None:
         while True:
             session_id = q.get()
             try:
-                store = app.config["LR_STORAGE"]
-                providers = app.config["LR_LLM_PROVIDERS"]
+                store = app.config["AFTERWORD_STORAGE"]
+                providers = app.config["AFTERWORD_LLM_PROVIDERS"]
                 processing.run_post_finish_pipeline(
                     store, session_id,
                     transcript_provider=providers.get("transcript"),
@@ -167,7 +167,7 @@ def sweep_stranded_sessions(app: Flask) -> list[str]:
     Sessions in ``failed`` are NOT auto-retried; see
     ``_STRANDED_STATUSES``. Returns the requeued session ids.
     """
-    store = app.config["LR_STORAGE"]
+    store = app.config["AFTERWORD_STORAGE"]
     requeued: list[str] = []
     for sess in reversed(store.list_sessions()):
         # list_sessions is newest-first; reversed → oldest first so

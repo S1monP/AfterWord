@@ -20,7 +20,7 @@ from tests.conftest import LRTestCase
 
 class CoursesServiceTests(LRTestCase):
     def _service(self):
-        return self.app.config["LR_COURSES_SERVICE"]
+        return self.app.config["AFTERWORD_COURSES_SERVICE"]
 
     def test_create_persists_defaults(self):
         c = self._service().create(name="Biology EP3456")
@@ -108,7 +108,7 @@ class CoursesServiceTests(LRTestCase):
         self.assertIsNone(cleared.color)
 
     def test_old_hex_colours_become_slots_on_start(self):
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         c = self._service().create(name="X")
         with store._tx() as conn:
             conn.execute("UPDATE courses SET color = '#3cc7b0' WHERE id = ?", (c.id,))
@@ -159,7 +159,7 @@ def _seed_session(
     course_id: object = None,
 ) -> str:
     sid = uuid.uuid4().hex
-    store = self.app.config["LR_STORAGE"]
+    store = self.app.config["AFTERWORD_STORAGE"]
     store.upsert_session(
         sid,
         title="test",
@@ -181,10 +181,10 @@ def _seed_session(
 
 class CourseSessionRelationTests(LRTestCase):
     def _store(self):
-        return self.app.config["LR_STORAGE"]
+        return self.app.config["AFTERWORD_STORAGE"]
 
     def _svc(self):
-        return self.app.config["LR_COURSES_SERVICE"]
+        return self.app.config["AFTERWORD_COURSES_SERVICE"]
 
     def test_set_session_course_assigns(self):
         c = self._svc().create(name="X")
@@ -244,18 +244,18 @@ class CourseSessionRelationTests(LRTestCase):
 class GetArtifactTests(LRTestCase):
     def test_get_artifact_returns_none_when_empty(self):
         sid = uuid.uuid4().hex
-        self.app.config["LR_STORAGE"].upsert_session(
+        self.app.config["AFTERWORD_STORAGE"].upsert_session(
             sid, title="t", expected_count=1, sample_rate=22050,
             channels=1, bits_per_sample=32,
             started_at="2026-01-15T10:00:00Z",
         )
         self.assertIsNone(
-            self.app.config["LR_STORAGE"].get_artifact(sid, "summary"),
+            self.app.config["AFTERWORD_STORAGE"].get_artifact(sid, "summary"),
         )
 
     def test_get_artifact_returns_record_when_present(self):
         sid = uuid.uuid4().hex
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         store.upsert_session(
             sid, title="t", expected_count=1, sample_rate=22050,
             channels=1, bits_per_sample=32,
@@ -346,7 +346,7 @@ class CoursesApiTests(LRTestCase):
 class SessionCourseAssignApiTests(LRTestCase):
     def _seed(self):
         sid = uuid.uuid4().hex
-        self.app.config["LR_STORAGE"].upsert_session(
+        self.app.config["AFTERWORD_STORAGE"].upsert_session(
             sid, title="t", expected_count=1, sample_rate=22050,
             channels=1, bits_per_sample=32,
             started_at="2026-01-15T10:00:00Z",
@@ -414,7 +414,7 @@ class LecturesUiTests(LRTestCase):
         self.assertIn("No lectures yet", body)
 
     def test_lectures_are_grouped_by_course(self):
-        svc = self.app.config["LR_COURSES_SERVICE"]
+        svc = self.app.config["AFTERWORD_COURSES_SERVICE"]
         calc = svc.create(name="Calc II", code="MBX101")
         svc.create(name="Biology EP3456")
         _seed_session(self, status="done", course_id=calc.id)
@@ -426,7 +426,7 @@ class LecturesUiTests(LRTestCase):
         self.assertIn("January 2026", body)
 
     def test_lectures_opens_the_selected_one(self):
-        svc = self.app.config["LR_COURSES_SERVICE"]
+        svc = self.app.config["AFTERWORD_COURSES_SERVICE"]
         course = svc.create(name="X")
         sid = _seed_session(self, course_id=course.id)
         body = self.client.get(f"/lectures?session={sid}").get_data(as_text=True)
@@ -456,7 +456,7 @@ class MeetingsUiTests(LRTestCase):
 
 class CoursesSettingsUiTests(LRTestCase):
     def test_settings_lists_courses_with_colours(self):
-        svc = self.app.config["LR_COURSES_SERVICE"]
+        svc = self.app.config["AFTERWORD_COURSES_SERVICE"]
         svc.create(name="Algebra", code="MA101", color="3")
         svc.create(name="Biology")
         body = self.client.get("/courses").get_data(as_text=True)
@@ -493,7 +493,7 @@ if __name__ == "__main__":
 class OtherUiTests(LRTestCase):
     def _finished(self, kind, status="done", detail=None):
         sid = _seed_session(self, status=status, kind=kind)
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         store.full_audio_path(sid).write_bytes(self.make_wav(b"\x00" * 256))
         if detail:
             with store._tx() as conn:
@@ -523,7 +523,7 @@ class OtherUiTests(LRTestCase):
         self.assertIn(f'data-retry="{broken}"', failed)
 
     def test_classify_moves_and_rewrites_summary(self):
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         sid = self._finished("other")
         store.add_artifact(sid, "transcript", "some lecture talk")
         store.add_artifact(sid, "summary", '{"text": "old other summary"}')
@@ -537,7 +537,7 @@ class OtherUiTests(LRTestCase):
                          store.get_artifact(sid, "summary")["content"])
 
     def test_classify_as_memo_goes_to_notes_without_summary(self):
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         sid = self._finished("other")
         store.add_artifact(sid, "transcript", "[00:00] Speaker 1: buy milk")
         store.add_artifact(sid, "summary", '{"text": "old"}')
@@ -557,7 +557,7 @@ class OtherUiTests(LRTestCase):
 
 class NotesVoiceMemoTests(LRTestCase):
     def _memo(self, text="[00:01] Speaker 1: remember to buy milk"):
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         memo = _seed_session(self, status="done", kind="voice_memo")
         store.full_audio_path(memo).write_bytes(self.make_wav(b"\x00" * 256))
         store.add_artifact(memo, "transcript", text)
@@ -581,7 +581,7 @@ class NotesVoiceMemoTests(LRTestCase):
             self.assertEqual(recording_url(memo), f"/notes?note_id={note.id}")
 
     def test_deleting_the_note_deletes_the_recording_and_back(self):
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         memo, note = self._memo()
         self.assertEqual(self.client.delete(f"/api/v1/notes/{note.id}").status_code, 204)
         self.assertIsNone(store.get_session(memo))
@@ -590,14 +590,14 @@ class NotesVoiceMemoTests(LRTestCase):
         self.assertIsNone(store.get_note(note2.id))
 
     def test_moving_a_memo_away_removes_its_note(self):
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         memo, note = self._memo()
         self.client.post(f"/api/v1/sessions/{memo}/kind", json={"kind": "lecture"})
         self.assertIsNone(store.get_note(note.id))
         self.assertEqual(store.get_session(memo).kind, "lecture")
 
     def test_memos_made_before_get_their_notes_on_start(self):
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         memo = _seed_session(self, status="done", kind="voice_memo")
         from services.notes import sync_memo_notes
         self.assertEqual(sync_memo_notes(store), 1)
@@ -607,7 +607,7 @@ class NotesVoiceMemoTests(LRTestCase):
 
 class RecordingNameTests(LRTestCase):
     def test_device_name_shows_as_kind_with_date_line(self):
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         sid = _seed_session(self, status="done", kind="meeting")
         with store._tx() as conn:
             conn.execute("UPDATE sessions SET title = 'rec_2026-01-15T1000' "
@@ -618,7 +618,7 @@ class RecordingNameTests(LRTestCase):
         self.assertIn("Thu 15 Jan 2026, 10:00", body)
 
     def test_rename_by_hand(self):
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         sid = _seed_session(self, status="done", kind="meeting")
         resp = self.client.post(f"/api/v1/sessions/{sid}/title",
                                 json={"title": "  Budget review "})
@@ -640,7 +640,7 @@ class ClickableTranscriptTests(LRTestCase):
                   "a line without a marker")
 
     def test_markers_become_play_buttons(self):
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         sid = _seed_session(self, status="done", kind="meeting")
         store.add_artifact(sid, "transcript", self.TRANSCRIPT)
         body = self.client.get(f"/meetings?session={sid}").get_data(as_text=True)
@@ -650,7 +650,7 @@ class ClickableTranscriptTests(LRTestCase):
         self.assertIn("a line without a marker", body)
 
     def test_recording_page_has_the_transcript_and_player(self):
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         sid = _seed_session(self, status="done", kind="meeting")
         store.full_audio_path(sid).write_bytes(self.make_wav(b"\x00" * 256))
         store.add_artifact(sid, "transcript", self.TRANSCRIPT)
@@ -661,7 +661,7 @@ class ClickableTranscriptTests(LRTestCase):
 
 class DeleteExportTests(LRTestCase):
     def _recording(self):
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         sid = _seed_session(self, status="done", kind="lecture")
         store.full_audio_path(sid).write_bytes(self.make_wav(b"\x00" * 256))
         store.set_session_title(sid, "Entropy and the second law", source="ai")
@@ -726,4 +726,4 @@ class DeleteExportTests(LRTestCase):
             self.assertEqual(self.client.delete(f"/api/v1/sessions/{sid}").status_code, 409)
         finally:
             _PIPELINES_IN_FLIGHT.discard(sid)
-        self.assertIsNotNone(self.app.config["LR_STORAGE"].get_session(sid))
+        self.assertIsNotNone(self.app.config["AFTERWORD_STORAGE"].get_session(sid))

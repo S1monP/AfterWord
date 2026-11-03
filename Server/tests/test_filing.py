@@ -34,7 +34,7 @@ class _Provider(LLMProvider):
 class FilingTests(LRTestCase):
     def setUp(self):
         super().setUp()
-        self.store = self.app.config["LR_STORAGE"]
+        self.store = self.app.config["AFTERWORD_STORAGE"]
         self.tasks = TasksService(self.store)
 
     def _session(self, kind="lecture"):
@@ -81,7 +81,7 @@ class FilingTests(LRTestCase):
         self.assertEqual(by_title["Field trip"].kind, "deadline")
         self.assertEqual(by_title["No date given"].kind, "task")
         self.assertNotIn("Old quiz", by_title)                  # in the past
-        events, _ = self.app.config["LR_EVENTS_SERVICE"].list()
+        events, _ = self.app.config["AFTERWORD_EVENTS_SERVICE"].list()
         exam = next(e for e in events if e.title == "Midterm exam")
         self.assertEqual(exam.source, "extracted")
         self.assertEqual(exam.source_ref, sid)

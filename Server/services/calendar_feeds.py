@@ -494,13 +494,13 @@ class SubscriptionsService:
 
 def start_scheduler(app) -> threading.Thread:
     """Sync due subscriptions every few minutes, in the background.
-    ``app.config["LR_SUBSCRIPTION_SYNC"] = False`` turns it off (tests)."""
+    ``app.config["AFTERWORD_SUBSCRIPTION_SYNC"] = False`` turns it off (tests)."""
     def run() -> None:
         time.sleep(20)
         while True:
-            if app.config.get("LR_SUBSCRIPTION_SYNC", True):
+            if app.config.get("AFTERWORD_SUBSCRIPTION_SYNC", True):
                 try:
-                    app.config["LR_SUBSCRIPTIONS_SERVICE"].sync_due()
+                    app.config["AFTERWORD_SUBSCRIPTIONS_SERVICE"].sync_due()
                 except Exception as exc:  # pragma: no cover
                     print(f"[LR ] calendar sync: {exc!r}", flush=True)
             time.sleep(300)

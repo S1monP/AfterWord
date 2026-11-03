@@ -53,7 +53,7 @@ class TaskDueTests(unittest.TestCase):
 
 class EventTimezoneTests(LRTestCase):
     def _events(self):
-        return self.app.config["LR_EVENTS_SERVICE"]
+        return self.app.config["AFTERWORD_EVENTS_SERVICE"]
 
     def test_form_time_is_local(self):
         ev = self._events().create(title="Lecture", kind="lecture",
@@ -120,7 +120,7 @@ class SessionTimezoneTests(LRTestCase):
         self.assertNotIn("â€”", page)    # the old mojibake dash
 
     def test_old_naive_started_at_is_migrated(self):
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         self._announce("2027-07-10T14:00:00")
         with store._tx() as conn:
             conn.execute("UPDATE sessions SET started_at = '2027-07-10T14:00:00'")

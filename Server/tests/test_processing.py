@@ -81,7 +81,7 @@ class _StubClassifier(LLMProvider):
 def _make_ready_session(case):
     """Create a session in status='ready' with a real full.aac on disk."""
     sid = uuid.uuid4().hex
-    store = case.app.config["LR_STORAGE"]
+    store = case.app.config["AFTERWORD_STORAGE"]
     store.upsert_session(
         sid, title="rec_2026-01-15T1000", expected_count=1,
         sample_rate=22050, channels=1, bits_per_sample=32,
@@ -102,7 +102,7 @@ class PipelineHappyPathTests(LRTestCase):
     def test_pipeline_walks_full_lifecycle(self):
         sid = _make_ready_session(self)
         result = processing.run_post_finish_pipeline(
-            self.app.config["LR_STORAGE"], sid,
+            self.app.config["AFTERWORD_STORAGE"], sid,
             transcript_provider=_StubTranscript("the quick brown fox"),
             classifier=_StubClassifier("lecture", 0.8),
         )
@@ -114,11 +114,11 @@ class PipelineHappyPathTests(LRTestCase):
     def test_pipeline_persists_transcript_artifact(self):
         sid = _make_ready_session(self)
         processing.run_post_finish_pipeline(
-            self.app.config["LR_STORAGE"], sid,
+            self.app.config["AFTERWORD_STORAGE"], sid,
             transcript_provider=_StubTranscript("the quick brown fox"),
             classifier=_StubClassifier("meeting", 0.7),
         )
-        artifact = self.app.config["LR_STORAGE"].get_artifact(
+        artifact = self.app.config["AFTERWORD_STORAGE"].get_artifact(
             sid, "transcript",
         )
         self.assertIsNotNone(artifact)
@@ -128,22 +128,22 @@ class PipelineHappyPathTests(LRTestCase):
     def test_pipeline_sets_kind_with_confidence(self):
         sid = _make_ready_session(self)
         processing.run_post_finish_pipeline(
-            self.app.config["LR_STORAGE"], sid,
+            self.app.config["AFTERWORD_STORAGE"], sid,
             transcript_provider=_StubTranscript("x"),
             classifier=_StubClassifier("voice_memo", 0.55),
         )
-        sess = self.app.config["LR_STORAGE"].get_session(sid)
+        sess = self.app.config["AFTERWORD_STORAGE"].get_session(sid)
         self.assertEqual(sess.kind, "voice_memo")
         self.assertEqual(sess.kind_confidence, 0.55)
 
     def test_pipeline_ends_at_status_done(self):
         sid = _make_ready_session(self)
         processing.run_post_finish_pipeline(
-            self.app.config["LR_STORAGE"], sid,
+            self.app.config["AFTERWORD_STORAGE"], sid,
             transcript_provider=_StubTranscript("x"),
             classifier=_StubClassifier(),
         )
-        sess = self.app.config["LR_STORAGE"].get_session(sid)
+        sess = self.app.config["AFTERWORD_STORAGE"].get_session(sid)
         self.assertEqual(sess.status, storage.STATUS_DONE)
 
     def test_pipeline_calls_providers_with_correct_args(self):
@@ -151,7 +151,7 @@ class PipelineHappyPathTests(LRTestCase):
         transcript = _StubTranscript("xyz")
         classifier = _StubClassifier()
         processing.run_post_finish_pipeline(
-            self.app.config["LR_STORAGE"], sid,
+            self.app.config["AFTERWORD_STORAGE"], sid,
             transcript_provider=transcript,
             classifier=classifier,
         )
@@ -174,7 +174,7 @@ class PipelineFailureTests(LRTestCase):
 
         sid = _make_ready_session(self)
         result = processing.run_post_finish_pipeline(
-            self.app.config["LR_STORAGE"], sid,
+            self.app.config["AFTERWORD_STORAGE"], sid,
             transcript_provider=FailTranscribe(),
             classifier=_StubClassifier(),
         )
@@ -183,14 +183,14 @@ class PipelineFailureTests(LRTestCase):
         self.assertEqual(
             result["reason"], processing.REASON_TRANSCRIBE_FAILED,
         )
-        sess = self.app.config["LR_STORAGE"].get_session(sid)
+        sess = self.app.config["AFTERWORD_STORAGE"].get_session(sid)
         self.assertEqual(sess.status, storage.STATUS_FAILED)
         self.assertIn("simulated upstream 500", sess.status_detail)
 
     def test_classify_failure_marks_status_failed(self):
         sid = _make_ready_session(self)
         result = processing.run_post_finish_pipeline(
-            self.app.config["LR_STORAGE"], sid,
+            self.app.config["AFTERWORD_STORAGE"], sid,
             transcript_provider=_StubTranscript("some text"),
             classifier=_StubClassifier(fail=True),
         )
@@ -199,7 +199,7 @@ class PipelineFailureTests(LRTestCase):
         self.assertEqual(
             result["reason"], processing.REASON_CLASSIFY_FAILED,
         )
-        sess = self.app.config["LR_STORAGE"].get_session(sid)
+        sess = self.app.config["AFTERWORD_STORAGE"].get_session(sid)
         self.assertEqual(sess.status, storage.STATUS_FAILED)
 
     def test_transcribe_failure_keeps_no_artifact(self):
@@ -216,11 +216,11 @@ class PipelineFailureTests(LRTestCase):
 
         sid = _make_ready_session(self)
         processing.run_post_finish_pipeline(
-            self.app.config["LR_STORAGE"], sid,
+            self.app.config["AFTERWORD_STORAGE"], sid,
             transcript_provider=FailTranscribe(),
             classifier=_StubClassifier(),
         )
-        artifact = self.app.config["LR_STORAGE"].get_artifact(
+        artifact = self.app.config["AFTERWORD_STORAGE"].get_artifact(
             sid, "transcript",
         )
         self.assertIsNone(artifact)
@@ -231,11 +231,11 @@ class PipelineFailureTests(LRTestCase):
         pick it up."""
         sid = _make_ready_session(self)
         processing.run_post_finish_pipeline(
-            self.app.config["LR_STORAGE"], sid,
+            self.app.config["AFTERWORD_STORAGE"], sid,
             transcript_provider=_StubTranscript("transcript text"),
             classifier=_StubClassifier(fail=True),
         )
-        artifact = self.app.config["LR_STORAGE"].get_artifact(
+        artifact = self.app.config["AFTERWORD_STORAGE"].get_artifact(
             sid, "transcript",
         )
         self.assertIsNotNone(artifact)
@@ -251,7 +251,7 @@ class PipelineFailureTests(LRTestCase):
             def classify(self, transcript):
                 raise RuntimeError("not reached")
 
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         sid = _make_ready_session(self)
         result = processing.run_post_finish_pipeline(
             store, sid,
@@ -285,7 +285,7 @@ class PipelineFailureTests(LRTestCase):
             def extract(self, transcript, kind, recorded_at=None):
                 raise RuntimeError("memos are not extracted")
 
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         sid = _make_ready_session(self)
         # A summary from an earlier run (as another kind) is removed.
         store.add_artifact(sid, "summary", '{"text": "old"}')
@@ -306,7 +306,7 @@ class PipelineFailureTests(LRTestCase):
 class PipelineSessionStateTests(LRTestCase):
     def test_pipeline_noop_when_not_ready(self):
         sid = uuid.uuid4().hex
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         store.upsert_session(
             sid, title="x", expected_count=1,
             sample_rate=22050, channels=1, bits_per_sample=32,
@@ -323,7 +323,7 @@ class PipelineSessionStateTests(LRTestCase):
 
     def test_pipeline_noop_when_session_missing(self):
         result = processing.run_post_finish_pipeline(
-            self.app.config["LR_STORAGE"], "missing-id",
+            self.app.config["AFTERWORD_STORAGE"], "missing-id",
             transcript_provider=_StubTranscript(),
             classifier=_StubClassifier(),
         )
@@ -331,7 +331,7 @@ class PipelineSessionStateTests(LRTestCase):
 
     def test_pipeline_noop_when_full_audio_missing(self):
         sid = uuid.uuid4().hex
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         store.upsert_session(
             sid, title="x", expected_count=1,
             sample_rate=22050, channels=1, bits_per_sample=32,
@@ -375,23 +375,23 @@ class PipelineRetryTests(LRTestCase):
         sid = _make_ready_session(self)
         transcript = FailThenSucceed()
         r1 = processing.run_post_finish_pipeline(
-            self.app.config["LR_STORAGE"], sid,
+            self.app.config["AFTERWORD_STORAGE"], sid,
             transcript_provider=transcript,
             classifier=_StubClassifier(),
         )
         self.assertFalse(r1["ok"])
-        self.app.config["LR_STORAGE"].set_status(
+        self.app.config["AFTERWORD_STORAGE"].set_status(
             sid, storage.STATUS_READY,
         )
         r2 = processing.run_post_finish_pipeline(
-            self.app.config["LR_STORAGE"], sid,
+            self.app.config["AFTERWORD_STORAGE"], sid,
             transcript_provider=transcript,
             classifier=_StubClassifier("meeting", 0.6),
         )
         self.assertTrue(r2["ok"])
         self.assertEqual(r2["kind"], "meeting")
         self.assertEqual(transcript.attempts, 2)
-        sess = self.app.config["LR_STORAGE"].get_session(sid)
+        sess = self.app.config["AFTERWORD_STORAGE"].get_session(sid)
         self.assertEqual(sess.status, storage.STATUS_DONE)
 
 
@@ -452,14 +452,14 @@ class PipelineSummariseExtractTests(LRTestCase):
 
         sid = _make_ready_session(self)
         result = processing.run_post_finish_pipeline(
-            self.app.config["LR_STORAGE"], sid,
+            self.app.config["AFTERWORD_STORAGE"], sid,
             transcript_provider=StubT(),
             classifier=StubLLM(),
             llm_provider=StubLLM(),
         )
         self.assertTrue(result["ok"])
         # Summary artifact exists and round-trips as JSON.
-        summary = self.app.config["LR_STORAGE"].get_artifact(
+        summary = self.app.config["AFTERWORD_STORAGE"].get_artifact(
             sid, "summary",
         )
         self.assertIsNotNone(summary)
@@ -467,7 +467,7 @@ class PipelineSummariseExtractTests(LRTestCase):
         self.assertEqual(parsed["text"], "A lecture on testing.")
         self.assertEqual(len(parsed["key_points"]), 2)
         # Extraction artifact exists and has the items.
-        extraction = self.app.config["LR_STORAGE"].get_artifact(
+        extraction = self.app.config["AFTERWORD_STORAGE"].get_artifact(
             sid, "extraction",
         )
         self.assertIsNotNone(extraction)
@@ -475,7 +475,7 @@ class PipelineSummariseExtractTests(LRTestCase):
         self.assertEqual(len(items), 2)
         self.assertEqual(items[0]["type"], "topic")
         # Session is fully done.
-        sess = self.app.config["LR_STORAGE"].get_session(sid)
+        sess = self.app.config["AFTERWORD_STORAGE"].get_session(sid)
         self.assertEqual(sess.status, storage.STATUS_DONE)
         self.assertEqual(result["summary_chars"],
                          len("A lecture on testing."))
@@ -511,7 +511,7 @@ class PipelineSummariseExtractTests(LRTestCase):
                     raise LLMError("extraction broke")
                 return []
 
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         sid = _make_ready_session(self)
         t = T()
         run = lambda resume: processing.run_post_finish_pipeline(
@@ -554,7 +554,7 @@ class PipelineSummariseExtractTests(LRTestCase):
 
         sid = _make_ready_session(self)
         result = processing.run_post_finish_pipeline(
-            self.app.config["LR_STORAGE"], sid,
+            self.app.config["AFTERWORD_STORAGE"], sid,
             transcript_provider=T(),
             classifier=T(),
             llm_provider=T(),
@@ -563,12 +563,12 @@ class PipelineSummariseExtractTests(LRTestCase):
         self.assertEqual(
             result["reason"], processing.REASON_SUMMARISE_FAILED,
         )
-        sess = self.app.config["LR_STORAGE"].get_session(sid)
+        sess = self.app.config["AFTERWORD_STORAGE"].get_session(sid)
         self.assertEqual(sess.status, storage.STATUS_FAILED)
         self.assertIn("upstream timed out", sess.status_detail)
         # No summary artifact was persisted.
         self.assertIsNone(
-            self.app.config["LR_STORAGE"].get_artifact(sid, "summary"),
+            self.app.config["AFTERWORD_STORAGE"].get_artifact(sid, "summary"),
         )
 
     def test_extract_failure_keeps_summary_artifact(self):
@@ -593,7 +593,7 @@ class PipelineSummariseExtractTests(LRTestCase):
 
         sid = _make_ready_session(self)
         result = processing.run_post_finish_pipeline(
-            self.app.config["LR_STORAGE"], sid,
+            self.app.config["AFTERWORD_STORAGE"], sid,
             transcript_provider=T(),
             classifier=T(),
             llm_provider=T(),
@@ -602,16 +602,16 @@ class PipelineSummariseExtractTests(LRTestCase):
         self.assertEqual(
             result["reason"], processing.REASON_EXTRACT_FAILED,
         )
-        sess = self.app.config["LR_STORAGE"].get_session(sid)
+        sess = self.app.config["AFTERWORD_STORAGE"].get_session(sid)
         self.assertEqual(sess.status, storage.STATUS_FAILED)
         # The summary was persisted before the extract step failed.
-        summary = self.app.config["LR_STORAGE"].get_artifact(
+        summary = self.app.config["AFTERWORD_STORAGE"].get_artifact(
             sid, "summary",
         )
         self.assertIsNotNone(summary)
         # No extraction artifact.
         self.assertIsNone(
-            self.app.config["LR_STORAGE"].get_artifact(
+            self.app.config["AFTERWORD_STORAGE"].get_artifact(
                 sid, "extraction",
             ),
         )
@@ -631,20 +631,20 @@ class _TopicClassifier(_StubClassifier):
 class RecordingTitleTests(LRTestCase):
     def _device_named(self):
         sid = _make_ready_session(self)
-        with self.app.config["LR_STORAGE"]._tx() as conn:
+        with self.app.config["AFTERWORD_STORAGE"]._tx() as conn:
             conn.execute("UPDATE sessions SET title = ? WHERE id = ?",
                          ("rec_2026-01-15T1000", sid))
         return sid
 
     def _run(self, sid, classifier):
         return processing.run_post_finish_pipeline(
-            self.app.config["LR_STORAGE"], sid,
+            self.app.config["AFTERWORD_STORAGE"], sid,
             transcript_provider=_StubTranscript("some talk"),
             classifier=classifier,
         )
 
     def test_ai_topic_names_the_recording(self):
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         sid = self._device_named()
         self._run(sid, _TopicClassifier("Entropy and the second law"))
         sess = store.get_session(sid)
@@ -657,7 +657,7 @@ class RecordingTitleTests(LRTestCase):
         )
 
     def test_name_given_by_hand_is_kept(self):
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         sid = _make_ready_session(self)
         store.set_session_title(sid, "My name", source="user")
         self._run(sid, _TopicClassifier("Something else"))
@@ -666,7 +666,7 @@ class RecordingTitleTests(LRTestCase):
         self.assertEqual(sess.title_source, "user")
 
     def test_no_topic_keeps_device_name(self):
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         sid = self._device_named()
         self._run(sid, _StubClassifier())
         sess = store.get_session(sid)
@@ -674,7 +674,7 @@ class RecordingTitleTests(LRTestCase):
         self.assertIsNone(sess.title_source)
 
     def test_real_name_from_the_api_is_kept(self):
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         sid = _make_ready_session(self)
         with store._tx() as conn:
             conn.execute("UPDATE sessions SET title = 'Linear Algebra' "
@@ -691,13 +691,13 @@ class CalendarTimeMatchTests(LRTestCase):
     def _seed(self, *, event_title, event_kind, starts_at,
               ends_at=None, course=None):
         sid = _make_ready_session(self)  # started 2026-01-15T10:00:00Z
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         course_id = None
         if course:
             course_id = store.create_course(
                 uuid.uuid4().hex, name=course,
             ).id
-        ev = self.app.config["LR_EVENTS_SERVICE"].create(
+        ev = self.app.config["AFTERWORD_EVENTS_SERVICE"].create(
             title=event_title,
             kind=event_kind,
             starts_at=starts_at,
@@ -710,7 +710,7 @@ class CalendarTimeMatchTests(LRTestCase):
         classifier = classifier or _StubClassifier("meeting", 0.7)
         transcript = _StubTranscript("the quick brown fox")
         result = processing.run_post_finish_pipeline(
-            self.app.config["LR_STORAGE"], sid,
+            self.app.config["AFTERWORD_STORAGE"], sid,
             transcript_provider=transcript,
             classifier=classifier,
         )
@@ -725,7 +725,7 @@ class CalendarTimeMatchTests(LRTestCase):
         )
         result, classifier = self._run(sid)
         self.assertTrue(result["ok"])
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         sess = store.get_session(sid)
         self.assertEqual(sess.kind, "lecture")
         self.assertEqual(sess.kind_confidence, 1.0)
@@ -736,7 +736,7 @@ class CalendarTimeMatchTests(LRTestCase):
         # The AI classifier was never called.
         self.assertEqual(classifier.calls, [])
         # The calendar shows the pairing.
-        matched = self.app.config["LR_EVENTS_SERVICE"].get(
+        matched = self.app.config["AFTERWORD_EVENTS_SERVICE"].get(
             ev.id,
         ).matched_session_id
         self.assertEqual(matched, sid)
@@ -749,7 +749,7 @@ class CalendarTimeMatchTests(LRTestCase):
             course="CS101",
         )
         self._run(sid, _TopicClassifier("Hash tables"))
-        sess = self.app.config["LR_STORAGE"].get_session(sid)
+        sess = self.app.config["AFTERWORD_STORAGE"].get_session(sid)
         self.assertEqual(sess.title, "CS101: Hash tables")
         self.assertEqual(sess.title_source, "calendar")
 
@@ -761,7 +761,7 @@ class CalendarTimeMatchTests(LRTestCase):
         )
         result, classifier = self._run(sid)
         self.assertTrue(result["ok"])
-        sess = self.app.config["LR_STORAGE"].get_session(sid)
+        sess = self.app.config["AFTERWORD_STORAGE"].get_session(sid)
         self.assertIsNone(sess.course_id)
         self.assertEqual(sess.title, "Lecture 5")
         self.assertEqual(classifier.calls, [])
@@ -775,7 +775,7 @@ class CalendarTimeMatchTests(LRTestCase):
         )
         result, classifier = self._run(sid)
         self.assertTrue(result["ok"])
-        sess = self.app.config["LR_STORAGE"].get_session(sid)
+        sess = self.app.config["AFTERWORD_STORAGE"].get_session(sid)
         self.assertEqual(sess.kind, "meeting")
         # Meetings are named after the event, not the course.
         self.assertEqual(sess.title, "Weekly sync")
@@ -793,13 +793,13 @@ class CalendarTimeMatchTests(LRTestCase):
         result, classifier = self._run(sid)
         self.assertTrue(result["ok"])
         self.assertEqual(len(classifier.calls), 1)
-        sess = self.app.config["LR_STORAGE"].get_session(sid)
+        sess = self.app.config["AFTERWORD_STORAGE"].get_session(sid)
         self.assertEqual(sess.kind, "meeting")  # from the AI stub
         self.assertEqual(sess.kind_confidence, 0.7)
 
     def test_manual_kind_is_preserved(self):
         sid = _make_ready_session(self)
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         store.set_kind(sid, "voice_memo", confidence=1.0)
         self._seed(
             event_title="Lecture 5", event_kind="lecture",

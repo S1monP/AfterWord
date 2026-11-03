@@ -2,7 +2,7 @@
 
 * Storage is UTC, always ``YYYY-MM-DDTHH:MM:SSZ``.
 * A timestamp without an offset means local wall-clock time in
-  ``LR_TIMEZONE`` (default ``Europe/London``): what the device puts in
+  ``AFTERWORD_TIMEZONE`` (default ``Europe/London``): what the device puts in
   ``started_at``, what a browser's ``datetime-local`` / ``date`` input
   sends, and an ICS "floating" time.
 * Pages show local time.
@@ -21,7 +21,7 @@ import os
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-TIMEZONE_ENV = "LR_TIMEZONE"
+TIMEZONE_ENV = "AFTERWORD_TIMEZONE"
 DEFAULT_TIMEZONE = "Europe/London"
 UTC = _dt.timezone.utc
 _FMT = "%Y-%m-%dT%H:%M:%SZ"

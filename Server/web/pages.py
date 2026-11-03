@@ -272,7 +272,7 @@ def delete_event_action(event_id: str) -> Any:
 
 @bp.get("/upload")
 def ui_upload() -> Any:
-    cfg = current_app.config["LR_CONFIG"]
+    cfg = current_app.config["AFTERWORD_CONFIG"]
     return render_template(
         "upload.html",
         max_upload_bytes=cfg.max_upload_bytes,

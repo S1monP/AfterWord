@@ -27,39 +27,39 @@ from services import transcode
 
 def current_app_storage() -> storage.Storage:
     """Pull the Storage instance off the active Flask app."""
-    return current_app.config["LR_STORAGE"]
+    return current_app.config["AFTERWORD_STORAGE"]
 
 
 def current_app_notes_service() -> services.notes.NotesService:
     """Pull the NotesService off the active Flask app."""
-    return current_app.config["LR_NOTES_SERVICE"]
+    return current_app.config["AFTERWORD_NOTES_SERVICE"]
 
 
 def current_app_tasks_service() -> services.tasks.TasksService:
     """Pull the TasksService off the active Flask app."""
-    return current_app.config["LR_TASKS_SERVICE"]
+    return current_app.config["AFTERWORD_TASKS_SERVICE"]
 
 
 def current_app_events_service() -> services.events.EventsService:
     """Pull the EventsService off the active Flask app."""
-    return current_app.config["LR_EVENTS_SERVICE"]
+    return current_app.config["AFTERWORD_EVENTS_SERVICE"]
 
 
 def current_app_subscriptions_service():
     """The calendar subscriptions service (services/calendar_feeds.py)."""
-    return current_app.config["LR_SUBSCRIPTIONS_SERVICE"]
+    return current_app.config["AFTERWORD_SUBSCRIPTIONS_SERVICE"]
 
 
 def current_app_classification_service() -> (
     services.classification.ClassificationService
 ):
     """Pull the ClassificationService off the active Flask app."""
-    return current_app.config["LR_CLASSIFICATION_SERVICE"]
+    return current_app.config["AFTERWORD_CLASSIFICATION_SERVICE"]
 
 
 def current_app_courses_service() -> services.courses.CoursesService:
     """Pull the CoursesService off the active Flask app."""
-    return current_app.config["LR_COURSES_SERVICE"]
+    return current_app.config["AFTERWORD_COURSES_SERVICE"]
 
 
 def current_app_llm_providers() -> dict[str, services.llm.LLMProvider]:
@@ -68,17 +68,17 @@ def current_app_llm_providers() -> dict[str, services.llm.LLMProvider]:
     Keys are ``"transcript"`` and ``"text"``; values are provider
     instances (real or no-op depending on env keys).
     """
-    return current_app.config["LR_LLM_PROVIDERS"]
+    return current_app.config["AFTERWORD_LLM_PROVIDERS"]
 
 
 def current_app_transcript_provider() -> services.llm.LLMProvider:
     """Pull the transcription provider (OpenRouter or no-op)."""
-    return current_app.config["LR_LLM_PROVIDERS"]["transcript"]
+    return current_app.config["AFTERWORD_LLM_PROVIDERS"]["transcript"]
 
 
 def current_app_text_provider() -> services.llm.LLMProvider:
     """Pull the text-model provider (OpenRouter chat or no-op)."""
-    return current_app.config["LR_LLM_PROVIDERS"]["text"]
+    return current_app.config["AFTERWORD_LLM_PROVIDERS"]["text"]
 
 
 # ---------------------------------------------------------------------------
@@ -361,7 +361,7 @@ def _estimate_duration_seconds(session: storage.Session) -> float:
     full = current_app_storage().full_audio_path(session.id)
     if not full.exists():
         return 0.0
-    cfg = current_app.config["LR_CONFIG"]
+    cfg = current_app.config["AFTERWORD_CONFIG"]
     duration = transcode.probe_duration(full, ffmpeg_path=cfg.ffmpeg_path)
     if duration is None:
         return 0.0

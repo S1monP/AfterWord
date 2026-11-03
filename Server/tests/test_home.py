@@ -9,7 +9,7 @@ from tests.conftest import LRTestCase
 
 class HomeTests(LRTestCase):
     def _store(self):
-        return self.app.config["LR_STORAGE"]
+        return self.app.config["AFTERWORD_STORAGE"]
 
     def _recording(self, *, kind="lecture", status="done", course_id=None, started_at=None):
         sid = uuid.uuid4().hex
@@ -32,12 +32,12 @@ class HomeTests(LRTestCase):
 
     def test_schedule_next_up_deadlines_and_todos(self):
         now = timeutil.local_now()
-        events = self.app.config["LR_EVENTS_SERVICE"]
+        events = self.app.config["AFTERWORD_EVENTS_SERVICE"]
         start = now + dt.timedelta(minutes=30)
         events.create(title="Project sync with Sam", kind="meeting",
                       starts_at=timeutil.fmt(start), ends_at=timeutil.fmt(start + dt.timedelta(minutes=30)),
                       location="Library room 3")
-        tasks = self.app.config["LR_TASKS_SERVICE"]
+        tasks = self.app.config["AFTERWORD_TASKS_SERVICE"]
         due = (now + dt.timedelta(days=4)).replace(hour=23, minute=59)
         tasks.create(title="Problem set 4", kind="deadline", due_at=timeutil.fmt(due))
         tasks.create(title="Email Sam the slides", kind="task", priority="high")
@@ -55,7 +55,7 @@ class HomeTests(LRTestCase):
         sid = self._recording()
         self._store().add_artifact(sid, "summary", json.dumps(
             {"text": "How to find eigenvalues. And more.", "sections": [], "key_points": []}))
-        self.app.config["LR_TASKS_SERVICE"].create(
+        self.app.config["AFTERWORD_TASKS_SERVICE"].create(
             title="Read chapter 5", kind="task", source="extracted", source_ref=sid, source_offset_ms=2480000)
         body = self.client.get("/").get_data(as_text=True)
         self.assertIn("Eigenvalues and diagonalisation", body)

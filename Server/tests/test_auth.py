@@ -22,7 +22,7 @@ class _AuthCase(LRTestCase):
         super().setUp()
         self._cfg = dataclasses.replace(self._cfg, **self.CFG)
         self.app = create_app(self._cfg)
-        self.app.config["LR_PIPELINE_BACKGROUND"] = False
+        self.app.config["AFTERWORD_PIPELINE_BACKGROUND"] = False
         self.client = self.app.test_client()
 
     def announce(self, headers=None):

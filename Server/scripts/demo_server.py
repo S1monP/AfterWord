@@ -36,12 +36,12 @@ from app import create_app  # noqa: E402
 cfg = dataclasses.replace(config_mod.load(), data_dir=DATA, port=8010, transcription_api_key="",
                           text_api_key="", web_password="")
 app = create_app(cfg)
-app.config["LR_SUBSCRIPTION_SYNC"] = False
-store = app.config["LR_STORAGE"]
-courses = app.config["LR_COURSES_SERVICE"]
-events = app.config["LR_EVENTS_SERVICE"]
-tasks = app.config["LR_TASKS_SERVICE"]
-notes = app.config["LR_NOTES_SERVICE"]
+app.config["AFTERWORD_SUBSCRIPTION_SYNC"] = False
+store = app.config["AFTERWORD_STORAGE"]
+courses = app.config["AFTERWORD_COURSES_SERVICE"]
+events = app.config["AFTERWORD_EVENTS_SERVICE"]
+tasks = app.config["AFTERWORD_TASKS_SERVICE"]
+notes = app.config["AFTERWORD_NOTES_SERVICE"]
 store.set_setting("theme", "dark")
 
 

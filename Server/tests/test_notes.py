@@ -19,7 +19,7 @@ class NotesServiceTests(LRTestCase):
     persists. These tests go through the service."""
 
     def _service(self):
-        return self.app.config["LR_NOTES_SERVICE"]
+        return self.app.config["AFTERWORD_NOTES_SERVICE"]
 
     def test_create_persists_and_renders(self):
         svc = self._service()
@@ -117,7 +117,7 @@ class NotesServiceTests(LRTestCase):
         n2 = svc.create(title="Second", body_md="2")
         n3 = svc.create(title="Third", body_md="3")
         # Force distinct updated_at values so order is deterministic.
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         for n, ts in [(n3, '2026-10-06T10:00:02Z'), (n2, '2026-10-06T10:00:01Z'), (n1, '2026-10-06T10:00:00Z')]:
             with store._tx() as conn:
                 conn.execute('UPDATE notes SET updated_at = ? WHERE id = ?', (ts, n.id))
@@ -354,7 +354,7 @@ class NotesWebUITests(LRTestCase):
         self.assertEqual(self.client.get("/notes?note_id=zzz").status_code, 404)
 
     def test_course_and_export(self):
-        course = self.app.config["LR_COURSES_SERVICE"].create(name="Physics")
+        course = self.app.config["AFTERWORD_COURSES_SERVICE"].create(name="Physics")
         note_id = self._create(title="Waves / 1", body_md="- [x] read").get_json()["note"]["id"]
         resp = self.client.patch(f"/api/v1/notes/{note_id}", json={"course_id": course.id})
         self.assertEqual(resp.get_json()["note"]["course_id"], course.id)

@@ -3,21 +3,21 @@ development server.
 
     python serve.py
 
-Reads the same settings as ``python app.py`` (``.env`` / ``LR_*``). On a
+Reads the same settings as ``python app.py`` (``.env`` / ``AFTERWORD_*``). On a
 VPS, put Caddy in front for HTTPS, bind to localhost, and set:
 
-    LR_HOST=127.0.0.1
-    LR_TRUSTED_PROXY=127.0.0.1     # believe Caddy's X-Forwarded-* headers
-    LR_COOKIE_SECURE=1
-    LR_WEB_PASSWORD=...            # login for the web UI
-    LR_DEVICE_TOKEN=...            # same value as DEVICE_TOKEN in secrets.h
+    AFTERWORD_HOST=127.0.0.1
+    AFTERWORD_TRUSTED_PROXY=127.0.0.1     # believe Caddy's X-Forwarded-* headers
+    AFTERWORD_COOKIE_SECURE=1
+    AFTERWORD_WEB_PASSWORD=...            # login for the web UI
+    AFTERWORD_DEVICE_TOKEN=...            # same value as DEVICE_TOKEN in secrets.h
 
 On the home network (a test drive before the VPS):
 
-    LR_MDNS_NAME=afterword         # http://afterword.local (mdns.py)
-    LR_EXTRA_PORTS=80              # also on port 80, so no ":8000" in the
-                                   # address; the recorder keeps LR_PORT
-    LR_LOG_FILE=data/server.log    # when started in the background
+    AFTERWORD_MDNS_NAME=afterword         # http://afterword.local (mdns.py)
+    AFTERWORD_EXTRA_PORTS=80              # also on port 80, so no ":8000" in the
+                                   # address; the recorder keeps AFTERWORD_PORT
+    AFTERWORD_LOG_FILE=data/server.log    # when started in the background
 
 Run one process: the AI pipeline worker lives inside it.
 """
@@ -34,9 +34,9 @@ from app import create_app
 
 
 def _log_to_file() -> None:
-    """``LR_LOG_FILE``: everything printed goes to that file (appended),
+    """``AFTERWORD_LOG_FILE``: everything printed goes to that file (appended),
     for running without a console window."""
-    path = os.environ.get("LR_LOG_FILE", "").strip()
+    path = os.environ.get("AFTERWORD_LOG_FILE", "").strip()
     if not path:
         return
     log = Path(path)
@@ -48,7 +48,7 @@ def _log_to_file() -> None:
 
 def _ports(cfg) -> list[int]:
     ports = [cfg.port]
-    for part in os.environ.get("LR_EXTRA_PORTS", "").replace(",", " ").split():
+    for part in os.environ.get("AFTERWORD_EXTRA_PORTS", "").replace(",", " ").split():
         if part.isdigit() and int(part) not in ports:
             ports.append(int(part))
     return ports
@@ -59,9 +59,9 @@ def main() -> None:
     _log_to_file()
     app = create_app(cfg)
     if not cfg.web_password:
-        print("[LR ] WARNING: LR_WEB_PASSWORD is not set; the web UI is open "
+        print("[LR ] WARNING: AFTERWORD_WEB_PASSWORD is not set; the web UI is open "
               "to anyone who can reach the server.", flush=True)
-    proxy = os.environ.get("LR_TRUSTED_PROXY", "").strip()
+    proxy = os.environ.get("AFTERWORD_TRUSTED_PROXY", "").strip()
     extra = {}
     if proxy:
         extra = {
@@ -74,7 +74,7 @@ def main() -> None:
     listen = " ".join(f"{cfg.host}:{p}" for p in ports)
     print(f"[LR ] waitress on {listen}"
           + (f" (behind proxy {proxy})" if proxy else ""), flush=True)
-    name = os.environ.get("LR_MDNS_NAME", "").strip()
+    name = os.environ.get("AFTERWORD_MDNS_NAME", "").strip()
     if name:
         import mdns
         # The friendliest port: 80 when it's served (no ":8000" to type).

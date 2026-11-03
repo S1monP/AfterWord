@@ -50,15 +50,15 @@ class LRTestCase(unittest.TestCase):
         # Run upload pipelines synchronously in tests so assertions
         # on the post-upload status are deterministic. (Production
         # runs them in a background thread.)
-        self.app.config["LR_PIPELINE_BACKGROUND"] = False
+        self.app.config["AFTERWORD_PIPELINE_BACKGROUND"] = False
         # No calendar fetching from the network in tests.
-        self.app.config["LR_SUBSCRIPTION_SYNC"] = False
+        self.app.config["AFTERWORD_SUBSCRIPTION_SYNC"] = False
         self.client = self.app.test_client()
 
     def tearDown(self) -> None:
         # Release any per-thread SQLite handles by dropping the app.
         try:
-            self.app.config["LR_STORAGE"]._tls.conn.close()  # type: ignore[attr-defined]
+            self.app.config["AFTERWORD_STORAGE"]._tls.conn.close()  # type: ignore[attr-defined]
         except Exception:
             pass
         # Best-effort cleanup. On Windows, WAL files may still be locked

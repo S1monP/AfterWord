@@ -195,7 +195,7 @@ def main() -> int:
             return run_checks(req)
     finally:
         try:
-            app_storage = app.config["LR_STORAGE"]
+            app_storage = app.config["AFTERWORD_STORAGE"]
             try:
                 app_storage._tls.conn.close()  # type: ignore[attr-defined]
             except Exception:

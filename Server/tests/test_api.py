@@ -218,14 +218,14 @@ class TranscribeRouteTests(LRTestCase):
             def transcribe(self, audio_path):
                 raise RuntimeError("not used")
 
-        self.app.config["LR_LLM_PROVIDERS"] = {
+        self.app.config["AFTERWORD_LLM_PROVIDERS"] = {
             "transcript": StubT(),
             "text": StubC(),
         }
 
     def _make_ready_session(self, sid="trnsc0000001"):
         import storage
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         store.upsert_session(
             sid, title="x", expected_count=1,
             sample_rate=22050, channels=1, bits_per_sample=32,
@@ -261,7 +261,7 @@ class TranscribeRouteTests(LRTestCase):
         route returns 409."""
         self._stub_providers()
         import storage
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         store.upsert_session(
             "trnsc0000002", title="x", expected_count=1,
             sample_rate=22050, channels=1, bits_per_sample=32,
@@ -282,7 +282,7 @@ class TranscribeRouteTests(LRTestCase):
         self._stub_providers(kind="lecture", conf=0.9)
         import storage
         sid = self._make_ready_session("stranded0001")
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         # Force the stuck state (ready -> transcribing is a legal
         # transition, exactly where a killed server would leave it).
         store.set_status(sid, storage.STATUS_TRANSCRIBING)
@@ -334,7 +334,7 @@ class TranscribeRouteTests(LRTestCase):
             def extract(self, transcript, kind, recorded_at=None):
                 raise LLMError("first run fails")
 
-        self.app.config["LR_LLM_PROVIDERS"] = {
+        self.app.config["AFTERWORD_LLM_PROVIDERS"] = {
             "transcript": Bad(), "text": Bad(),
         }
         sid = self._make_ready_session("trnsc0000003")
@@ -342,7 +342,7 @@ class TranscribeRouteTests(LRTestCase):
         self.assertEqual(r1.status_code, 200)
         self.assertFalse(r1.get_json()["ok"])
         self.assertEqual(
-            self.app.config["LR_STORAGE"].get_session(sid).status,
+            self.app.config["AFTERWORD_STORAGE"].get_session(sid).status,
             storage.STATUS_FAILED,
         )
         # Swap in working providers and retry.
@@ -366,7 +366,7 @@ class TranscribeRouteTests(LRTestCase):
                 # M9: no items.
                 return []
 
-        self.app.config["LR_LLM_PROVIDERS"] = {
+        self.app.config["AFTERWORD_LLM_PROVIDERS"] = {
             "transcript": Good(), "text": Good(),
         }
         r2 = self.client.post(f"/api/v1/sessions/{sid}/transcribe")
@@ -401,7 +401,7 @@ class TranscribeRouteTests(LRTestCase):
             def transcribe(self, audio_path):
                 raise RuntimeError("not used")
 
-        self.app.config["LR_LLM_PROVIDERS"] = {
+        self.app.config["AFTERWORD_LLM_PROVIDERS"] = {
             "transcript": T(), "text": C(),
         }
         sid = self._make_ready_session("trnsc0000004")
@@ -420,7 +420,7 @@ class WebUITests(LRTestCase):
         dashboard cards show them instead of the empty states."""
         import datetime as _dt
         import storage as storage_mod
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         for sid, kind, title in (
             ("lect00000001", "lecture", "Linear Algebra"),
             ("meet00000001", "meeting", "Weekly sync"),
@@ -441,7 +441,7 @@ class WebUITests(LRTestCase):
             _dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(days=1)
         )
         event_starts = tomorrow.strftime("%Y-%m-%dT") + "10:00:00Z"
-        self.app.config["LR_EVENTS_SERVICE"].create(
+        self.app.config["AFTERWORD_EVENTS_SERVICE"].create(
             title="Project demo", kind="other", starts_at=event_starts,
         )
         r = self.client.get("/")
@@ -713,7 +713,7 @@ class PipelineResilienceTests(LRTestCase):
     def _stranded_session(self, sid: str, to_status: str) -> None:
         """Create a stitched session and strand it at ``to_status``
         (simulating a server restart mid-pipeline)."""
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         store.upsert_session(
             sid, title="Stranded", expected_count=1,
             sample_rate=22050, channels=1, bits_per_sample=32,
@@ -738,7 +738,7 @@ class PipelineResilienceTests(LRTestCase):
                     break
 
     def _wait_status(self, sid: str, want: str, timeout: float = 10.0):
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         deadline = time.time() + timeout
         status = None
         while time.time() < deadline:
@@ -754,7 +754,7 @@ class PipelineResilienceTests(LRTestCase):
         runs on the FIFO worker, then completes to 'done'."""
         sid = "resfinish00000001"
         self._announce_and_fill(sid)
-        self.app.config["LR_PIPELINE_BACKGROUND"] = True
+        self.app.config["AFTERWORD_PIPELINE_BACKGROUND"] = True
         r = self.client.post(f"/api/v1/sessions/{sid}/finish")
         self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
         j = r.get_json()
@@ -777,7 +777,7 @@ class PipelineResilienceTests(LRTestCase):
         # Give any (wrongly) queued pipeline time to move the status.
         time.sleep(0.3)
         self.assertEqual(
-            self.app.config["LR_STORAGE"].get_session(sid).status,
+            self.app.config["AFTERWORD_STORAGE"].get_session(sid).status,
             storage.STATUS_TRANSCRIBING,
         )
 
@@ -795,7 +795,7 @@ class PipelineResilienceTests(LRTestCase):
         """A stranded session with a persisted transcript artifact
         skips transcription entirely (the expensive step is not
         repeated after a restart)."""
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         sid = "resresume00000001"
         self._stranded_session(sid, storage.STATUS_TRANSCRIBED)
         store.add_artifact(sid, "transcript", "kept transcript", model="stub")
@@ -815,8 +815,8 @@ class PipelineResilienceTests(LRTestCase):
             def extract(self, t, k, recorded_at=None):
                 raise AssertionError("must not re-extract on resume")
 
-        noop_text = self.app.config["LR_LLM_PROVIDERS"]["text"]
-        self.app.config["LR_LLM_PROVIDERS"] = {
+        noop_text = self.app.config["AFTERWORD_LLM_PROVIDERS"]["text"]
+        self.app.config["AFTERWORD_LLM_PROVIDERS"] = {
             "transcript": _Boom(), "text": noop_text,
         }
         requeued = sweep_stranded_sessions(self.app)
@@ -831,7 +831,7 @@ class PipelineResilienceTests(LRTestCase):
         would loop forever); they stay for the manual retry endpoint."""
         sid = "resfailed00000001"
         self._stranded_session(sid, storage.STATUS_TRANSCRIBING)
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         store.update_status(
             sid, storage.STATUS_FAILED, status_detail="boom",
         )
@@ -845,7 +845,7 @@ class PipelineResilienceTests(LRTestCase):
         """Two queued sessions are transcribed one at a time, in
         queue order."""
         from pathlib import Path
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         sids = ["resfifo0000000001", "resfifo0000000002"]
         for k, sid in enumerate(sids):
             store.upsert_session(
@@ -856,7 +856,7 @@ class PipelineResilienceTests(LRTestCase):
             store.write_chunk(sid, 1, self.make_wav(b"\x00" * 200))
             self.assertTrue(store.finish_session(sid).ok)
 
-        noop_text = self.app.config["LR_LLM_PROVIDERS"]["text"]
+        noop_text = self.app.config["AFTERWORD_LLM_PROVIDERS"]["text"]
 
         class _Recorder:
             name = "recorder"
@@ -878,7 +878,7 @@ class PipelineResilienceTests(LRTestCase):
                 return noop_text.extract(t, k)
 
         rec = _Recorder()
-        self.app.config["LR_LLM_PROVIDERS"] = {
+        self.app.config["AFTERWORD_LLM_PROVIDERS"] = {
             "transcript": rec, "text": noop_text,
         }
         for sid in sids:

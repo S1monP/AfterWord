@@ -47,8 +47,8 @@ class _Base(LRTestCase):
         patcher = mock.patch.object(calendar_feeds, "fetch", side_effect=lambda url: self.feed)
         self.fetch = patcher.start()
         self.addCleanup(patcher.stop)
-        self.svc = self.app.config["LR_SUBSCRIPTIONS_SERVICE"]
-        self.store = self.app.config["LR_STORAGE"]
+        self.svc = self.app.config["AFTERWORD_SUBSCRIPTIONS_SERVICE"]
+        self.store = self.app.config["AFTERWORD_STORAGE"]
 
     def events(self):
         return self.store.list_events(limit=5000)[0]
@@ -170,7 +170,7 @@ class RepeatingEventTests(_Base):
 
 class YourChangesStayTests(_Base):
     def test_kind_and_course_you_set_survive_a_sync(self):
-        course = self.app.config["LR_COURSES_SERVICE"].create(name="Elsewhere")
+        course = self.app.config["AFTERWORD_COURSES_SERVICE"].create(name="Elsewhere")
         sub, _ = self.svc.add(URL, kind="lecture")
         ev = next(e for e in self.events() if e.source_ref == "a")
         self.store.update_event(ev.id, kind="meeting", course_id=course.id)
@@ -184,7 +184,7 @@ class YourChangesStayTests(_Base):
     def test_an_event_you_delete_stays_deleted(self):
         sub, _ = self.svc.add(URL)
         ev = next(e for e in self.events() if e.source_ref == "a")
-        self.app.config["LR_EVENTS_SERVICE"].delete(ev.id)
+        self.app.config["AFTERWORD_EVENTS_SERVICE"].delete(ev.id)
         result = self.svc.sync(sub.id)
         self.assertEqual((result.added, result.skipped), (0, 1))
         self.assertEqual([e.source_ref for e in self.events()], ["b"])
@@ -196,7 +196,7 @@ class YourChangesStayTests(_Base):
         self.assertEqual(self.svc.get(sub.id).name, "Renamed")
 
     def test_removing_a_subscription_removes_its_events_only(self):
-        manual = self.app.config["LR_EVENTS_SERVICE"].create(
+        manual = self.app.config["AFTERWORD_EVENTS_SERVICE"].create(
             title="Dentist", kind="other", starts_at="2030-01-01T10:00:00Z")
         sub, _ = self.svc.add(URL)
         self.assertTrue(self.svc.delete(sub.id))
@@ -205,7 +205,7 @@ class YourChangesStayTests(_Base):
 
 class CourseTests(_Base):
     def test_events_match_courses_by_code_or_name(self):
-        courses = self.app.config["LR_COURSES_SERVICE"]
+        courses = self.app.config["AFTERWORD_COURSES_SERVICE"]
         algebra = courses.create(name="Algebra basics", code="math101")
         optics = courses.create(name="Optics")
         self.svc.add(URL)
@@ -217,7 +217,7 @@ class CourseTests(_Base):
         missing = self.svc.missing_courses(sub.id)
         self.assertEqual([(m["code"], m["name"]) for m in missing],
                          [("MATH101", "Algebra"), ("PHY202", "Optics")])
-        self.assertEqual(self.svc.create_courses(sub.id, self.app.config["LR_COURSES_SERVICE"]), 2)
+        self.assertEqual(self.svc.create_courses(sub.id, self.app.config["AFTERWORD_COURSES_SERVICE"]), 2)
         self.assertTrue(all(e.course_id for e in self.events()))
         self.assertEqual(self.svc.missing_courses(sub.id), [])
 
@@ -235,7 +235,7 @@ class CourseTests(_Base):
 
 class ImportTests(_Base):
     def test_importing_twice_updates_instead_of_duplicating(self):
-        events = self.app.config["LR_EVENTS_SERVICE"]
+        events = self.app.config["AFTERWORD_EVENTS_SERVICE"]
         self.assertEqual(events.import_ics(self.feed, "lecture"), 2)
         self.feed = calendar(vevent("a", "MATH101 Algebra/Lecture 01", 1, 12),
                              vevent("b", "PHY202 Optics Lab 2", 2, 14))
@@ -243,7 +243,7 @@ class ImportTests(_Base):
         self.assertEqual(len(self.events()), 2)
 
     def test_a_subscription_takes_over_events_imported_earlier(self):
-        self.app.config["LR_EVENTS_SERVICE"].import_ics(self.feed)
+        self.app.config["AFTERWORD_EVENTS_SERVICE"].import_ics(self.feed)
         self.svc.add(URL)
         self.assertEqual(len(self.events()), 2)
         self.assertEqual({e.source for e in self.events()}, {"subscription"})

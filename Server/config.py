@@ -51,6 +51,38 @@ def _load_dotenv(path: Path) -> None:
         os.environ[key] = value
 
 
+#: Settings used to be named ``LR_*``; those names are still read.
+LEGACY_PREFIX = "LR_"
+PREFIX = "AFTERWORD_"
+#: Old names that map onto a different setting, in priority order: the
+#: OpenRouter key used to serve both models, the MiniMax key the text one.
+_LEGACY_ALIASES: dict[str, tuple[str, ...]] = {
+    "LR_MINIMAX_API_KEY": ("AFTERWORD_TEXT_API_KEY",),
+    "LR_OPENROUTER_API_KEY": (
+        "AFTERWORD_TRANSCRIPTION_API_KEY", "AFTERWORD_TEXT_API_KEY",
+    ),
+}
+
+
+def apply_legacy_names(environ=os.environ) -> None:
+    """Copy settings still named ``LR_*`` onto their ``AFTERWORD_*`` names.
+
+    A value already set under the new name always wins, so an old
+    ``.env`` keeps working and can be renamed at any time.
+    """
+    def copy(old: str, new: str) -> None:
+        value = environ.get(old, "")
+        if value != "" and environ.get(new, "") == "":
+            environ[new] = value
+
+    for old in [k for k in environ if k.startswith(LEGACY_PREFIX)]:
+        if old not in _LEGACY_ALIASES:
+            copy(old, PREFIX + old[len(LEGACY_PREFIX):])
+    for old, targets in _LEGACY_ALIASES.items():
+        for new in targets:
+            copy(old, new)
+
+
 def _env(key: str, *fallback_keys: str, default: str = "") -> str:
     """First non-empty value among ``key`` and ``fallback_keys``."""
     for k in (key, *fallback_keys):
@@ -117,28 +149,26 @@ def load() -> Config:
     """Build a Config from the current process environment.
 
     A ``.env`` file is loaded first (CWD, then the directory
-    containing this module) without overriding real env vars.
+    containing this module) without overriding real env vars, then
+    old ``LR_*`` names are copied onto their new names
+    (:func:`apply_legacy_names`).
     """
     here = Path(__file__).resolve().parent
     for candidate in (Path.cwd() / ".env", here / ".env"):
         _load_dotenv(candidate)
+    apply_legacy_names()
     return Config(
-        data_dir=_resolve_dir(_env("LR_DATA_DIR", default="data"), here),
-        host=_env("LR_HOST", default="0.0.0.0"),
-        port=_env_int("LR_PORT", 8000),
+        data_dir=_resolve_dir(_env("AFTERWORD_DATA_DIR", default="data"), here),
+        host=_env("AFTERWORD_HOST", default="0.0.0.0"),
+        port=_env_int("AFTERWORD_PORT", 8000),
         # Both providers go through OpenRouter; the same key works
-        # for both. Legacy var names are accepted as fallbacks.
-        transcription_api_key=_env(
-            "LR_TRANSCRIPTION_API_KEY", "LR_OPENROUTER_API_KEY",
-        ),
-        text_api_key=_env(
-            "LR_TEXT_API_KEY", "LR_MINIMAX_API_KEY",
-            "LR_OPENROUTER_API_KEY",
-        ),
-        ffmpeg_path=_env("LR_FFMPEG_PATH", default="ffmpeg"),
-        max_upload_bytes=_env_int("LR_MAX_UPLOAD_BYTES", 500 * 1024 * 1024),
-        device_token=_env("LR_DEVICE_TOKEN"),
-        web_password=_env("LR_WEB_PASSWORD"),
-        secret_key=_env("LR_SECRET"),
-        cookie_secure=_env("LR_COOKIE_SECURE").lower() in ("1", "true", "yes", "on"),
+        # for both.
+        transcription_api_key=_env("AFTERWORD_TRANSCRIPTION_API_KEY"),
+        text_api_key=_env("AFTERWORD_TEXT_API_KEY"),
+        ffmpeg_path=_env("AFTERWORD_FFMPEG_PATH", default="ffmpeg"),
+        max_upload_bytes=_env_int("AFTERWORD_MAX_UPLOAD_BYTES", 500 * 1024 * 1024),
+        device_token=_env("AFTERWORD_DEVICE_TOKEN"),
+        web_password=_env("AFTERWORD_WEB_PASSWORD"),
+        secret_key=_env("AFTERWORD_SECRET"),
+        cookie_secure=_env("AFTERWORD_COOKIE_SECURE").lower() in ("1", "true", "yes", "on"),
     )

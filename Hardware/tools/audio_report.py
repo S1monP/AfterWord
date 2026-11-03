@@ -11,7 +11,7 @@ recording; any format ffmpeg reads works.  Reports:
   * noise floor of the quietest seconds and its spectrum (hum vs. hiss)
 
 For a true noise floor, record a minute with nothing playing and hands
-off the board.  Needs ffmpeg on PATH (or LR_FFMPEG_PATH) and numpy:
+off the board.  Needs ffmpeg on PATH (or AFTERWORD_FFMPEG_PATH) and numpy:
     uv run --no-project --with numpy python audio_report.py 1.aac 2.aac
 """
 import os
@@ -22,7 +22,7 @@ import numpy as np
 
 SR = 22050
 N = 4096
-FFMPEG = os.environ.get("LR_FFMPEG_PATH", "ffmpeg")
+FFMPEG = os.environ.get("AFTERWORD_FFMPEG_PATH", "ffmpeg")
 
 
 def decode(paths):

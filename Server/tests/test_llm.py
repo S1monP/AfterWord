@@ -194,7 +194,7 @@ class TranscriptionProviderTests(unittest.TestCase):
 
     def test_transcribe_provider_options_env_override(self):
         capture = {}
-        env_name = "LR_TRANSCRIBE_PROVIDER_OPTIONS"
+        env_name = "AFTERWORD_TRANSCRIBE_PROVIDER_OPTIONS"
         old = os.environ.get(env_name)
         os.environ[env_name] = "{}"
         try:

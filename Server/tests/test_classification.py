@@ -22,7 +22,7 @@ def _make_session(
     """
     import uuid
     sid = uuid.uuid4().hex
-    store = self.app.config["LR_STORAGE"]
+    store = self.app.config["AFTERWORD_STORAGE"]
     store.upsert_session(
         sid,
         title="test",
@@ -49,7 +49,7 @@ def _make_session(
 
 class ClassificationServiceTests(LRTestCase):
     def _service(self):
-        return self.app.config["LR_CLASSIFICATION_SERVICE"]
+        return self.app.config["AFTERWORD_CLASSIFICATION_SERVICE"]
 
     def test_override_kind_persists_lecture(self):
         sid = _make_session(self)
@@ -106,7 +106,7 @@ class ClassificationServiceTests(LRTestCase):
                 )
 
         sid = _make_session(self)
-        self.app.config["LR_STORAGE"].add_artifact(
+        self.app.config["AFTERWORD_STORAGE"].add_artifact(
             sid, "transcript", "lorem ipsum transcript",
         )
         out = self._service().classify_session(
@@ -130,7 +130,7 @@ class ClassificationServiceTests(LRTestCase):
                 raise LLMError("simulated upstream failure")
 
         sid = _make_session(self)
-        self.app.config["LR_STORAGE"].add_artifact(
+        self.app.config["AFTERWORD_STORAGE"].add_artifact(
             sid, "transcript", "something",
         )
         self.assertIsNone(
@@ -200,12 +200,12 @@ class ClassificationApiTests(LRTestCase):
                 )
 
         sid = self._make()
-        self.app.config["LR_STORAGE"].add_artifact(
+        self.app.config["AFTERWORD_STORAGE"].add_artifact(
             sid, "transcript", "all-hands meeting notes",
         )
         # Replace the registered classifier with the stub.
-        original = self.app.config["LR_LLM_PROVIDERS"]["text"]
-        self.app.config["LR_LLM_PROVIDERS"]["text"] = (
+        original = self.app.config["AFTERWORD_LLM_PROVIDERS"]["text"]
+        self.app.config["AFTERWORD_LLM_PROVIDERS"]["text"] = (
             StubClassifier()
         )
         try:
@@ -213,14 +213,14 @@ class ClassificationApiTests(LRTestCase):
                 f"/api/v1/sessions/{sid}/classify",
             )
         finally:
-            self.app.config["LR_LLM_PROVIDERS"]["text"] = original
+            self.app.config["AFTERWORD_LLM_PROVIDERS"]["text"] = original
         self.assertEqual(resp.status_code, 200)
         body = resp.get_json()
         self.assertEqual(body["kind"], "meeting")
         self.assertEqual(body["confidence"], 0.65)
         self.assertEqual(body["reason"], "classified")
         # The kind should also be persisted on the session row.
-        sess = self.app.config["LR_STORAGE"].get_session(sid)
+        sess = self.app.config["AFTERWORD_STORAGE"].get_session(sid)
         self.assertEqual(sess.kind, "meeting")
         self.assertEqual(sess.kind_confidence, 0.65)
 

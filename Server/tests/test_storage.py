@@ -15,14 +15,14 @@ from tests.conftest import LRTestCase
 class InitialiseTests(LRTestCase):
 
     def test_initialise_creates_dirs(self) -> None:
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         self.assertTrue(self._tmpdir.exists())
         self.assertTrue((self._tmpdir / "db").exists())
         self.assertTrue((self._tmpdir / "sessions").exists())
         self.assertTrue((self._tmpdir / "db" / "metadata.db").exists())
 
     def test_schema_includes_future_seams(self) -> None:
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         with store._connect() as conn:  # type: ignore[attr-defined]
             tables = {
                 r["name"]
@@ -34,7 +34,7 @@ class InitialiseTests(LRTestCase):
             self.assertIn(expected, tables, f"missing table {expected}")
 
     def test_search_tables_created(self) -> None:
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         with store._connect() as conn:  # type: ignore[attr-defined]
             names = {
                 r["name"]
@@ -50,7 +50,7 @@ class InitialiseTests(LRTestCase):
 class SessionTests(LRTestCase):
 
     def test_upsert_creates_session(self) -> None:
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         sid = "abcdef1234567890"
         sess, created = store.upsert_session(
             sid,
@@ -66,7 +66,7 @@ class SessionTests(LRTestCase):
         self.assertEqual(sess.status, storage.STATUS_RECEIVING)
 
     def test_upsert_is_idempotent(self) -> None:
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         sid = "abcdef1234567890"
         store.upsert_session(
             sid, title="First", expected_count=2,
@@ -82,7 +82,7 @@ class SessionTests(LRTestCase):
         self.assertEqual(sess.title, "First")
 
     def test_session_id_validation(self) -> None:
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         with self.assertRaises(ValueError):
             store.upsert_session(
                 "ab", title="x", expected_count=1,
@@ -91,7 +91,7 @@ class SessionTests(LRTestCase):
             )
 
     def test_list_sessions_ordering(self) -> None:
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         # Use distinct created_at values via started_at so ordering is
         # deterministic without depending on real wall-clock time.
         for i, tag in enumerate(("aaaa", "bbbb", "cccc")):
@@ -107,7 +107,7 @@ class SessionTests(LRTestCase):
 class ChunkWriteTests(LRTestCase):
 
     def _make_session(self, expected: int = 2) -> str:
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         sid = "abcdef1234567890"
         store.upsert_session(
             sid, title="t", expected_count=expected,
@@ -118,7 +118,7 @@ class ChunkWriteTests(LRTestCase):
 
     def test_write_chunk_creates_file(self) -> None:
         sid = self._make_session()
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         payload = self.make_wav()
         size = store.write_chunk(sid, 1, payload)
         self.assertEqual(size, len(payload))
@@ -126,7 +126,7 @@ class ChunkWriteTests(LRTestCase):
 
     def test_write_chunk_overwrites_safely(self) -> None:
         sid = self._make_session()
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         a = self.make_wav(b"A" * 200)
         b = self.make_wav(b"B" * 200)
         store.write_chunk(sid, 1, a)
@@ -140,20 +140,20 @@ class ChunkWriteTests(LRTestCase):
 
     def test_write_chunk_too_high_index_rejected(self) -> None:
         sid = self._make_session(expected=2)
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         with self.assertRaises(ValueError):
             store.write_chunk(sid, 5, self.make_wav())
 
     def test_missing_chunks_reports_gaps(self) -> None:
         sid = self._make_session(expected=3)
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         store.write_chunk(sid, 1, self.make_wav())
         store.write_chunk(sid, 3, self.make_wav())
         self.assertEqual(store.missing_chunks(sid), [2])
 
     def test_meta_json_written(self) -> None:
         sid = self._make_session()
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         meta_path = store.session_dir(sid) / "meta.json"
         self.assertTrue(meta_path.exists())
 
@@ -161,7 +161,7 @@ class ChunkWriteTests(LRTestCase):
 class FinishTests(LRTestCase):
 
     def _make_full_session(self, n: int = 3) -> str:
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         sid = "abcdef1234567890"
         store.upsert_session(
             sid, title="t", expected_count=n,
@@ -173,7 +173,7 @@ class FinishTests(LRTestCase):
         return sid
 
     def test_finish_missing_returns_409_payload(self) -> None:
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         sid = "abcdef1234567890"
         store.upsert_session(
             sid, title="t", expected_count=3,
@@ -188,7 +188,7 @@ class FinishTests(LRTestCase):
 
     def test_finish_stitches_full_aac(self) -> None:
         sid = self._make_full_session(n=3)
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         result = store.finish_session(sid)
         self.assertTrue(result.ok, result.reason)
         full = store.open_full_audio(sid)
@@ -205,7 +205,7 @@ class FinishTests(LRTestCase):
 
     def test_finish_removes_chunk_files(self) -> None:
         sid = self._make_full_session(n=2)
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         store.finish_session(sid)
         # Chunk files are gone; the chunks directory is rmdir'd.
         self.assertFalse(store.chunk_path(sid, 1).exists())
@@ -213,7 +213,7 @@ class FinishTests(LRTestCase):
 
     def test_finish_idempotent(self) -> None:
         sid = self._make_full_session(n=2)
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         r1 = store.finish_session(sid)
         r2 = store.finish_session(sid)
         self.assertTrue(r1.ok)
@@ -221,7 +221,7 @@ class FinishTests(LRTestCase):
         self.assertEqual(r2.reason, "already_ready")
 
     def test_finish_clears_failed_status_on_retry(self) -> None:
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         sid = self._make_full_session(n=2)
         store.update_status(sid, storage.STATUS_FAILED, status_detail="boom")
         self.assertEqual(store.get_session(sid).status, storage.STATUS_FAILED)
@@ -282,7 +282,7 @@ class NonMinimalWavTests(LRTestCase):
 
     def test_wav_with_list_chunk_is_accepted_by_sniff(self) -> None:
         wav = self._build_wav_with_extra_chunk(b"\x00" * 200)
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         sid = "listchunk1234567890"
         store.upsert_session(
             sid, title="t", expected_count=1,
@@ -301,7 +301,7 @@ class NonMinimalWavTests(LRTestCase):
             b"\x00" * 200, extra_chunk_id=b"JUNK",
             extra_payload=b"\x00" * 64,
         )
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         sid = "junkchunk1234567890"
         store.upsert_session(
             sid, title="t", expected_count=1,
@@ -317,7 +317,7 @@ class NonMinimalWavTests(LRTestCase):
         of the chunk files (stream copy, no header surgery)."""
         payload = b"ABCD" * 500  # 2000 bytes, easy to identify in output
         wav = self._build_wav_with_extra_chunk(payload)
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         sid = "payload1234567890ab"
         store.upsert_session(
             sid, title="t", expected_count=1,
@@ -332,7 +332,7 @@ class NonMinimalWavTests(LRTestCase):
         self.assertEqual(full, wav)
 
     def test_stitched_multi_chunk_concatenates_in_order(self) -> None:
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         sid = "concat1234567890a"
         store.upsert_session(
             sid, title="t", expected_count=3,
@@ -409,7 +409,7 @@ class M8TransitionGuardTests(LRTestCase):
     def _make(self):
         import uuid
         sid = uuid.uuid4().hex
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         store.upsert_session(
             sid, title="x", expected_count=1,
             sample_rate=22050, channels=1, bits_per_sample=32,
@@ -466,7 +466,7 @@ class M8AddArtifactTests(LRTestCase):
     def _make(self):
         import uuid
         sid = uuid.uuid4().hex
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         store.upsert_session(
             sid, title="x", expected_count=1,
             sample_rate=22050, channels=1, bits_per_sample=32,
@@ -489,7 +489,7 @@ class M8AddArtifactTests(LRTestCase):
         self.assertEqual(fetched["content"], "hello world")
 
     def test_add_artifact_missing_session_raises_keyerror(self):
-        store = self.app.config["LR_STORAGE"]
+        store = self.app.config["AFTERWORD_STORAGE"]
         with self.assertRaises(KeyError):
             store.add_artifact("no-such-id", "transcript", "x")
 

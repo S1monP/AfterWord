@@ -166,7 +166,7 @@ def main() -> int:
         server.shutdown()
         thread.join(timeout=2)
         try:
-            app.config["LR_STORAGE"]._tls.conn.close()  # type: ignore[attr-defined]
+            app.config["AFTERWORD_STORAGE"]._tls.conn.close()  # type: ignore[attr-defined]
         except Exception:
             pass
         shutil.rmtree(tmp, ignore_errors=True)
