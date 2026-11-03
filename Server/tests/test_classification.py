@@ -1,9 +1,7 @@
 """Tests for the ClassificationService and the Other page.
 
-The LLM path is a stub (Milestone 6), so the corresponding
-``classify_session`` tests assert the stub contract (always returns
-None). The real implementation lands in Milestone 8 alongside
-transcription.
+The LLM path is tested with stub classifiers; no real API calls are
+made.
 """
 from __future__ import annotations
 

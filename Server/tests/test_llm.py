@@ -1,4 +1,4 @@
-"""Tests for the LLM providers (Milestone 8).
+"""Tests for the LLM providers.
 
 The transcription and text-model providers talk to external HTTP
 APIs. Tests inject a fake transport so no real network call is

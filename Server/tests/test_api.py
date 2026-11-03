@@ -177,7 +177,7 @@ class DeviceFlowTests(LRTestCase):
 class TranscribeRouteTests(LRTestCase):
     """Tests for POST /api/v1/sessions/<id>/transcribe.
 
-    Milestone 8 manual-retry endpoint. Re-runs the post-finish
+    The manual-retry endpoint. Re-runs the post-finish
     pipeline on a session that's already in 'ready' (or 'done'
     / 'failed' / 'transcribed' / 'classifying'). All tests use
     stub providers; no real HTTP is performed.
@@ -522,7 +522,7 @@ class WebUITests(LRTestCase):
 
 
 class EventsApiTests(LRTestCase):
-    """HTTP surface for /api/v1/events/* (added in Milestone 5)."""
+    """HTTP surface for /api/v1/events/*."""
 
     def _base(self, **overrides):
         payload = {

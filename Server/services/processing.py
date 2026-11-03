@@ -1,4 +1,4 @@
-"""Post-finish pipeline orchestrator (Milestones 8 + 9).
+"""Post-finish pipeline orchestrator.
 
 The ``/finish`` endpoint stitches the session's audio and leaves it in
 ``status='ready'``. Right after that, the server kicks off the

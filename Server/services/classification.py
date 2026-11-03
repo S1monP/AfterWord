@@ -2,23 +2,16 @@
 
 Two paths:
 
-* **Manual override** via :meth:`ClassificationService.override_kind` —
-  the user picks a kind from a dropdown on the ``/unsorted`` page.
-  This is fully implemented; it's the only path that does real
-  work in Tier 1 / Milestone 6.
+* **Manual override** via :meth:`ClassificationService.override_kind`:
+  the user moves a recording to another page ("Move to" in the
+  actions menu).
 
 * **LLM-driven classification** via
-  :meth:`ClassificationService.classify_session` — calls the
-  configured text model (via OpenRouter) with the session's
-  transcript (once transcripts exist) and parses the result into
-  one of ``{lecture, voice_memo, meeting, other}``.
-
-  In Milestone 6 this method was a **stub** that always returned
-  ``None``. The real implementation landed in Milestone 8 alongside
-  the transcription pipeline: the LLM call needs a transcript,
-  which didn't exist yet. The contract is stable, so the API
-  routes and the ``/unsorted`` UI shipped first and the LLM button
-  lights up automatically now that the backend is ready.
+  :meth:`ClassificationService.classify_session`: calls the
+  configured text model with the session's transcript and parses
+  the result into one of :data:`VALID_KINDS`. It returns ``None``
+  when there is no transcript yet, no text model is configured, or
+  the model call fails.
 
 The service is constructed with a :class:`storage.Storage` instance
 so it can be tested without a Flask app. Routes get the service via
@@ -43,10 +36,9 @@ VALID_KINDS: frozenset[str] = frozenset(
 SELECTABLE_KINDS: frozenset[str] = VALID_KINDS - {"command"}
 
 
-# Reason returned by the LLM classify endpoint when the AI path
-# isn't implemented yet. The UI uses this to surface a friendly
-# message ("AI classification lands in a later milestone — pick a
-# kind manually for now").
+# Reason returned by the classify endpoint when the model could not
+# classify the session (no transcript yet, no text model configured,
+# or the call failed).
 LLM_NOT_IMPLEMENTED = "llm_not_implemented"
 
 

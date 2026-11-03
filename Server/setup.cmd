@@ -1,6 +1,6 @@
 @echo off
 REM ============================================================================
-REM  Lecture Recorder Server - one-time setup for Windows
+REM  AfterWord server - one-time setup for Windows
 REM
 REM  Usage:   setup.cmd
 REM
@@ -17,7 +17,7 @@ setlocal
 cd /d "%~dp0"
 
 echo.
-echo === Lecture Recorder Server - setup ===
+echo === AfterWord server - setup ===
 echo.
 
 REM --- 1. Check Python ---

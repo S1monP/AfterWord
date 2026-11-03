@@ -3,9 +3,9 @@
 The service owns three concerns the storage layer doesn't:
 
 * Input validation (title length, body size, control characters).
-* Markdown rendering and HTML sanitisation. The ``markdown`` library
-  with default extensions escapes raw HTML, so we don't need a
-  separate bleach pass for Tier 1.
+* Markdown rendering and HTML sanitisation: ``markdown`` renders,
+  then a ``bleach`` allowlist cleans the HTML, so a ``<script>`` in a
+  note never runs.
 * Synchronising ``body_html`` when ``body_md`` changes. The storage
   layer keeps the two fields side-by-side so list views don't have
   to render on every read.

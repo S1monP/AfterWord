@@ -1,4 +1,4 @@
-"""Tests for the Tier 1 schema additions.
+"""Tests for the schema beyond recordings and chunks.
 
 Covers:
   * The new tables (notes, todos, deadlines, events) exist and have
@@ -113,8 +113,8 @@ class SchemaShapeTests(LRTestCase):
 
 
 class KindOverrideTests(LRTestCase):
-    """The one piece of classification that does real work in Tier 1:
-    the manual kind override via POST /api/v1/sessions/<id>/kind."""
+    """Classification by hand: the manual kind override via
+    POST /api/v1/sessions/<id>/kind."""
 
     def _upload_complete_session(self) -> str:
         import json
@@ -225,8 +225,7 @@ class ServiceStubTests(unittest.TestCase):
         )
 
     def test_tasks_service_is_real(self) -> None:
-        """Tasks is the second service to land (Milestone 5). The
-        constructor should take a Storage instance; full behaviour
+        """The constructor should take a Storage instance; full behaviour
         is covered in ``tests/test_tasks.py``."""
         from services.tasks import TasksService
         import inspect
@@ -237,8 +236,7 @@ class ServiceStubTests(unittest.TestCase):
         )
 
     def test_events_service_is_real(self) -> None:
-        """Events is the third service to land (Milestone 5). The
-        constructor takes a Storage instance; full behaviour
+        """The constructor takes a Storage instance; full behaviour
         is covered in ``tests/test_events.py``.
         """
         from services.events import EventsService
@@ -250,10 +248,8 @@ class ServiceStubTests(unittest.TestCase):
         )
 
     def test_classification_service_is_real(self) -> None:
-        """Classification is the fourth service to land (Milestone 6).
-        The constructor takes a Storage instance; manual override
-        works against the real DB. The LLM path is stubbed (returns
-        None) until Milestone 8; full coverage lives in
+        """The constructor takes a Storage instance; manual override
+        works against the real DB. Full coverage lives in
         ``tests/test_classification.py``."""
         from services.classification import ClassificationService
         import inspect

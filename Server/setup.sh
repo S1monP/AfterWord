@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-#  Lecture Recorder Server - one-time setup for Linux / macOS
+#  AfterWord server - one-time setup for Linux / macOS
 #
 #  Usage:   ./setup.sh
 #
@@ -17,7 +17,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 echo
-echo "=== Lecture Recorder Server - setup ==="
+echo "=== AfterWord server - setup ==="
 echo
 
 # --- 1. Check Python ---

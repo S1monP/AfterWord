@@ -45,14 +45,14 @@ from config import Config
 STATUS_RECEIVING = "receiving"
 STATUS_STITCHING = "stitching"
 STATUS_READY = "ready"
-# Milestone 8: lifecycle states for the post-finish pipeline. The
+# Lifecycle states for the post-finish pipeline. The
 # session goes from ``ready`` to ``transcribing`` → ``transcribed`` →
 # ``classifying`` → ``done``. Any error short-circuits to ``failed``
 # with a useful ``status_detail``.
 STATUS_TRANSCRIBING = "transcribing"
 STATUS_TRANSCRIBED = "transcribed"
 STATUS_CLASSIFYING = "classifying"
-# Milestone 9: after classification the pipeline produces a
+# After classification the pipeline produces a
 # summary and extracts structured items (deadlines, key points,
 # topics). The session is fully LLM-processed at ``done``.
 STATUS_SUMMARISING = "summarising"
@@ -278,7 +278,7 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
     """,
     # The first search index, never queried; replaced by the above.
     "DROP TABLE IF EXISTS artifacts_fts",
-    # -- Tier 1 schema additions --
+    # -- Notes, tasks, events and calendar subscriptions --
     # Notes: independent of recordings. Markdown source + render cache.
     """
     CREATE TABLE IF NOT EXISTS notes (
@@ -374,7 +374,7 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
 # wrapped to silently ignore "duplicate column" errors that arise when
 # the schema is already up to date.
 SCHEMA_ALTERS: tuple[str, ...] = (
-    # sessions: recording-kind classification (Tier 1's manual override).
+    # sessions: recording-kind classification.
     "ALTER TABLE sessions ADD COLUMN kind TEXT",
     "ALTER TABLE sessions ADD COLUMN kind_confidence REAL",
     "ALTER TABLE sessions ADD COLUMN kind_set_at TEXT",
@@ -527,7 +527,7 @@ class Session:
     updated_at: str
     received_chunks: int
     full_audio_size: int
-    # Tier 1: recording-kind classification. 'lecture' | 'voice_memo' |
+    # Recording-kind classification. 'lecture' | 'voice_memo' |
     # 'meeting' | 'other' | None (unclassified). kind_confidence is 0..1;
     # kind_set_at is when the classification was assigned (LLM or human).
     kind: Optional[str] = None

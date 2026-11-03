@@ -357,7 +357,7 @@ if __name__ == "__main__":
 
 
 # ---------------------------------------------------------------------------
-# Milestone 8: new statuses, transition guard, add_artifact helper
+# Pipeline statuses, transition guard, add_artifact helper
 # ---------------------------------------------------------------------------
 
 

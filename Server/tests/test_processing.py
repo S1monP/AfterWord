@@ -1,4 +1,4 @@
-"""Tests for the post-finish pipeline (Milestone 8).
+"""Tests for the post-finish pipeline.
 
 The pipeline walks sessions through
 ``ready -> transcribing -> transcribed -> classifying -> done`` and
