@@ -121,6 +121,26 @@ To try the web UI with made-up data, without touching real data:
 .venv\Scripts\python.exe scripts\demo_server.py              # http://127.0.0.1:8010
 ```
 
+## Code checks and dependencies
+
+```powershell
+.venv\Scripts\python.exe -m pip install -r requirements-dev.txt   # ruff, once
+.venv\Scripts\ruff.exe check .                                     # lint
+.venv\Scripts\ruff.exe format .                                    # format
+```
+
+Settings are in `pyproject.toml` (line length 100, Python 3.11+).
+
+`requirements.in` lists what the server needs and why; `requirements.txt`
+pins the exact versions, for every platform. To add or upgrade a package,
+edit `requirements.in` (or pass `--upgrade-package NAME`), then:
+
+```powershell
+uv pip compile requirements.in --universal --python-version 3.11 -o requirements.txt
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe -m unittest discover -s tests
+```
+
 ## Running it on the home network
 
 `scripts\run_home.ps1` runs the production server as **http://afterword.local**

@@ -1,0 +1,35 @@
+# What the server needs, and why. requirements.txt pins the exact versions
+# (for every platform and Python 3.11+); after changing this file, run
+#   uv pip compile requirements.in --universal --python-version 3.11 -o requirements.txt
+# and the tests.
+
+Flask>=3.0,<4.0
+
+# Renders markdown notes.
+markdown>=3.6
+
+# Used for sanitising note HTML so a <script> in a note body
+# can't execute. Tag-and-attribute allowlist, default config.
+bleach>=6.0
+
+# Parses .ics calendar files (import and subscriptions).
+icalendar>=5.0
+
+# Calendar subscriptions: expands repeating events (RRULE, EXDATE, moved
+# and cancelled occurrences) inside a date window. Pure Python.
+recurring-ical-events>=3.3
+
+# Time zone database for zoneinfo (Windows has none built in; see
+# timeutil.py).
+tzdata>=2024.1
+
+# Production web server for serve.py (python app.py is for development).
+waitress>=3.0
+
+# The server's name on the home network (http://afterword.local; mdns.py,
+# AFTERWORD_MDNS_NAME). Pure Python.
+zeroconf>=0.130
+
+# Search: word stems, so "лекция" finds "лекции" and "meeting" finds
+# "meetings" (search.py). Pure Python.
+snowballstemmer>=2.2
