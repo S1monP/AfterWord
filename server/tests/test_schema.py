@@ -215,9 +215,10 @@ class ServiceStubTests(unittest.TestCase):
     """The service modules are present with NotImplementedError bodies."""
 
     def test_notes_service_is_real(self) -> None:
-        from services.notes import NotesService
         # The constructor should accept a storage instance now.
         import inspect
+
+        from services.notes import NotesService
         sig = inspect.signature(NotesService.__init__)
         self.assertGreaterEqual(
             len(sig.parameters), 2,
@@ -227,8 +228,9 @@ class ServiceStubTests(unittest.TestCase):
     def test_tasks_service_is_real(self) -> None:
         """The constructor should take a Storage instance; full behaviour
         is covered in ``tests/test_tasks.py``."""
-        from services.tasks import TasksService
         import inspect
+
+        from services.tasks import TasksService
         sig = inspect.signature(TasksService.__init__)
         self.assertGreaterEqual(
             len(sig.parameters), 2,
@@ -239,8 +241,9 @@ class ServiceStubTests(unittest.TestCase):
         """The constructor takes a Storage instance; full behaviour
         is covered in ``tests/test_events.py``.
         """
-        from services.events import EventsService
         import inspect
+
+        from services.events import EventsService
         sig = inspect.signature(EventsService.__init__)
         self.assertGreaterEqual(
             len(sig.parameters), 2,
@@ -251,8 +254,9 @@ class ServiceStubTests(unittest.TestCase):
         """The constructor takes a Storage instance; manual override
         works against the real DB. Full coverage lives in
         ``tests/test_classification.py``."""
-        from services.classification import ClassificationService
         import inspect
+
+        from services.classification import ClassificationService
         sig = inspect.signature(ClassificationService.__init__)
         self.assertGreaterEqual(
             len(sig.parameters), 2,
@@ -264,7 +268,7 @@ class ServiceStubTests(unittest.TestCase):
         self.assertEqual(KINDS, frozenset({"lecture", "meeting", "other"}))
 
     def test_tasks_priority_status_and_kind_constants(self) -> None:
-        from services.tasks import PRIORITIES, STATUSES, KINDS
+        from services.tasks import PRIORITIES, STATUSES
         self.assertEqual(PRIORITIES, frozenset({"low", "medium", "high", "urgent"}))
         self.assertEqual(STATUSES, frozenset({"open", "done", "cancelled"}))
 

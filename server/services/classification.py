@@ -19,11 +19,7 @@ so it can be tested without a Flask app. Routes get the service via
 """
 from __future__ import annotations
 
-from typing import Optional
-
-import storage
 from storage import Session, Storage
-
 
 # --- Constants --------------------------------------------------------------
 
@@ -53,7 +49,7 @@ class ClassificationService:
     # -- manual override -------------------------------------------------
 
     def override_kind(
-        self, session_id: str, kind: Optional[str],
+        self, session_id: str, kind: str | None,
     ) -> Session:
         """Set the kind manually. Pass ``kind=None`` to clear.
 
@@ -80,7 +76,7 @@ class ClassificationService:
 
     def classify_session(
         self, session_id: str, *, classifier=None,
-    ) -> Optional[tuple[str, float]]:
+    ) -> tuple[str, float] | None:
         """Run the LLM classifier on a session's transcript.
 
         Looks up the most recent ``transcript`` artifact for the
@@ -134,7 +130,7 @@ class ClassificationService:
 
 
 __all__ = [
-    "ClassificationService",
-    "VALID_KINDS",
     "LLM_NOT_IMPLEMENTED",
+    "VALID_KINDS",
+    "ClassificationService",
 ]

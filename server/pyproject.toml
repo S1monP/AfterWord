@@ -1,0 +1,27 @@
+# Tool settings for the server. Dependencies live in requirements.txt.
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes: undefined and unused names
+    "B",        # bugbear: likely bugs
+    "I",        # import order
+    "UP",       # modern syntax for the minimum Python version
+    "RUF",      # ruff's own checks
+]
+ignore = [
+    "E501",                          # the formatter wraps code; long strings and URLs stay
+    "RUF001", "RUF002", "RUF003",    # Cyrillic and typographic characters are intentional
+    "RUF012",                        # mutable class attributes (test fixtures)
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Scripts put the server folder on sys.path before importing from it.
+"scripts/*" = ["E402"]
+
+[tool.ruff.format]
+# Defaults (double quotes, 4 spaces); only the line length above differs.

@@ -21,20 +21,21 @@ Concurrency model:
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
+import shutil
 import sqlite3
 import struct
 import threading
 import time
 import uuid
-import json
-import shutil
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator, Optional, Union
+from typing import Any
 
 import timeutil
 from config import Config
@@ -115,7 +116,7 @@ _CONTROL_CHARS_TITLE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _DEVICE_NAME = re.compile(r"^rec_(\d{4}-\d{2}-\d{2}T\d{4}|nt\d+)(_\d+)?$")
 
 
-def title_is_placeholder(sess: "Session") -> bool:
+def title_is_placeholder(sess: Session) -> bool:
     """True when a session has no real name yet, so the calendar or
     the AI may name it: no title, or the device's folder name."""
     if sess.title_source in ("ai", "calendar"):
@@ -428,7 +429,7 @@ def _parse_wav_header(header: bytes) -> tuple[int, int, int]:
     return sample_rate, channels, bits_per_sample
 
 
-def _find_chunk(data: bytes, chunk_id: bytes) -> Optional[bytes]:
+def _find_chunk(data: bytes, chunk_id: bytes) -> bytes | None:
     """Return the payload of the first ``chunk_id`` in a RIFF stream.
 
     Handles arbitrary padding between chunks (RIFF chunks are
@@ -463,7 +464,7 @@ def _wav_data_chunk_size(data: bytes) -> int:
     return 0
 
 
-def _wav_data_offset(data: bytes) -> Optional[int]:
+def _wav_data_offset(data: bytes) -> int | None:
     """Return the byte offset of the ``data`` chunk payload, or None."""
     pos = 12
     while pos + 8 <= len(data):
@@ -515,17 +516,17 @@ def make_wav_bytes(
 class Session:
     """In-memory view of a session row."""
     id: str
-    course_id: Optional[str]
-    title: Optional[str]
+    course_id: str | None
+    title: str | None
     started_at: str
-    finished_at: Optional[str]
+    finished_at: str | None
     status: str
-    status_detail: Optional[str]
+    status_detail: str | None
     expected_count: int
     sample_rate: int
     channels: int
     bits_per_sample: int
-    notes: Optional[str]
+    notes: str | None
     created_at: str
     updated_at: str
     received_chunks: int
@@ -533,13 +534,13 @@ class Session:
     # Recording-kind classification. 'lecture' | 'voice_memo' |
     # 'meeting' | 'other' | None (unclassified). kind_confidence is 0..1;
     # kind_set_at is when the classification was assigned (LLM or human).
-    kind: Optional[str] = None
-    kind_confidence: Optional[float] = None
-    kind_set_at: Optional[str] = None
+    kind: str | None = None
+    kind_confidence: float | None = None
+    kind_set_at: str | None = None
     # Where ``title`` came from: 'calendar' (matched event), 'ai'
     # (topic from the transcript), 'user' (renamed by hand, never
     # overwritten), or None (the device's folder name).
-    title_source: Optional[str] = None
+    title_source: str | None = None
 
     def to_api_dict(self) -> dict[str, Any]:
         return {
@@ -588,15 +589,15 @@ class Note:
     id: str
     title: str
     body_md: str
-    body_html: Optional[str]
+    body_html: str | None
     source: str
-    source_ref: Optional[str]
+    source_ref: str | None
     pinned: bool
     created_at: str
     updated_at: str
     # The note's course; a voice memo's note has source 'voice_memo' and
     # its recording's id as source_ref (the audio).
-    course_id: Optional[str] = None
+    course_id: str | None = None
 
     def to_api_dict(self) -> dict[str, Any]:
         return {
@@ -624,18 +625,18 @@ class Task:
     """
     id: str
     title: str
-    body_md: Optional[str]
-    description: Optional[str]
+    body_md: str | None
+    description: str | None
     priority: str
     status: str
     kind: str
-    due_at: Optional[str]
+    due_at: str | None
     source: str
-    source_ref: Optional[str]
-    source_offset_ms: Optional[int]
-    course_id: Optional[str]
+    source_ref: str | None
+    source_offset_ms: int | None
+    course_id: str | None
     pinned: bool
-    completed_at: Optional[str]
+    completed_at: str | None
     created_at: str
     updated_at: str
 
@@ -672,19 +673,19 @@ class Event:
     """
     id: str
     title: str
-    description: Optional[str]
+    description: str | None
     kind: str                          # 'lecture' | 'meeting' | 'other'
     starts_at: str
-    ends_at: Optional[str]
-    location: Optional[str]
+    ends_at: str | None
+    location: str | None
     source: str                        # 'manual' | 'ical_import' | 'subscription' | 'extracted'
-    source_ref: Optional[str]
-    course_id: Optional[str]
-    matched_session_id: Optional[str]
-    match_confidence: Optional[float]
+    source_ref: str | None
+    course_id: str | None
+    matched_session_id: str | None
+    match_confidence: float | None
     created_at: str
     updated_at: str
-    subscription_id: Optional[str] = None
+    subscription_id: str | None = None
 
     def to_api_dict(self) -> dict[str, Any]:
         return {
@@ -713,11 +714,11 @@ class Subscription:
     name: str
     url: str
     kind: str                       # the kind its events get
-    course_id: Optional[str]        # None: match each event to a course by name
+    course_id: str | None        # None: match each event to a course by name
     hidden_keys: list[str]
-    last_attempt_at: Optional[str]
-    last_synced_at: Optional[str]
-    last_error: Optional[str]
+    last_attempt_at: str | None
+    last_synced_at: str | None
+    last_error: str | None
     event_count: int
     created_at: str
     updated_at: str
@@ -734,8 +735,8 @@ class Course:
     """
     id: str
     name: str
-    code: Optional[str]
-    color: Optional[str]
+    code: str | None
+    color: str | None
     sort_order: int
     created_at: str
 
@@ -956,7 +957,7 @@ class Storage:
         self,
         session_id: str,
         *,
-        title: Optional[str],
+        title: str | None,
         expected_count: int,
         sample_rate: int,
         channels: int,
@@ -1001,7 +1002,7 @@ class Storage:
         assert sess is not None
         return sess, True
 
-    def get_session(self, session_id: str) -> Optional[Session]:
+    def get_session(self, session_id: str) -> Session | None:
         with self._tx() as conn:
             row = conn.execute(
                 "SELECT * FROM sessions WHERE id = ?", (session_id,)
@@ -1082,8 +1083,8 @@ class Storage:
         session_id: str,
         status: str,
         *,
-        status_detail: Optional[str] = None,
-        finished_at: Optional[str] = None,
+        status_detail: str | None = None,
+        finished_at: str | None = None,
     ) -> None:
         if status not in ALL_STATUSES:
             raise ValueError(f"unknown status: {status}")
@@ -1128,7 +1129,7 @@ class Storage:
         session_id: str,
         status: str,
         *,
-        status_detail: Optional[str] = None,
+        status_detail: str | None = None,
     ) -> None:
         self.update_status(
             session_id, status, status_detail=status_detail,
@@ -1157,9 +1158,9 @@ class Storage:
     def set_kind(
         self,
         session_id: str,
-        kind: Optional[str],
+        kind: str | None,
         *,
-        confidence: Optional[float] = None,
+        confidence: float | None = None,
     ) -> Session:
         """Set the recording's kind (or clear it with ``None``).
 
@@ -1204,8 +1205,8 @@ class Storage:
         course_id: str,
         *,
         name: str,
-        code: Optional[str] = None,
-        color: Optional[str] = None,
+        code: str | None = None,
+        color: str | None = None,
         sort_order: int = 0,
     ) -> Course:
         """Insert a new course. All validation is the caller's job
@@ -1238,7 +1239,7 @@ class Storage:
                 (key, value),
             )
 
-    def get_course(self, course_id: str) -> Optional[Course]:
+    def get_course(self, course_id: str) -> Course | None:
         with self._tx() as conn:
             row = conn.execute(
                 "SELECT * FROM courses WHERE id = ?", (course_id,)
@@ -1251,10 +1252,10 @@ class Storage:
         self,
         course_id: str,
         *,
-        name: Optional[str] = None,
+        name: str | None = None,
         code: Any = _UNSET,
         color: Any = _UNSET,
-        sort_order: Optional[int] = None,
+        sort_order: int | None = None,
     ) -> Course:
         """Partial update. ``name`` and ``sort_order`` use the simple
         None-means-don't-touch convention. ``code`` and ``color`` use
@@ -1337,9 +1338,9 @@ class Storage:
         )
 
     def list_sessions_by_course(
-        self, course_id: Optional[str], *,
-        status: Union[str, list[str], None] = "ready",
-        kind: Optional[str] = None,
+        self, course_id: str | None, *,
+        status: str | list[str] | None = "ready",
+        kind: str | None = None,
     ) -> list[Session]:
         """List sessions under a given course (or NULL course when
         ``course_id is None``), newest first.
@@ -1385,7 +1386,7 @@ class Storage:
         return [self._row_to_session(conn, r) for r in rows]
 
     def set_session_course(
-        self, session_id: str, course_id: Optional[str],
+        self, session_id: str, course_id: str | None,
     ) -> Session:
         """Assign or unassign a course on a session.
 
@@ -1414,7 +1415,7 @@ class Storage:
     TITLE_SOURCES: frozenset[str] = frozenset({"calendar", "ai", "user"})
 
     def set_session_title(
-        self, session_id: str, title: str, *, source: Optional[str] = None,
+        self, session_id: str, title: str, *, source: str | None = None,
     ) -> Session:
         """Rename a session and record where the name came from
         (``source``, one of :attr:`TITLE_SOURCES`, or None).
@@ -1466,7 +1467,7 @@ class Storage:
 
     def get_artifact(
         self, session_id: str, kind: str,
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Fetch one artifact for a session, by kind.
 
         Returns ``{"kind", "content", "model", "created_at"}`` or
@@ -1496,7 +1497,7 @@ class Storage:
         kind: str,
         content: str,
         *,
-        model: Optional[str] = None,
+        model: str | None = None,
     ) -> dict[str, Any]:
         """Store a session's artifact of ``kind``, replacing any
         earlier one of the same kind.
@@ -1567,12 +1568,12 @@ class Storage:
         *,
         title: str,
         body_md: str,
-        body_html: Optional[str],
+        body_html: str | None,
         source: str = "manual",
-        source_ref: Optional[str] = None,
+        source_ref: str | None = None,
         pinned: bool = False,
-        course_id: Optional[str] = None,
-        created_at: Optional[str] = None,
+        course_id: str | None = None,
+        created_at: str | None = None,
     ) -> Note:
         """Insert a new note. The caller is responsible for the rendered
         ``body_html`` (the service layer renders markdown and passes
@@ -1594,7 +1595,7 @@ class Storage:
             )
         return self.get_note(note_id)  # type: ignore[return-value]
 
-    def get_note(self, note_id: str) -> Optional[Note]:
+    def get_note(self, note_id: str) -> Note | None:
         with self._tx() as conn:
             row = conn.execute(
                 "SELECT * FROM notes WHERE id = ?", (note_id,)
@@ -1607,10 +1608,10 @@ class Storage:
         self,
         note_id: str,
         *,
-        title: Optional[str] = None,
-        body_md: Optional[str] = None,
-        body_html: Optional[str] = None,
-        pinned: Optional[bool] = None,
+        title: str | None = None,
+        body_md: str | None = None,
+        body_html: str | None = None,
+        pinned: bool | None = None,
         course_id: Any = _UNSET,
     ) -> Note:
         """Partial update. Only fields that are not None are touched
@@ -1658,7 +1659,7 @@ class Storage:
         assert updated is not None
         return updated
 
-    def note_for_recording(self, session_id: str) -> Optional[Note]:
+    def note_for_recording(self, session_id: str) -> Note | None:
         """The note holding a voice memo's text, if any."""
         with self._tx() as conn:
             row = conn.execute(
@@ -1679,7 +1680,7 @@ class Storage:
         *,
         limit: int = 50,
         offset: int = 0,
-        search: Optional[str] = None,
+        search: str | None = None,
     ) -> tuple[list[Note], int]:
         """List notes, newest first. ``search`` is a case-insensitive
         substring match against ``title`` and ``body_md``.
@@ -1710,7 +1711,7 @@ class Storage:
                 ORDER BY updated_at DESC, id DESC
                 LIMIT ? OFFSET ?
                 """,
-                where_params + [limit, offset],
+                [*where_params, limit, offset],
             ).fetchall()
         return [self._row_to_note(r) for r in rows], int(total)
 
@@ -1735,18 +1736,18 @@ class Storage:
         task_id: str,
         *,
         title: str,
-        body_md: Optional[str] = None,
-        description: Optional[str] = None,
+        body_md: str | None = None,
+        description: str | None = None,
         priority: str = "medium",
         status: str = "open",
         kind: str = "task",
-        due_at: Optional[str] = None,
+        due_at: str | None = None,
         source: str = "manual",
-        source_ref: Optional[str] = None,
-        source_offset_ms: Optional[int] = None,
-        course_id: Optional[str] = None,
+        source_ref: str | None = None,
+        source_offset_ms: int | None = None,
+        course_id: str | None = None,
         pinned: bool = False,
-        completed_at: Optional[str] = None,
+        completed_at: str | None = None,
     ) -> Task:
         now = now_iso()
         with self._tx() as conn:
@@ -1768,7 +1769,7 @@ class Storage:
             )
         return self.get_task(task_id)  # type: ignore[return-value]
 
-    def get_task(self, task_id: str) -> Optional[Task]:
+    def get_task(self, task_id: str) -> Task | None:
         with self._tx() as conn:
             row = conn.execute(
                 "SELECT * FROM tasks WHERE id = ?", (task_id,)
@@ -1781,12 +1782,12 @@ class Storage:
         self,
         task_id: str,
         *,
-        title: Optional[str] = None,
+        title: str | None = None,
         body_md: Any = _UNSET,
         description: Any = _UNSET,
-        priority: Optional[str] = None,
-        status: Optional[str] = None,
-        kind: Optional[str] = None,
+        priority: str | None = None,
+        status: str | None = None,
+        kind: str | None = None,
         completed_at: Any = _UNSET,
         due_at: Any = _UNSET,
         source_offset_ms: Any = _UNSET,
@@ -1863,9 +1864,9 @@ class Storage:
     def list_tasks(
         self,
         *,
-        kind: Optional[str] = None,
-        status: Optional[str] = None,
-        priority: Optional[str] = None,
+        kind: str | None = None,
+        status: str | None = None,
+        priority: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> tuple[list[Task], int]:
@@ -1923,7 +1924,7 @@ class Storage:
                     created_at DESC
                 LIMIT ? OFFSET ?
                 """,
-                where_params + [limit, offset],
+                [*where_params, limit, offset],
             ).fetchall()
         return [self._row_to_task(r) for r in rows], int(total)
 
@@ -2040,7 +2041,7 @@ class Storage:
         missing: list[int]
         full_audio_size: int
 
-    def finish_session(self, session_id: str) -> "Storage.FinishResult":
+    def finish_session(self, session_id: str) -> Storage.FinishResult:
         """Validate chunk presence and stitch into full.aac.
 
         Idempotent: if the session is already ``ready`` (full.aac exists),
@@ -2168,15 +2169,15 @@ class Storage:
         title: str,
         kind: str,
         starts_at: str,
-        ends_at: Optional[str] = None,
-        description: Optional[str] = None,
-        location: Optional[str] = None,
+        ends_at: str | None = None,
+        description: str | None = None,
+        location: str | None = None,
         source: str = "manual",
-        source_ref: Optional[str] = None,
-        course_id: Optional[str] = None,
-        matched_session_id: Optional[str] = None,
-        match_confidence: Optional[float] = None,
-        subscription_id: Optional[str] = None,
+        source_ref: str | None = None,
+        course_id: str | None = None,
+        matched_session_id: str | None = None,
+        match_confidence: float | None = None,
+        subscription_id: str | None = None,
     ) -> Event:
         """Insert a new event. All validation is the caller's job
         (the service layer is responsible)."""
@@ -2198,7 +2199,7 @@ class Storage:
             )
         return self.get_event(event_id)  # type: ignore[return-value]
 
-    def get_event(self, event_id: str) -> Optional[Event]:
+    def get_event(self, event_id: str) -> Event | None:
         with self._tx() as conn:
             row = conn.execute(
                 "SELECT * FROM events WHERE id = ?", (event_id,)
@@ -2211,13 +2212,13 @@ class Storage:
         self,
         event_id: str,
         *,
-        title: Optional[str] = None,
+        title: str | None = None,
         description: Any = _UNSET,
-        kind: Optional[str] = None,
-        starts_at: Optional[str] = None,
+        kind: str | None = None,
+        starts_at: str | None = None,
         ends_at: Any = _UNSET,
         location: Any = _UNSET,
-        source: Optional[str] = None,
+        source: str | None = None,
         source_ref: Any = _UNSET,
         course_id: Any = _UNSET,
         matched_session_id: Any = _UNSET,
@@ -2286,9 +2287,9 @@ class Storage:
     def list_events(
         self,
         *,
-        kind: Optional[str] = None,
-        starts_after: Optional[str] = None,
-        starts_before: Optional[str] = None,
+        kind: str | None = None,
+        starts_after: str | None = None,
+        starts_before: str | None = None,
         limit: int = 500,
         offset: int = 0,
     ) -> tuple[list[Event], int]:
@@ -2324,11 +2325,11 @@ class Storage:
                 ORDER BY starts_at ASC, id ASC
                 LIMIT ? OFFSET ?
                 """,
-                where_params + [limit, offset],
+                [*where_params, limit, offset],
             ).fetchall()
         return [self._row_to_event(r) for r in rows], int(total)
 
-    def events_from_feed(self, subscription_id: Optional[str], *, source: Optional[str] = None) -> list[Event]:
+    def events_from_feed(self, subscription_id: str | None, *, source: str | None = None) -> list[Event]:
         """Every event a subscription added (``subscription_id``), or,
         with ``subscription_id=None`` and a ``source``, every event of
         that source that isn't a subscription's (one-off imports)."""
@@ -2347,7 +2348,7 @@ class Storage:
         return [self._row_to_event(r) for r in rows]
 
     def create_subscription(self, sub_id: str, *, name: str, url: str, kind: str,
-                            course_id: Optional[str]) -> Subscription:
+                            course_id: str | None) -> Subscription:
         now = now_iso()
         with self._tx() as conn:
             conn.execute(
@@ -2357,7 +2358,7 @@ class Storage:
             )
         return self.get_subscription(sub_id)  # type: ignore[return-value]
 
-    def get_subscription(self, sub_id: str) -> Optional[Subscription]:
+    def get_subscription(self, sub_id: str) -> Subscription | None:
         with self._tx() as conn:
             row = conn.execute(
                 "SELECT * FROM calendar_subscriptions WHERE id = ?", (sub_id,)
@@ -2387,7 +2388,7 @@ class Storage:
         with self._tx() as conn:
             cur = conn.execute(
                 f"UPDATE calendar_subscriptions SET {', '.join(sets)} WHERE id = ?",
-                params + [sub_id],
+                [*params, sub_id],
             )
             if cur.rowcount == 0:
                 raise KeyError(sub_id)
@@ -2498,7 +2499,7 @@ class Storage:
         return ([self._row_to_task(r) for r in task_rows],
                 [self._row_to_event(r) for r in event_rows])
 
-    def event_for_session(self, session_id: str) -> Optional[Event]:
+    def event_for_session(self, session_id: str) -> Event | None:
         """The calendar event a recording was matched to, if any."""
         with self._tx() as conn:
             row = conn.execute(
@@ -2554,7 +2555,7 @@ class Storage:
 
     def search_put_item(
         self, item_type: str, item_id: str, stamp: str,
-        rows: list[tuple[str, Optional[int], str, str, str]],
+        rows: list[tuple[str, int | None, str, str, str]],
     ) -> None:
         """Replace an item's search rows: ``(field, at_ms, text, words,
         stems)`` each."""
@@ -2635,7 +2636,7 @@ class Storage:
 
     # --- audio serving ----------------------------------------------------
 
-    def open_full_audio(self, session_id: str) -> Optional[Path]:
+    def open_full_audio(self, session_id: str) -> Path | None:
         p = self.full_audio_path(session_id)
         return p if p.exists() else None
 

@@ -9,7 +9,6 @@ from flask import Blueprint, current_app, jsonify, request
 import storage
 from web.common import current_app_events_service
 
-
 bp = Blueprint("events_api", __name__)
 
 

@@ -3,14 +3,18 @@ matches, grouped, with where each one opens."""
 from __future__ import annotations
 
 import re
-from typing import Any, Optional
+from typing import Any
 
 from flask import Blueprint, jsonify, request, url_for
 
 import search
 import timeutil
 from web.common import (
-    _KIND_LABEL, course_cls, current_app_storage, rec_title, recording_url,
+    _KIND_LABEL,
+    course_cls,
+    current_app_storage,
+    rec_title,
+    recording_url,
 )
 
 bp = Blueprint("search_api", __name__)
@@ -56,12 +60,12 @@ def api_search() -> Any:
     return jsonify({"query": raw, "groups": groups})
 
 
-def _when(iso: Optional[str], fmt: str = "%a %d %b %Y, %H:%M") -> str:
+def _when(iso: str | None, fmt: str = "%a %d %b %Y, %H:%M") -> str:
     dt = timeutil.to_local(iso)
     return dt.strftime(fmt) if dt else ""
 
 
-def _due(iso: Optional[str]) -> str:
+def _due(iso: str | None) -> str:
     """A due date: "Tue 03 Nov 2026", with ", 23:59" unless it is all day."""
     dt = timeutil.to_local(iso)
     if dt is None:
@@ -76,7 +80,7 @@ def _clock(ms: int) -> str:
     return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
 
-def _course(store, course_id: Optional[str]):
+def _course(store, course_id: str | None):
     return store.get_course(course_id) if course_id else None
 
 
@@ -94,18 +98,18 @@ def _plain(line: str) -> str:
     return _MD_INLINE.sub("", _MD_LINK.sub(r"\1", _MD_LINE.sub("", line))).strip()
 
 
-def _snippet(hit: search.Hit, query: search.Query, markdown: bool = False) -> Optional[list]:
+def _snippet(hit: search.Hit, query: search.Query, markdown: bool = False) -> list | None:
     if not hit.best:
         return None
     text = _plain(hit.best["text"]) if markdown else hit.best["text"]
     return search.snippet(text, query)
 
 
-def _recording(store, hit, query, raw) -> Optional[dict]:
+def _recording(store, hit, query, raw) -> dict | None:
     sess = store.get_session(hit.item_id)
     if sess is None:
         return None
-    def url(at_ms: Optional[int] = None) -> str:
+    def url(at_ms: int | None = None) -> str:
         args: dict[str, Any] = {"hl": raw}
         if at_ms is not None:
             args["t"] = at_ms
@@ -133,7 +137,7 @@ def _recording(store, hit, query, raw) -> Optional[dict]:
     }
 
 
-def _note(store, hit, query, raw) -> Optional[dict]:
+def _note(store, hit, query, raw) -> dict | None:
     note = store.get_note(hit.item_id)
     if note is None:
         return None
@@ -154,7 +158,7 @@ def _note(store, hit, query, raw) -> Optional[dict]:
     }
 
 
-def _task(store, hit, query, raw) -> Optional[dict]:
+def _task(store, hit, query, raw) -> dict | None:
     task = store.get_task(hit.item_id)
     if task is None:
         return None
@@ -175,7 +179,7 @@ def _task(store, hit, query, raw) -> Optional[dict]:
     }
 
 
-def _event(store, hit, query, raw) -> Optional[dict]:
+def _event(store, hit, query, raw) -> dict | None:
     event = store.get_event(hit.item_id)
     if event is None:
         return None

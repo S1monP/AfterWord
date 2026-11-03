@@ -3,11 +3,8 @@ from __future__ import annotations
 
 import json
 import unittest
-from typing import Any
 
 from tests.conftest import LRTestCase
-
-
 
 # ---------------------------------------------------------------------------
 # Service-level tests
@@ -157,7 +154,7 @@ class NotesServiceTests(LRTestCase):
     def test_list_empty_search_is_ignored(self):
         svc = self._service()
         svc.create(title="A", body_md="x")
-        notes, total = svc.list(search="   ")
+        _notes, total = svc.list(search="   ")
         self.assertEqual(total, 1)
 
     def test_render_html_escapes_script_tags(self):

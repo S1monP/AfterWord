@@ -14,37 +14,39 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Optional
+from typing import Any
 
 from flask import Flask, jsonify
 
-import services
-import services.notes  # noqa: F401
-import services.tasks  # noqa: F401
-import services.events  # noqa: F401
-import services.classification  # noqa: F401
-import services.courses  # noqa: F401
-import services.llm  # noqa: F401
 import auth
-import logsetup
 import config as config_mod
+import logsetup
+import services
+import services.classification
+import services.courses
+import services.events
+import services.llm
+import services.notes
+import services.tasks
 import storage
-from services import transcode
 import web
-from web.common import nav_context, register_filters
-from web.pipeline import _start_pipeline_worker, sweep_stranded_sessions
+from services import transcode
 
 # Re-exported: tests and scripts import these from ``app``.
-from web.common import _default_title_from_iso, _normalise_title  # noqa: F401
+from web.common import _default_title_from_iso, _normalise_title, nav_context, register_filters  # noqa: F401
 from web.pipeline import (  # noqa: F401
-    _PIPELINE_LOCK, _PIPELINES_IN_FLIGHT, _enqueue_pipeline,
+    _PIPELINE_LOCK,
+    _PIPELINES_IN_FLIGHT,
+    _enqueue_pipeline,
+    _start_pipeline_worker,
+    sweep_stranded_sessions,
 )
 
 # Named, not __name__: ``python app.py`` would log as "__main__".
 log = logging.getLogger("app")
 
 
-def create_app(config: Optional[config_mod.Config] = None) -> Flask:
+def create_app(config: config_mod.Config | None = None) -> Flask:
     """Build and configure a Flask app. ``config`` is injectable for tests."""
     cfg = config or config_mod.load()
     app = Flask(__name__, template_folder="templates", static_folder="static")

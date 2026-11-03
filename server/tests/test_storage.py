@@ -8,7 +8,6 @@ import struct
 import unittest
 
 import storage
-
 from tests.conftest import LRTestCase
 
 

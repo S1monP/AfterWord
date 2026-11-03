@@ -6,12 +6,12 @@ from __future__ import annotations
 import logging
 import shutil
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
-from flask import abort, Blueprint, current_app, jsonify, request, send_file
+from flask import Blueprint, abort, current_app, jsonify, request, send_file
 
 import services
-import services.classification  # noqa: F401
+import services.classification
 import storage
 import timeutil
 from services import processing, transcode
@@ -26,8 +26,8 @@ from web.common import (
     recording_url,
 )
 from web.pipeline import (
-    _PIPELINES_IN_FLIGHT,
     _PIPELINE_LOCK,
+    _PIPELINES_IN_FLIGHT,
     _RETRYABLE_STATUSES,
     _enqueue_pipeline,
     set_kind_by_hand,
@@ -517,7 +517,7 @@ def api_upload_audio() -> Any:
     if title is None:
         title = _default_title_from_iso(started_at)
 
-    work_dir: Optional[Path] = None
+    work_dir: Path | None = None
     try:
         fmt = transcode.sniff_format(inbox_path)
         if transcode.is_canonical_aac(fmt):

@@ -9,12 +9,12 @@ Run: ``python scripts/e2e_check.py`` (add ``--live`` for real HTTP).
 from __future__ import annotations
 
 import json
+import shutil
 import struct
 import sys
 import tempfile
 import threading
 import time
-import shutil
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen

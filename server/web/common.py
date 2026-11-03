@@ -7,19 +7,19 @@ import json
 import re
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
-from flask import current_app, Flask, g, has_request_context, request, url_for
-from markupsafe import escape, Markup
+from flask import Flask, current_app, g, has_request_context, request, url_for
+from markupsafe import Markup, escape
 
-import services
-import services.notes  # noqa: F401
-import services.tasks  # noqa: F401
-import services.events  # noqa: F401
-import services.classification  # noqa: F401
-import services.courses  # noqa: F401
-import services.llm  # noqa: F401
 import search
+import services
+import services.classification
+import services.courses
+import services.events
+import services.llm
+import services.notes
+import services.tasks
 import storage
 import timeutil
 from services import transcode
@@ -85,7 +85,7 @@ def current_app_text_provider() -> services.llm.LLMProvider:
 # Jinja filters
 # ---------------------------------------------------------------------------
 
-def _parse_summary_artifact(artifact: Optional[dict]) -> Optional[dict]:
+def _parse_summary_artifact(artifact: dict | None) -> dict | None:
     """Split a summary artifact into display fields.
 
     The pipeline stores the summary as a JSON payload
@@ -126,7 +126,7 @@ def _parse_summary_artifact(artifact: Optional[dict]) -> Optional[dict]:
 
 def register_filters(app: Flask) -> None:
     @app.template_filter("human_size")
-    def _human_size(num: Optional[int]) -> str:
+    def _human_size(num: int | None) -> str:
         if not num:
             return "0 B"
         size = float(num)
@@ -139,7 +139,7 @@ def register_filters(app: Flask) -> None:
         return f"{size:.1f} TB"
 
     @app.template_filter("human_duration")
-    def _human_duration(seconds: Optional[float]) -> str:
+    def _human_duration(seconds: float | None) -> str:
         if not seconds or seconds < 0:
             return "0:00"
         s = int(seconds)
@@ -151,19 +151,19 @@ def register_filters(app: Flask) -> None:
 
     # Stored times are UTC; pages show local time (timeutil).
     @app.template_filter("iso_local")
-    def _iso_local(iso: Optional[str]) -> str:
+    def _iso_local(iso: str | None) -> str:
         dt = timeutil.to_local(iso)
         if dt is None:
             return iso or "\u2014"
         return dt.strftime("%Y-%m-%d %H:%M")
 
     @app.template_filter("local_date")
-    def _local_date(iso: Optional[str]) -> str:
+    def _local_date(iso: str | None) -> str:
         dt = timeutil.to_local(iso)
         return dt.strftime("%Y-%m-%d") if dt else (iso or "")[:10]
 
     @app.template_filter("local_time")
-    def _local_time(iso: Optional[str]) -> str:
+    def _local_time(iso: str | None) -> str:
         dt = timeutil.to_local(iso)
         return dt.strftime("%H:%M") if dt else (iso or "")[11:16]
 
@@ -177,7 +177,7 @@ def register_filters(app: Flask) -> None:
     # A page opened from a search result (?hl=<query>) marks the
     # matched words, in every word form (search.highlight).
     @app.template_filter("search_marks")
-    def _search_marks(text: Optional[str]) -> Any:
+    def _search_marks(text: str | None) -> Any:
         raw = request.args.get("hl", "") if has_request_context() else ""
         if not raw or not text:
             return text
@@ -224,8 +224,8 @@ def is_other(sess: storage.Session) -> bool:
 
 
 def recording_url(
-    sess: "storage.Session | str | None", **args: Any,
-) -> Optional[str]:
+    sess: storage.Session | str | None, **args: Any,
+) -> str | None:
     """Where a recording opens: its page, with it selected. ``sess``
     may be a session or its id; ``args`` go on the URL (``t`` in ms,
     ``hl`` for search marks). None for an unknown recording."""
@@ -280,7 +280,7 @@ def nav_context() -> dict[str, Any]:
     }
 
 
-def course_cls(slot: "str | int | None") -> str:
+def course_cls(slot: str | int | None) -> str:
     """CSS class giving an element its course colour (``--cc``)."""
     try:
         n = int(slot or 0)
@@ -289,7 +289,7 @@ def course_cls(slot: "str | int | None") -> str:
     return f"cc-{n}" if 1 <= n <= 12 else "cc-0"
 
 
-def course_color(slot: "str | int | None") -> str:
+def course_color(slot: str | int | None) -> str:
     """CSS colour for a course-palette slot: the active scheme's tone
     (``--cc<n>``, tokens.css), falling back to the default tone."""
     from services import palette
@@ -324,7 +324,7 @@ def rec_when(sess: storage.Session) -> str:
 
 def _short_duration(seconds: float) -> str:
     """45 s, 11 min, 1 h 52 min."""
-    s = int(round(seconds))
+    s = round(seconds)
     if s < 60:
         return f"{s} s"
     h, m = divmod(round(s / 60), 60)
@@ -382,7 +382,7 @@ _TITLE_RE = re.compile(r"^[\w\s\-.,()\[\]!&'\"]+$", re.UNICODE)
 _TITLE_MAX = 200
 
 
-def _normalise_title(raw: str) -> Optional[str]:
+def _normalise_title(raw: str) -> str | None:
     """Return a clean title, or None if it was empty / invalid."""
     title = raw.strip()
     if not title or len(title) > _TITLE_MAX:
@@ -410,7 +410,7 @@ def _default_title_from_iso(iso_ts: str) -> str:
     return f"rec_{date}T{time_str}"
 
 
-def _file_mtime_iso(path: Path) -> Optional[str]:
+def _file_mtime_iso(path: Path) -> str | None:
     try:
         mtime = path.stat().st_mtime
     except OSError:

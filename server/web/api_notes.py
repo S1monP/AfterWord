@@ -11,7 +11,6 @@ import services.notes  # noqa: F401
 import storage
 from web.common import current_app_notes_service, current_app_storage
 
-
 bp = Blueprint("notes_api", __name__)
 
 

@@ -18,13 +18,12 @@ from __future__ import annotations
 
 import re
 import uuid
-from typing import Optional
 
 import bleach
 import markdown as _md
+
 import storage
 from storage import Note
-
 
 # --- Limits -----------------------------------------------------------------
 
@@ -76,7 +75,7 @@ def _validate_source(source: object) -> str:
     return source
 
 
-def _validate_source_ref(source_ref: object) -> Optional[str]:
+def _validate_source_ref(source_ref: object) -> str | None:
     if source_ref is None or source_ref == "":
         return None
     if not isinstance(source_ref, str):
@@ -142,9 +141,9 @@ class NotesService:
         title: str,
         body_md: str = "",
         source: str = "manual",
-        source_ref: Optional[str] = None,
-        course_id: Optional[str] = None,
-        created_at: Optional[str] = None,
+        source_ref: str | None = None,
+        course_id: str | None = None,
+        created_at: str | None = None,
     ) -> Note:
         title = _validate_title(title)
         body_md = _validate_body(body_md)
@@ -164,7 +163,7 @@ class NotesService:
             created_at=created_at,
         )
 
-    def _validate_course(self, course_id: object) -> Optional[str]:
+    def _validate_course(self, course_id: object) -> str | None:
         if course_id is None or course_id == "":
             return None
         if not isinstance(course_id, str) or self._store.get_course(course_id) is None:
@@ -175,18 +174,18 @@ class NotesService:
         self,
         note_id: str,
         *,
-        title: Optional[str] = None,
-        body_md: Optional[str] = None,
-        pinned: Optional[bool] = None,
+        title: str | None = None,
+        body_md: str | None = None,
+        pinned: bool | None = None,
         course_id: object = storage._UNSET,
     ) -> Note:
         if not isinstance(note_id, str) or not note_id:
             raise ValueError("note_id is required")
         if self._store.get_note(note_id) is None:
             raise KeyError(note_id)
-        new_title: Optional[str] = None
-        new_body: Optional[str] = None
-        new_body_html: Optional[str] = None
+        new_title: str | None = None
+        new_body: str | None = None
+        new_body_html: str | None = None
         if title is not None:
             new_title = _validate_title(title)
         if body_md is not None:
@@ -208,7 +207,7 @@ class NotesService:
             raise ValueError("note_id is required")
         return self._store.delete_note(note_id)
 
-    def get(self, note_id: str) -> Optional[Note]:
+    def get(self, note_id: str) -> Note | None:
         if not isinstance(note_id, str) or not note_id:
             return None
         return self._store.get_note(note_id)
@@ -218,7 +217,7 @@ class NotesService:
         *,
         limit: int = 50,
         offset: int = 0,
-        search: Optional[str] = None,
+        search: str | None = None,
     ) -> tuple[list[Note], int]:
         if not isinstance(limit, int) or limit < 1:
             raise ValueError("limit must be a positive int")
@@ -241,7 +240,7 @@ def memo_text(transcript: str) -> str:
     return "\n\n".join(line for line in lines if line)
 
 
-def ensure_memo_note(store: storage.Storage, session_id: str) -> Optional[Note]:
+def ensure_memo_note(store: storage.Storage, session_id: str) -> Note | None:
     """Give a finished voice memo its note (once). The note's text starts
     as the transcript; its title is the recording's name."""
     sess = store.get_session(session_id)

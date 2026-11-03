@@ -33,10 +33,12 @@ from __future__ import annotations
 
 import json
 import traceback
-from typing import Optional
 
+import timeutil
+from services import filing
+from services.events import EventsService
+from services.llm import LLMError, LLMProvider, Summary
 from storage import (
-    title_is_placeholder,
     STATUS_CLASSIFYING,
     STATUS_DONE,
     STATUS_EXTRACTING,
@@ -46,13 +48,8 @@ from storage import (
     STATUS_TRANSCRIBED,
     STATUS_TRANSCRIBING,
     Storage,
+    title_is_placeholder,
 )
-
-import timeutil
-from services import filing
-from services.events import EventsService
-from services.llm import LLMError, LLMProvider, Summary
-
 
 # Why the pipeline stopped. Used to label the ``failed`` status so the
 # UI can distinguish "transcription failed" from "classification failed"
@@ -79,7 +76,7 @@ def _set_status(
     session_id: str,
     status: str,
     *,
-    status_detail: Optional[str] = None,
+    status_detail: str | None = None,
 ) -> None:
     """Helper: update status, swallow transition errors as soft fails.
 
@@ -136,11 +133,11 @@ def run_post_finish_pipeline(
     storage: Storage,
     session_id: str,
     *,
-    transcript_provider: Optional[LLMProvider] = None,
-    classifier: Optional[LLMProvider] = None,
-    llm_provider: Optional[LLMProvider] = None,
+    transcript_provider: LLMProvider | None = None,
+    classifier: LLMProvider | None = None,
+    llm_provider: LLMProvider | None = None,
     resume: bool = False,
-) -> Optional[dict]:
+) -> dict | None:
     """Run the post-stitch pipeline for ``session_id``.
 
     The ``transcript_provider``, ``classifier`` and ``llm_provider``
@@ -227,7 +224,7 @@ def run_post_finish_pipeline(
     # a previous run is reused verbatim — the recording is NOT
     # transcribed again. Statuses still walk the legal chain so
     # the transition guard stays satisfied.
-    resume_transcript: Optional[str] = None
+    resume_transcript: str | None = None
     if resume:
         try:
             existing = storage.get_artifact(session_id, "transcript")
@@ -310,8 +307,8 @@ def run_post_finish_pipeline(
     # already. In both cases the classifier is skipped and we go
     # straight from ``transcribed`` to ``summarising`` (the
     # transition table allows that jump).
-    kind: Optional[str] = None
-    confidence: Optional[float] = None
+    kind: str | None = None
+    confidence: float | None = None
     sess_now = storage.get_session(session_id)
     kind_already_set = (
         sess_now is not None and sess_now.kind is not None
@@ -389,7 +386,7 @@ def run_post_finish_pipeline(
     # returns an empty Summary, so this step always succeeds in
     # the no-key case. On resume, a summary artifact persisted by
     # a previous run is reused instead of re-calling the model.
-    resume_summary: Optional[Summary] = None
+    resume_summary: Summary | None = None
     if resume:
         try:
             existing = storage.get_artifact(session_id, "summary")
@@ -529,7 +526,7 @@ def _summary_payload(summary: Summary) -> str:
     })
 
 
-def _recorded_at(sess) -> Optional[str]:
+def _recorded_at(sess) -> str | None:
     """When a recording was made, for the extraction prompt (so "next
     Friday" can be worked out): "Thursday 30 October 2026, 13:10"."""
     local = timeutil.to_local(sess.started_at) if sess else None
@@ -537,7 +534,7 @@ def _recorded_at(sess) -> Optional[str]:
 
 
 def _file_items(
-    storage: Storage, session_id: str, kind: Optional[str], items: list,
+    storage: Storage, session_id: str, kind: str | None, items: list,
 ) -> int:
     """Copy deadlines / to-dos / events into the user's lists (only for
     :data:`filing.FILING_KINDS`; other kinds just drop what an earlier

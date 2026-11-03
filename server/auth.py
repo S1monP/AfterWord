@@ -22,7 +22,7 @@ import logging
 import secrets
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from flask import (
     Blueprint,
@@ -97,7 +97,7 @@ def _device_token_ok(expected: str) -> bool:
     return scheme.lower() == "bearer" and _same(token.strip(), expected)
 
 
-def _guard() -> Optional[Any]:
+def _guard() -> Any | None:
     cfg = current_app.config["AFTERWORD_CONFIG"]
     endpoint = request.endpoint
     if endpoint in DEVICE_ENDPOINTS:
@@ -115,7 +115,7 @@ def _guard() -> Optional[Any]:
     return redirect(url_for("auth.login", next=target))
 
 
-def _safe_next(target: Optional[str]) -> str:
+def _safe_next(target: str | None) -> str:
     """Only same-site paths, so ?next= cannot send the user elsewhere."""
     if target and target.startswith("/") and not target.startswith("//") \
             and "\\" not in target:

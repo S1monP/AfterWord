@@ -10,12 +10,12 @@ Run: ``python scripts/upload_smoke.py``.
 from __future__ import annotations
 
 import json
+import shutil
 import struct
 import sys
 import tempfile
 import threading
 import time
-import shutil
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -58,17 +58,17 @@ def build_multipart(file_bytes: bytes, filename: str,
         parts.append(
             f"--{boundary}\r\n"
             f"Content-Disposition: form-data; name=\"title\"\r\n"
-            f"\r\n{title}\r\n".encode("utf-8")
+            f"\r\n{title}\r\n".encode()
         )
     parts.append(
         f"--{boundary}\r\n"
         f"Content-Disposition: form-data; name=\"file\"; "
         f"filename=\"{filename}\"\r\n"
         f"Content-Type: audio/wav\r\n"
-        f"\r\n".encode("utf-8")
+        f"\r\n".encode()
     )
     parts.append(file_bytes)
-    parts.append(f"\r\n--{boundary}--\r\n".encode("utf-8"))
+    parts.append(f"\r\n--{boundary}--\r\n".encode())
     body = b"".join(parts)
     ctype = f"multipart/form-data; boundary={boundary}"
     return body, ctype

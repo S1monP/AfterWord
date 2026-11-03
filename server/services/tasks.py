@@ -17,12 +17,11 @@ from __future__ import annotations
 import datetime as _dt
 import re
 import uuid
-from typing import Any, Optional
+from typing import Any
 
 import storage
 import timeutil
 from storage import Task
-
 
 # --- Limits -----------------------------------------------------------------
 
@@ -64,7 +63,7 @@ def _validate_title(title: object) -> str:
     return title
 
 
-def _validate_body(body_md: object) -> Optional[str]:
+def _validate_body(body_md: object) -> str | None:
     if body_md is None or body_md == "":
         return None
     if not isinstance(body_md, str):
@@ -76,7 +75,7 @@ def _validate_body(body_md: object) -> Optional[str]:
     return body_md
 
 
-def _validate_description(description: object) -> Optional[str]:
+def _validate_description(description: object) -> str | None:
     if description is None or description == "":
         return None
     if not isinstance(description, str):
@@ -136,7 +135,7 @@ def _validate_source(source: object) -> str:
     return source
 
 
-def _validate_source_ref(source_ref: object) -> Optional[str]:
+def _validate_source_ref(source_ref: object) -> str | None:
     if source_ref is None or source_ref == "":
         return None
     if not isinstance(source_ref, str):
@@ -146,7 +145,7 @@ def _validate_source_ref(source_ref: object) -> Optional[str]:
     return source_ref
 
 
-def _validate_course_id(course_id: object) -> Optional[str]:
+def _validate_course_id(course_id: object) -> str | None:
     if course_id is None or course_id == "":
         return None
     if not isinstance(course_id, str):
@@ -156,7 +155,7 @@ def _validate_course_id(course_id: object) -> Optional[str]:
     return course_id
 
 
-def _validate_source_offset_ms(offset: object) -> Optional[int]:
+def _validate_source_offset_ms(offset: object) -> int | None:
     if offset is None:
         return None
     if isinstance(offset, bool) or not isinstance(offset, int):
@@ -166,7 +165,7 @@ def _validate_source_offset_ms(offset: object) -> Optional[int]:
     return int(offset)
 
 
-def _validate_due_at(due_at: object) -> Optional[str]:
+def _validate_due_at(due_at: object) -> str | None:
     """Parse and validate a due_at timestamp.
 
     Accepts anything ``datetime.fromisoformat`` can parse (in Python
@@ -192,7 +191,7 @@ def _validate_due_at(due_at: object) -> Optional[str]:
         ) from exc
 
 
-def is_overdue(task_due_at: Optional[str], now_iso: str) -> bool:
+def is_overdue(task_due_at: str | None, now_iso: str) -> bool:
     """True iff the task is past due at ``now_iso``.
 
     A due time of local midnight is a due *date* (that is what the
@@ -211,7 +210,7 @@ def is_overdue(task_due_at: Optional[str], now_iso: str) -> bool:
     return due < now
 
 
-def is_due_today(task_due_at: Optional[str], now_iso: str) -> bool:
+def is_due_today(task_due_at: str | None, now_iso: str) -> bool:
     """True iff the task is due on the same local date as now."""
     if not task_due_at:
         return False
@@ -235,16 +234,16 @@ class TasksService:
         self,
         *,
         title: str,
-        body_md: Optional[str] = None,
-        description: Optional[str] = None,
+        body_md: str | None = None,
+        description: str | None = None,
         priority: str = "medium",
         status: str = "open",
         kind: str = "task",
-        due_at: Optional[str] = None,
+        due_at: str | None = None,
         source: str = "manual",
-        source_ref: Optional[str] = None,
-        source_offset_ms: Optional[int] = None,
-        course_id: Optional[str] = None,
+        source_ref: str | None = None,
+        source_offset_ms: int | None = None,
+        course_id: str | None = None,
         pinned: bool = False,
     ) -> Task:
         title = _validate_title(title)
@@ -286,11 +285,11 @@ class TasksService:
         self,
         task_id: str,
         *,
-        title: Optional[str] = None,
+        title: str | None = None,
         body_md: Any = storage._UNSET,
         description: Any = storage._UNSET,
-        priority: Optional[str] = None,
-        kind: Optional[str] = None,
+        priority: str | None = None,
+        kind: str | None = None,
         due_at: Any = storage._UNSET,
         source_offset_ms: Any = storage._UNSET,
         course_id: Any = storage._UNSET,
@@ -301,11 +300,11 @@ class TasksService:
         existing = self._store.get_task(task_id)
         if existing is None:
             raise KeyError(task_id)
-        new_title: Optional[str] = None
+        new_title: str | None = None
         new_body: Any = storage._UNSET
         new_description: Any = storage._UNSET
-        new_priority: Optional[str] = None
-        new_kind: Optional[str] = None
+        new_priority: str | None = None
+        new_kind: str | None = None
         new_due_at: Any = storage._UNSET
         new_source_offset_ms: Any = storage._UNSET
         new_course_id: Any = storage._UNSET
@@ -375,7 +374,7 @@ class TasksService:
                 f"allowed from {existing.status!r}: "
                 f"{sorted(ALLOWED_TRANSITIONS[existing.status])}"
             )
-        completed_at: Optional[str]
+        completed_at: str | None
         if status == "done" and existing.completed_at is None:
             completed_at = storage.now_iso()
         elif existing.status == "done" and status != "done":
@@ -391,7 +390,7 @@ class TasksService:
             raise ValueError("task_id is required")
         return self._store.delete_task(task_id)
 
-    def get(self, task_id: str) -> Optional[Task]:
+    def get(self, task_id: str) -> Task | None:
         if not isinstance(task_id, str) or not task_id:
             return None
         return self._store.get_task(task_id)
@@ -399,9 +398,9 @@ class TasksService:
     def list(
         self,
         *,
-        kind: Optional[str] = None,
-        status: Optional[str] = None,
-        priority: Optional[str] = None,
+        kind: str | None = None,
+        status: str | None = None,
+        priority: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> tuple[list[Task], int]:

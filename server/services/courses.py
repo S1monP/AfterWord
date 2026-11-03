@@ -16,11 +16,9 @@ The service layer owns three concerns the storage layer doesn't:
 from __future__ import annotations
 
 import uuid
-from typing import Optional
 
 from services import palette
 from storage import Course, Storage
-
 
 # --- Limits -----------------------------------------------------------------
 
@@ -41,7 +39,7 @@ def _validate_name(name: object) -> str:
     return name
 
 
-def _validate_code(code: object) -> Optional[str]:
+def _validate_code(code: object) -> str | None:
     if code is None or code == "":
         return None
     if not isinstance(code, str):
@@ -51,7 +49,7 @@ def _validate_code(code: object) -> Optional[str]:
     return code
 
 
-def _validate_color(color: object) -> Optional[str]:
+def _validate_color(color: object) -> str | None:
     return palette.to_slot(color)
 
 
@@ -93,8 +91,8 @@ class CoursesService:
         self,
         *,
         name: str,
-        code: Optional[str] = None,
-        color: Optional[str] = None,
+        code: str | None = None,
+        color: str | None = None,
         sort_order: int = 0,
     ) -> Course:
         name = _validate_name(name)
@@ -138,7 +136,7 @@ class CoursesService:
             raise ValueError("course_id is required")
         return self._store.delete_course(course_id)
 
-    def get(self, course_id: str) -> Optional[Course]:
+    def get(self, course_id: str) -> Course | None:
         if not isinstance(course_id, str) or not course_id:
             return None
         return self._store.get_course(course_id)

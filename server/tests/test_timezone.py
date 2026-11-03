@@ -4,12 +4,10 @@ and across the 25 Oct 2026 clock change, where UTC-only logic is wrong.
 """
 from __future__ import annotations
 
-import datetime as _dt
 import json
 import unittest
 
 import timeutil
-from services import events as events_mod
 from services.tasks import is_due_today, is_overdue
 from tests.conftest import LRTestCase
 

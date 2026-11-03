@@ -14,7 +14,6 @@ import unittest
 
 from tests.conftest import LRTestCase
 
-
 # A minimal hand-crafted .ics calendar with three importable VEVENTs
 # plus one malformed one (no SUMMARY). Used by the import tests.
 _SAMPLE_ICS = b"""BEGIN:VCALENDAR
@@ -505,9 +504,9 @@ def _make_event(starts_at: str, eid: str):
 # service-level tests above don't accidentally rely on them being in
 # scope at import time).
 from services.events import (  # noqa: E402
-    Event, suggest_match_confidence,
+    Event,
+    suggest_match_confidence,
 )
-
 
 if __name__ == "__main__":
     unittest.main()

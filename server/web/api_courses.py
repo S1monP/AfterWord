@@ -9,7 +9,6 @@ from flask import Blueprint, jsonify, request
 import storage
 from web.common import current_app_courses_service
 
-
 bp = Blueprint("courses_api", __name__)
 
 

@@ -5,7 +5,6 @@ test, so tests are isolated and can run in any order.
 """
 from __future__ import annotations
 
-import os
 import shutil
 import sys
 import tempfile
@@ -17,8 +16,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import config as config_mod  # noqa: E402
-from app import create_app  # noqa: E402
 import storage  # noqa: E402
+from app import create_app  # noqa: E402
 
 # Real ffmpeg when the host has one (uploads are transcoded to AAC at
 # ingest now, so upload/stitch tests need it); a dummy path otherwise,

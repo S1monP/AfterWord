@@ -251,8 +251,9 @@ class ClassificationServiceIsRealTests(unittest.TestCase):
     constructor takes a storage instance."""
 
     def test_classification_service_init_signature(self):
-        from services.classification import ClassificationService
         import inspect
+
+        from services.classification import ClassificationService
         sig = inspect.signature(ClassificationService.__init__)
         self.assertGreaterEqual(
             len(sig.parameters), 2,

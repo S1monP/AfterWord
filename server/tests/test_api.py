@@ -260,7 +260,6 @@ class TranscribeRouteTests(LRTestCase):
         for the pipeline to run. If it's still 'receiving', the
         route returns 409."""
         self._stub_providers()
-        import storage
         store = self.app.config["AFTERWORD_STORAGE"]
         store.upsert_session(
             "trnsc0000002", title="x", expected_count=1,
@@ -419,6 +418,7 @@ class WebUITests(LRTestCase):
         """With a lecture, a meeting, and an event in the DB, the
         dashboard cards show them instead of the empty states."""
         import datetime as _dt
+
         import storage as storage_mod
         store = self.app.config["AFTERWORD_STORAGE"]
         for sid, kind, title in (
@@ -438,7 +438,7 @@ class WebUITests(LRTestCase):
             store.set_kind(sid, kind, confidence=1.0)
         # An event starting tomorrow lands in the "This week" list.
         tomorrow = (
-            _dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(days=1)
+            _dt.datetime.now(_dt.UTC) + _dt.timedelta(days=1)
         )
         event_starts = tomorrow.strftime("%Y-%m-%dT") + "10:00:00Z"
         self.app.config["AFTERWORD_EVENTS_SERVICE"].create(

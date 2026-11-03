@@ -9,7 +9,6 @@ from flask import Blueprint, jsonify, request
 import storage
 from web.common import current_app_tasks_service
 
-
 bp = Blueprint("tasks_api", __name__)
 
 

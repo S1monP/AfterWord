@@ -8,7 +8,7 @@ One list, and one live editor; a note with audio also has a player and
 from __future__ import annotations
 
 import datetime as _dt
-from typing import Any, Optional
+from typing import Any
 
 import timeutil
 from services.llm import parse_transcript_lines
@@ -24,13 +24,13 @@ UNTITLED = "Untitled note"
 
 
 def _clock(seconds: float) -> str:
-    s = int(round(seconds))
+    s = round(seconds)
     m, sec = divmod(s, 60)
     h, m = divmod(m, 60)
     return f"{h}:{m:02d}:{sec:02d}" if h else f"{m}:{sec:02d}"
 
 
-def _day(dt: Optional[_dt.datetime], today: _dt.date) -> str:
+def _day(dt: _dt.datetime | None, today: _dt.date) -> str:
     if dt is None:
         return ""
     if dt.date() == today:

@@ -10,27 +10,26 @@ from __future__ import annotations
 
 import json
 import os
+
+# Real ffmpeg when the host has one — the AAC segmenter/halving
+# tests shell out to it.
+import shutil as _shutil
 import struct
 import unittest
 
 from services import llm
 from services.llm import (
-    Classification,
+    VALID_KINDS,
     LLMConfigError,
     LLMError,
     LLMHTTPError,
-    LLMProvider,
-    TranscriptionProvider,
     TextProvider,
-    VALID_KINDS,
+    TranscriptionProvider,
     _build_multipart_body,
     _parse_classify_response,
 )
 from tests.conftest import skip_without_ffmpeg
 
-# Real ffmpeg when the host has one — the AAC segmenter/halving
-# tests shell out to it.
-import shutil as _shutil
 FFMPEG_PATH = _shutil.which("ffmpeg") or "ffmpeg-nonexistent-test-binary"
 
 
@@ -38,6 +37,7 @@ def _write_aac(path_dir, seconds: float = 5.0, rate: int = 8000):
     """Build a real ADTS AAC file from a generated WAV (needs ffmpeg;
     skip the calling test when it isn't available)."""
     from pathlib import Path as _P
+
     from services import transcode as tx
     data = b"\x00\x01" * int(seconds * rate)
     wav = _write_real_wav(
@@ -315,7 +315,6 @@ class TranscriptionProviderTests(unittest.TestCase):
             http_transport=transport,
         )
         import tempfile
-        from pathlib import Path
         with tempfile.TemporaryDirectory() as d:
             text = p.transcribe(_write_aac(d, seconds=5.0))
         self.assertEqual(len(calls), 3)
@@ -355,7 +354,7 @@ class TranscriptionProviderTests(unittest.TestCase):
             http_transport=transport,
         )
         import tempfile
-        from pathlib import Path
+
         from services import transcode as tx
         with tempfile.TemporaryDirectory() as d:
             audio = _write_aac(d, seconds=100.0)

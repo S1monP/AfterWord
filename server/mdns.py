@@ -17,14 +17,13 @@ import logging
 import socket
 import threading
 import time
-from typing import Optional
 
 log = logging.getLogger(__name__)
 
 RECHECK_S = 300
 
 
-def lan_ip() -> Optional[str]:
+def lan_ip() -> str | None:
     """The address this machine uses on the local network (no packet
     is sent: connecting a UDP socket only picks the route)."""
     try:
@@ -36,7 +35,7 @@ def lan_ip() -> Optional[str]:
     return None if ip.startswith("127.") else ip
 
 
-def announce(name: str, port: int) -> Optional[threading.Thread]:
+def announce(name: str, port: int) -> threading.Thread | None:
     """Announce ``name.local`` for this machine on ``port`` until the
     process ends. Returns None (and says why) when it can't."""
     try:
@@ -47,7 +46,7 @@ def announce(name: str, port: int) -> Optional[threading.Thread]:
         return None
     name = name.strip().lower().removesuffix(".local")
 
-    def info_for(ip: str) -> "ServiceInfo":
+    def info_for(ip: str) -> ServiceInfo:
         return ServiceInfo(
             "_http._tcp.local.", f"AfterWord ({name})._http._tcp.local.",
             addresses=[socket.inet_aton(ip)], port=port,

@@ -18,12 +18,11 @@ from __future__ import annotations
 
 import datetime as _dt
 import os
-from typing import Optional
 from zoneinfo import ZoneInfo
 
 TIMEZONE_ENV = "AFTERWORD_TIMEZONE"
 DEFAULT_TIMEZONE = "Europe/London"
-UTC = _dt.timezone.utc
+UTC = _dt.UTC
 _FMT = "%Y-%m-%dT%H:%M:%SZ"
 
 
@@ -54,7 +53,7 @@ def to_utc_iso(value: str) -> str:
     return fmt(parse(value))
 
 
-def to_local(value: Optional[str]) -> Optional[_dt.datetime]:
+def to_local(value: str | None) -> _dt.datetime | None:
     """Stored timestamp -> aware local datetime (``None`` if empty or
     unparseable)."""
     if not value:

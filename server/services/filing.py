@@ -23,10 +23,11 @@ from __future__ import annotations
 
 import datetime as _dt
 import re
-from typing import Any, Optional
+from typing import Any
 
 import timeutil
-from services.events import KINDS as EVENT_KINDS, EventsService
+from services.events import KINDS as EVENT_KINDS
+from services.events import EventsService
 from services.tasks import TasksService
 from storage import Storage, title_is_placeholder
 
@@ -44,7 +45,7 @@ _MAX_TITLE = 200
 class _Link:
     """Where a filed item came from: the recording and the moment."""
 
-    def __init__(self, sess, offset_ms: Optional[int]) -> None:
+    def __init__(self, sess, offset_ms: int | None) -> None:
         self.session_id = sess.id
         self.offset_ms = offset_ms
         named = sess.title and not (
@@ -85,7 +86,7 @@ def refile(storage: Storage, session_id: str, items: list[dict]) -> dict:
 
 def _file_one(item: dict, sess, recorded_day: _dt.date,
               tasks: TasksService, events: EventsService,
-              link: Optional[_Link]) -> Optional[str]:
+              link: _Link | None) -> str | None:
     kind = item.get("type")
     text = " ".join(str(item.get("text", "")).split())[:_MAX_TITLE]
     if kind not in ("deadline", "action_item", "event") or not text:
@@ -108,8 +109,8 @@ def _file_one(item: dict, sess, recorded_day: _dt.date,
 
 
 def _add_task(tasks: TasksService, sess, kind: str, text: str,
-              due: Optional[_dt.datetime], recorded_day: _dt.date,
-              link: Optional[_Link]) -> Optional[str]:
+              due: _dt.datetime | None, recorded_day: _dt.date,
+              link: _Link | None) -> str | None:
     if due is not None and due.date() < recorded_day:
         return None
     day = due.date() if due else None
@@ -133,7 +134,7 @@ def _add_task(tasks: TasksService, sess, kind: str, text: str,
 
 def _add_event(events: EventsService, sess, text: str, item: dict,
                start: _dt.datetime, recorded_day: _dt.date,
-               link: Optional[_Link]) -> Optional[str]:
+               link: _Link | None) -> str | None:
     if start.date() < recorded_day:
         return None
     end = _local(item.get("end"))
@@ -167,7 +168,7 @@ def _add_event(events: EventsService, sess, text: str, item: dict,
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
-def _local(value: Any) -> Optional[tuple[_dt.datetime, bool]]:
+def _local(value: Any) -> tuple[_dt.datetime, bool] | None:
     """A model date ('2026-11-06' or '2026-11-06T14:00', local time) as
     ``(naive local datetime, has_time)``; None if absent or unreadable."""
     if not isinstance(value, str) or not value.strip():
@@ -184,7 +185,7 @@ def _local(value: Any) -> Optional[tuple[_dt.datetime, bool]]:
     return dt.replace(second=0, microsecond=0), True
 
 
-def _offset_ms(value: Any) -> Optional[int]:
+def _offset_ms(value: Any) -> int | None:
     """'12:34' or '1:02:03' (a transcript marker) as milliseconds."""
     if not isinstance(value, str):
         return None
@@ -222,7 +223,7 @@ def _similar(a: str, b: str) -> bool:
     return len(wa & wb) / min(len(wa), len(wb)) >= 0.75
 
 
-def _same_day(due_at: Optional[str], day: Optional[_dt.date]) -> bool:
+def _same_day(due_at: str | None, day: _dt.date | None) -> bool:
     if due_at is None or day is None:
         return due_at is None and day is None
     local = timeutil.to_local(due_at)

@@ -22,8 +22,6 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
-
 
 log = logging.getLogger(__name__)
 
@@ -150,7 +148,7 @@ def ffmpeg_available(ffmpeg_path: str = "ffmpeg") -> bool:
     return shutil.which(ffmpeg_path) is not None or os.path.isfile(ffmpeg_path)
 
 
-def ffmpeg_version(ffmpeg_path: str = "ffmpeg") -> Optional[str]:
+def ffmpeg_version(ffmpeg_path: str = "ffmpeg") -> str | None:
     """First line of ``ffmpeg -version`` if available, else None."""
     if not ffmpeg_available(ffmpeg_path):
         return None
@@ -196,7 +194,7 @@ def probe_duration(
     *,
     ffmpeg_path: str = "ffmpeg",
     timeout_sec: int = 60,
-) -> Optional[float]:
+) -> float | None:
     """Duration of an audio file in seconds via ffprobe.
 
     Returns ``None`` when ffprobe is unavailable or the file can't
@@ -231,7 +229,7 @@ def decode_duration(
     *,
     ffmpeg_path: str = "ffmpeg",
     timeout_sec: int = 600,
-) -> Optional[float]:
+) -> float | None:
     """Exact duration of an audio file in seconds by decoding it.
 
     ADTS AAC has no container duration; ffprobe *estimates* it from
@@ -400,7 +398,7 @@ def ingest_audio_file(
     src: Path,
     *,
     ffmpeg_path: str = "ffmpeg",
-    work_dir: Optional[Path] = None,
+    work_dir: Path | None = None,
 ) -> tuple[Path, AudioFormat]:
     """Ensure ``src`` is canonical AAC; transcode if not.
 

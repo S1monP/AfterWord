@@ -13,7 +13,6 @@ import os
 import sys
 import threading
 from pathlib import Path
-from typing import Optional
 
 FORMAT = "%(asctime)s %(levelname)-7s %(name)s: %(message)s"
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
@@ -25,7 +24,7 @@ _SERVER_DIR = Path(__file__).resolve().parent
 _log = logging.getLogger(__name__)
 
 
-def setup(log_file: Optional[str] = None, level: Optional[str] = None) -> Optional[Path]:
+def setup(log_file: str | None = None, level: str | None = None) -> Path | None:
     """Send all log records to the console or, with ``log_file``, to that
     file (relative paths are taken from the server folder).
 
@@ -40,7 +39,7 @@ def setup(log_file: Optional[str] = None, level: Optional[str] = None) -> Option
         level = os.environ.get("AFTERWORD_LOG_LEVEL", "")
     level = (level.strip() or "INFO").upper()
 
-    path: Optional[Path] = None
+    path: Path | None = None
     if log_file.strip():
         path = Path(log_file.strip())
         if not path.is_absolute():

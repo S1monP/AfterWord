@@ -4,7 +4,7 @@ reader; on the phone the list fills the screen and a recording opens full screen
 from __future__ import annotations
 
 import datetime as _dt
-from typing import Any, Callable, Optional
+from typing import Any
 
 import storage
 import timeutil
@@ -35,7 +35,7 @@ PAGES: dict[str, dict[str, Any]] = {
 SPEAKER_COLOURS = 4
 
 
-def _clock(ms: Optional[int]) -> str:
+def _clock(ms: int | None) -> str:
     s = (ms or 0) // 1000
     h, rem = divmod(s, 3600)
     m, sec = divmod(rem, 60)

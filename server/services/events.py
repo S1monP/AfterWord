@@ -22,12 +22,10 @@ from __future__ import annotations
 import datetime as _dt
 import re
 import uuid
-from typing import Any, Optional
+from typing import Any
 
-import storage
 import timeutil
 from storage import Event, Storage
-
 
 # --- Limits -----------------------------------------------------------------
 
@@ -94,12 +92,12 @@ def _parse_iso(ts: str) -> _dt.datetime:
 
 def _fmt_iso(dt: _dt.datetime) -> str:
     """Format an aware datetime as the storage-normalised ISO string."""
-    return dt.astimezone(_dt.timezone.utc).strftime(
+    return dt.astimezone(_dt.UTC).strftime(
         "%Y-%m-%dT%H:%M:%SZ"
     )
 
 
-def _validate_repeat_until(value: object) -> Optional[str]:
+def _validate_repeat_until(value: object) -> str | None:
     """Validate the optional weekly-recurrence end date (inclusive).
 
     Accepts ``YYYY-MM-DD``; returns a normalised ISO date string or
@@ -155,7 +153,7 @@ def _validate_source(source: object) -> str:
 
 def _validate_optional_text(
     value: object, *, field: str, max_len: int,
-) -> Optional[str]:
+) -> str | None:
     if value is None or value == "":
         return None
     if not isinstance(value, str):
@@ -167,13 +165,13 @@ def _validate_optional_text(
     return value
 
 
-def _validate_source_ref(source_ref: object) -> Optional[str]:
+def _validate_source_ref(source_ref: object) -> str | None:
     return _validate_optional_text(
         source_ref, field="source_ref", max_len=MAX_SOURCE_REF_LEN,
     )
 
 
-def _validate_course_id(course_id: object, store: Storage) -> Optional[str]:
+def _validate_course_id(course_id: object, store: Storage) -> str | None:
     """Validate an event's optional course association: ``None`` or
     an existing course id. Used by the calendar time-matcher, which
     assigns the matched event's course to the recording."""
@@ -192,7 +190,7 @@ def _validate_starts_at(value: object) -> str:
 
 def _validate_ends_at(
     value: object, *, starts_at: str,
-) -> Optional[str]:
+) -> str | None:
     if value is None or value == "":
         return None
     normalised = _normalise_iso(value, field="ends_at")
@@ -206,8 +204,8 @@ def _validate_ends_at(
 def suggest_match_confidence(
     session_started_at: str,
     event_starts_at: str,
-    event_ends_at: Optional[str],
-) -> Optional[float]:
+    event_ends_at: str | None,
+) -> float | None:
     """Compute a 0..1 confidence score for whether a session belongs
     to an event.
 
@@ -274,12 +272,12 @@ class EventsService:
         title: str,
         kind: str,
         starts_at: str,
-        ends_at: Optional[str] = None,
-        description: Optional[str] = None,
-        location: Optional[str] = None,
+        ends_at: str | None = None,
+        description: str | None = None,
+        location: str | None = None,
         source: str = "manual",
-        source_ref: Optional[str] = None,
-        course_id: Optional[str] = None,
+        source_ref: str | None = None,
+        course_id: str | None = None,
     ) -> Event:
         title = _validate_title(title)
         kind = _validate_kind(kind)
@@ -360,13 +358,13 @@ class EventsService:
         title: str,
         kind: str,
         starts_at: str,
-        ends_at: Optional[str] = None,
-        description: Optional[str] = None,
-        location: Optional[str] = None,
+        ends_at: str | None = None,
+        description: str | None = None,
+        location: str | None = None,
         source: str = "manual",
-        source_ref: Optional[str] = None,
-        course_id: Optional[str] = None,
-        repeat_until: Optional[str] = None,
+        source_ref: str | None = None,
+        course_id: str | None = None,
+        repeat_until: str | None = None,
     ) -> tuple[Event, int]:
         """Create a weekly-recurring event series.
 
@@ -416,7 +414,7 @@ class EventsService:
         tz = timeutil.local_tz()
         start_local = starts_dt.astimezone(tz)
         end_local = _parse_iso(ends_norm).astimezone(tz) if ends_norm else None
-        first: Optional[Event] = None
+        first: Event | None = None
         for k in range(weeks):
             step = _dt.timedelta(days=7 * k)
             ev = self.create(
@@ -450,7 +448,7 @@ class EventsService:
             SubscriptionsService(self._store).hide(event)
         return self._store.delete_event(event_id)
 
-    def get(self, event_id: str) -> Optional[Event]:
+    def get(self, event_id: str) -> Event | None:
         if not isinstance(event_id, str) or not event_id:
             return None
         return self._store.get_event(event_id)
@@ -458,9 +456,9 @@ class EventsService:
     def list(
         self,
         *,
-        kind: Optional[str] = None,
-        starts_after: Optional[str] = None,
-        starts_before: Optional[str] = None,
+        kind: str | None = None,
+        starts_after: str | None = None,
+        starts_before: str | None = None,
         limit: int = 500,
         offset: int = 0,
     ) -> tuple[list[Event], int]:
@@ -484,7 +482,7 @@ class EventsService:
             offset=offset,
         )
 
-    def suggest_match(self, session_id: str) -> Optional[Event]:
+    def suggest_match(self, session_id: str) -> Event | None:
         """Find the best event whose window covers the session's
         ``started_at``. Returns ``None`` if the session doesn't exist
         or no event matches.
@@ -507,7 +505,7 @@ class EventsService:
         candidates, _ = self._store.list_events(
             starts_after=window_lo, starts_before=window_hi, limit=500,
         )
-        best: Optional[tuple[float, Event]] = None
+        best: tuple[float, Event] | None = None
         for ev in candidates:
             conf = suggest_match_confidence(
                 sess.started_at, ev.starts_at, ev.ends_at,
@@ -567,8 +565,8 @@ class EventsService:
 
 
 __all__ = [
-    "Event",
     "KINDS",
+    "Event",
     "EventsService",
     "suggest_match_confidence",
 ]

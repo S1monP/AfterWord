@@ -23,7 +23,6 @@ import sqlite3
 import threading
 from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import Optional, Union
 
 import snowballstemmer
 
@@ -75,10 +74,10 @@ def _stem(word: str) -> str:
 # Building the index
 # ---------------------------------------------------------------------------
 
-Row = tuple[str, Optional[int], str, str, str]
+Row = tuple[str, int | None, str, str, str]
 
 
-def _row(field_: str, at_ms: Optional[int], text: str) -> Optional[Row]:
+def _row(field_: str, at_ms: int | None, text: str) -> Row | None:
     """``(field, at_ms, text, words, stems)``, or None without words."""
     text = text.strip()
     words = [_norm(w) for w in _WORD.findall(text)]
@@ -95,11 +94,11 @@ _MD_LEAD = re.compile(r"^\s*(?:[#>*+-]+|\d+[.)])\s+")
 _MD_EMPHASIS = re.compile(r"\*\*|__|`")
 
 
-def _paragraphs(text: Optional[str]) -> list[str]:
+def _paragraphs(text: str | None) -> list[str]:
     return [p.strip() for p in _PARAGRAPH_BREAK.split(text or "") if p.strip()]
 
 
-def _markdown_lines(text: Optional[str]) -> list[str]:
+def _markdown_lines(text: str | None) -> list[str]:
     out = []
     for line in (text or "").splitlines():
         line = _MD_EMPHASIS.sub("", _MD_LEAD.sub("", line)).strip()
@@ -108,7 +107,7 @@ def _markdown_lines(text: Optional[str]) -> list[str]:
     return out
 
 
-def _summary_texts(artifact: Optional[dict]) -> list[str]:
+def _summary_texts(artifact: dict | None) -> list[str]:
     """The summary's overview paragraphs, section headings and texts,
     and key points (pipeline payload; plain text in old summaries)."""
     content = (artifact or {}).get("content") or ""
@@ -127,7 +126,7 @@ def _summary_texts(artifact: Optional[dict]) -> list[str]:
     return texts
 
 
-def _recording_rows(store: storage.Storage, session_id: str) -> Optional[list]:
+def _recording_rows(store: storage.Storage, session_id: str) -> list | None:
     sess = store.get_session(session_id)
     if sess is None:
         return None
@@ -148,7 +147,7 @@ def _recording_rows(store: storage.Storage, session_id: str) -> Optional[list]:
     return rows
 
 
-def _note_rows(store: storage.Storage, note_id: str) -> Optional[list]:
+def _note_rows(store: storage.Storage, note_id: str) -> list | None:
     note = store.get_note(note_id)
     if note is None:
         return None
@@ -157,7 +156,7 @@ def _note_rows(store: storage.Storage, note_id: str) -> Optional[list]:
     ]
 
 
-def _task_rows(store: storage.Storage, task_id: str) -> Optional[list]:
+def _task_rows(store: storage.Storage, task_id: str) -> list | None:
     task = store.get_task(task_id)
     if task is None:
         return None
@@ -167,7 +166,7 @@ def _task_rows(store: storage.Storage, task_id: str) -> Optional[list]:
     ]
 
 
-def _event_rows(store: storage.Storage, event_id: str) -> Optional[list]:
+def _event_rows(store: storage.Storage, event_id: str) -> list | None:
     event = store.get_event(event_id)
     if event is None:
         return None
@@ -275,7 +274,7 @@ class Hit:
     title_match: bool = False
     # The piece to show: for a recording the first line that mentions
     # it, else the best matching piece other than the title.
-    best: Optional[dict] = None
+    best: dict | None = None
     moments: list[int] = field(default_factory=list)  # transcript at_ms
 
 
@@ -283,7 +282,7 @@ class Hit:
 _TITLE_WEIGHT = 2.0
 
 
-def search(store: storage.Storage, query: Union[str, Query]) -> dict[str, list[Hit]]:
+def search(store: storage.Storage, query: str | Query) -> dict[str, list[Hit]]:
     """Matching items by type (:data:`ITEM_TYPES`), best first."""
     if isinstance(query, str):
         query = parse_query(query)
@@ -329,7 +328,7 @@ def search(store: storage.Storage, query: Union[str, Query]) -> dict[str, list[H
 Segments = list[tuple[str, bool]]
 
 
-def highlight(text: str, query: Union[str, Query]) -> Segments:
+def highlight(text: str, query: str | Query) -> Segments:
     """``text`` as ``[(part, is_match), ...]``, matched words marked."""
     if isinstance(query, str):
         query = parse_query(query)
@@ -348,7 +347,7 @@ def highlight(text: str, query: Union[str, Query]) -> Segments:
     return out
 
 
-def snippet(text: str, query: Union[str, Query], width: int = 160) -> Segments:
+def snippet(text: str, query: str | Query, width: int = 160) -> Segments:
     """Like :func:`highlight`, cut to about ``width`` characters around
     the first match."""
     if len(text) > width:

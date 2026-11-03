@@ -9,7 +9,7 @@ never a hex value, so its colour follows scheme and theme changes.
 from __future__ import annotations
 
 import re
-from typing import Iterable, Optional
+from collections.abc import Iterable
 
 SLOTS = 12
 
@@ -42,7 +42,7 @@ def nearest_slot(hex_color: str) -> int:
     return min(REFERENCE, key=distance)
 
 
-def to_slot(color: object) -> Optional[str]:
+def to_slot(color: object) -> str | None:
     """A colour given by a caller -> the stored form ("1".."12"), or
     None for "no colour". Accepts a slot number (int or digits) or an
     old-style hex colour, which maps to the nearest slot. Raises
@@ -61,7 +61,7 @@ def to_slot(color: object) -> Optional[str]:
     raise ValueError(f"color must be a palette slot 1-{SLOTS}; got {color!r}")
 
 
-def next_free(used: Iterable[Optional[str]]) -> str:
+def next_free(used: Iterable[str | None]) -> str:
     """The first slot no course uses yet (cycling once all are taken)."""
     taken = [u for u in used if u]
     for slot in range(1, SLOTS + 1):

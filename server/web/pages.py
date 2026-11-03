@@ -5,7 +5,16 @@ from __future__ import annotations
 import io
 from typing import Any
 
-from flask import abort, Blueprint, current_app, redirect, render_template, request, send_file, url_for
+from flask import (
+    Blueprint,
+    abort,
+    current_app,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    url_for,
+)
 
 import timeutil
 from services import transcode
@@ -14,10 +23,7 @@ from web.common import (
     current_app_events_service,
     current_app_notes_service,
     current_app_storage,
-    current_app_tasks_service,
-    recording_url,
 )
-
 
 bp = Blueprint("pages", __name__)
 

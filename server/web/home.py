@@ -9,7 +9,7 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import math
-from typing import Any, Optional
+from typing import Any
 
 import storage
 import timeutil
@@ -37,7 +37,7 @@ RECENT_LIMIT = 12
 DAY_START, DAY_END = 8, 19          # the Today timeline, widened to fit events
 
 
-def _clock(ms: Optional[int]) -> str:
+def _clock(ms: int | None) -> str:
     s = (ms or 0) // 1000
     h, rem = divmod(s, 3600)
     m, sec = divmod(rem, 60)
@@ -72,18 +72,18 @@ class _Ctx:
         self.today = self.now.date()
         self.courses = {c.id: c for c in current_app_courses_service().list()[0]}
 
-    def cc(self, course_id: Optional[str]) -> str:
+    def cc(self, course_id: str | None) -> str:
         course = self.courses.get(course_id or "")
         return course_cls(course.color if course else None)
 
-    def course_name(self, course_id: Optional[str]) -> str:
+    def course_name(self, course_id: str | None) -> str:
         course = self.courses.get(course_id or "")
         return course.name if course else ""
 
 
 # --- schedule -----------------------------------------------------------
 
-def _event_status(ctx: _Ctx, ev) -> tuple[str, str, Optional[str]]:
+def _event_status(ctx: _Ctx, ev) -> tuple[str, str, str | None]:
     """(label, status class, recording url) for an event, now."""
     sess = ctx.store.get_session(ev.matched_session_id) if ev.matched_session_id else None
     if sess is not None:
@@ -172,7 +172,7 @@ def _schedule(ctx: _Ctx, week_offset: int) -> dict[str, Any]:
     }
 
 
-def _next_up(ctx: _Ctx) -> Optional[dict[str, Any]]:
+def _next_up(ctx: _Ctx) -> dict[str, Any] | None:
     events, _ = current_app_events_service().list(
         starts_after=timeutil.fmt(ctx.now), limit=1,
     )
@@ -300,7 +300,7 @@ def _recent(ctx: _Ctx) -> list[dict[str, Any]]:
 
 # --- deadlines and to-dos ---------------------------------------------------
 
-def _said_in(ctx: _Ctx, task) -> Optional[dict[str, str]]:
+def _said_in(ctx: _Ctx, task) -> dict[str, str] | None:
     if not task.source_ref:
         return None
     sess = ctx.store.get_session(task.source_ref)

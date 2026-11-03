@@ -35,7 +35,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Protocol
+from typing import Protocol
 
 log = logging.getLogger(__name__)
 
@@ -67,8 +67,8 @@ class HttpTransport(Protocol):
         self,
         url: str,
         *,
-        data: Optional[bytes] = None,
-        headers: Optional[dict[str, str]] = None,
+        data: bytes | None = None,
+        headers: dict[str, str] | None = None,
         timeout: float = 60.0,
     ) -> HttpResponse: ...
 
@@ -76,8 +76,8 @@ class HttpTransport(Protocol):
 def _urllib_transport(
     url: str,
     *,
-    data: Optional[bytes] = None,
-    headers: Optional[dict[str, str]] = None,
+    data: bytes | None = None,
+    headers: dict[str, str] | None = None,
     timeout: float = 60.0,
 ) -> HttpResponse:
     """Stdlib HTTP transport using ``urllib.request``.
@@ -123,7 +123,7 @@ class LLMConfigError(LLMError):
 @dataclass
 class Deadline:
     text: str
-    due: Optional[str] = None  # ISO-8601 date if the model could extract one
+    due: str | None = None  # ISO-8601 date if the model could extract one
 
 
 @dataclass
@@ -155,12 +155,12 @@ class LLMProvider:
         raise NotImplementedError
 
     def summarize(
-        self, transcript: str, kind: Optional[str] = None,
+        self, transcript: str, kind: str | None = None,
     ) -> Summary:
         raise NotImplementedError
 
     def extract(
-        self, transcript: str, kind: str, recorded_at: Optional[str] = None,
+        self, transcript: str, kind: str, recorded_at: str | None = None,
     ) -> list[dict]:
         raise NotImplementedError
 
@@ -202,7 +202,7 @@ class _NoOpProvider(LLMProvider):
         return Classification(kind="other", confidence=0.0)
 
     def summarize(
-        self, transcript: str, kind: Optional[str] = None,
+        self, transcript: str, kind: str | None = None,
     ) -> Summary:
         # Empty Summary so the pipeline persists an empty
         # summary artifact; the UI's "no summary yet" placeholder
@@ -213,7 +213,7 @@ class _NoOpProvider(LLMProvider):
         )
 
     def extract(
-        self, transcript: str, kind: str, recorded_at: Optional[str] = None,
+        self, transcript: str, kind: str, recorded_at: str | None = None,
     ) -> list[dict]:
         # Empty list so the pipeline persists an empty
         # extraction artifact. The UI can render "no
@@ -329,7 +329,7 @@ def _read_env_int(name: str, default: int) -> int:
         return default
 
 
-def _format_timestamp(seconds: object) -> Optional[str]:
+def _format_timestamp(seconds: object) -> str | None:
     """Format a segment start time (float seconds) as ``[MM:SS]``
     (or ``[H:MM:SS]`` past one hour). Returns ``None`` when the
     value is missing or not a number.
@@ -394,7 +394,7 @@ _TRANSCRIPT_LINE = re.compile(
 )
 
 
-def parse_transcript_lines(text: Optional[str]) -> list[dict]:
+def parse_transcript_lines(text: str | None) -> list[dict]:
     """Split a transcript back into lines: "[12:34] Speaker 2: text"
     becomes ``{"t": 754, "stamp": "12:34", "speaker": "Speaker 2",
     "text": ...}``; lines without a marker (plain transcripts) have
@@ -464,12 +464,12 @@ class TranscriptionProvider(LLMProvider):
         self,
         api_key: str,
         *,
-        model: Optional[str] = None,
-        annotate_speakers: Optional[bool] = None,
-        chunk_max_seconds: Optional[float] = None,
-        provider_options: Optional[dict] = None,
-        ffmpeg_path: Optional[str] = None,
-        http_transport: Optional[HttpTransport] = None,
+        model: str | None = None,
+        annotate_speakers: bool | None = None,
+        chunk_max_seconds: float | None = None,
+        provider_options: dict | None = None,
+        ffmpeg_path: str | None = None,
+        http_transport: HttpTransport | None = None,
     ) -> None:
         if not api_key:
             raise LLMConfigError(
@@ -513,7 +513,7 @@ class TranscriptionProvider(LLMProvider):
         self._ffmpeg_path = (
             ffmpeg_path or os.environ.get("AFTERWORD_FFMPEG_PATH", "ffmpeg")
         )
-        self._ffmpeg_ok: Optional[bool] = None
+        self._ffmpeg_ok: bool | None = None
         self._http = http_transport or _urllib_transport
 
     def transcribe(self, audio_path: Path) -> str:
@@ -561,7 +561,7 @@ class TranscriptionProvider(LLMProvider):
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
     def _post_transcription(
-        self, audio_path: Path, audio_format: Optional[str] = None,
+        self, audio_path: Path, audio_format: str | None = None,
     ) -> bytes:
         """POST one audio piece and return the raw response body.
 
@@ -617,7 +617,7 @@ class TranscriptionProvider(LLMProvider):
 
     def _extract_chunk(
         self, raw: bytes, offset: float,
-    ) -> tuple[Optional[list[dict]], Optional[str]]:
+    ) -> tuple[list[dict] | None, str | None]:
         """Parse one transcription response.
 
         Returns ``(segments, text)``: ``segments`` is the list of
@@ -633,7 +633,7 @@ class TranscriptionProvider(LLMProvider):
             return (None, decoded)
         if not isinstance(payload, dict):
             return (None, decoded)
-        segments: Optional[list[dict]] = None
+        segments: list[dict] | None = None
         raw_segments = payload.get("segments")
         if isinstance(raw_segments, list) and raw_segments:
             segments = []
@@ -662,7 +662,7 @@ class TranscriptionProvider(LLMProvider):
                 self._ffmpeg_ok = False
         return self._ffmpeg_ok
 
-    def _probe_duration(self, path: Path) -> Optional[float]:
+    def _probe_duration(self, path: Path) -> float | None:
         """Accurate duration of an audio file, or ``None``.
 
         ADTS AAC has no container duration; ffprobe *estimates* it
@@ -725,7 +725,7 @@ class TranscriptionProvider(LLMProvider):
         # Exact piece start times from the segment list
         # (filename,start_time,end_time rows). Fall back to ffprobe
         # estimates if the list is missing or unparseable.
-        starts: Optional[list[float]] = None
+        starts: list[float] | None = None
         try:
             rows = list_path.read_text().splitlines()
             starts = [float(r.split(",")[1]) for r in rows if r.strip()]
@@ -777,7 +777,7 @@ class TranscriptionProvider(LLMProvider):
 
     def _stt_audio(
         self, piece_path: Path, mp3: Path,
-    ) -> tuple[Path, Optional[str]]:
+    ) -> tuple[Path, str | None]:
         """The file and format label to send for one piece.
 
         Pieces stay AAC (stream-copied from storage) for segmenting
@@ -883,7 +883,7 @@ class TranscriptionProvider(LLMProvider):
         )
 
     def summarize(
-        self, transcript: str, kind: Optional[str] = None,
+        self, transcript: str, kind: str | None = None,
     ) -> Summary:
         raise LLMConfigError(
             "TranscriptionProvider only transcribes; use "
@@ -891,7 +891,7 @@ class TranscriptionProvider(LLMProvider):
         )
 
     def extract(
-        self, transcript: str, kind: str, recorded_at: Optional[str] = None,
+        self, transcript: str, kind: str, recorded_at: str | None = None,
     ) -> list[dict]:
         raise LLMConfigError(
             "TranscriptionProvider only transcribes; use "
@@ -1015,7 +1015,7 @@ def _chunk_text(
 # Map step for long recordings: notes on one part of the transcript,
 # with a heading. The synthesis step merges them into sections.
 def _section_notes_prompt(
-    kind: Optional[str], language: Optional[str] = None,
+    kind: str | None, language: str | None = None,
 ) -> str:
     return (
         "You write notes on ONE part of a longer audio transcript. "
@@ -1039,8 +1039,8 @@ def _section_notes_prompt(
 # Synthesis step: merges the notes on each part into one summary
 # without shortening them back down to a few sentences.
 def _synthesis_prompt(
-    kind: Optional[str], transcript_chars: int,
-    language: Optional[str] = None,
+    kind: str | None, transcript_chars: int,
+    language: str | None = None,
 ) -> str:
     return (
         "You are given notes on consecutive parts of one audio "
@@ -1105,7 +1105,7 @@ _FILING_RULES = (
 )
 
 
-def _recorded_line(recorded_at: Optional[str]) -> str:
+def _recorded_line(recorded_at: str | None) -> str:
     """The recording date plus the next two weeks with their weekdays:
     models work out "next Tuesday" far more reliably from a list than
     by counting."""
@@ -1143,13 +1143,13 @@ _EXTRACT_SECTION_PROMPT = (
 
 
 def _summarise_one_chunk(
-    provider: "TextProvider",
+    provider: TextProvider,
     chunk: str,
     *,
     section_index: int,
     total_sections: int,
-    kind: Optional[str] = None,
-    language: Optional[str] = None,
+    kind: str | None = None,
+    language: str | None = None,
 ) -> Summary:
     """Run the per-chunk notes LLM call. Returns an empty
     :class:`Summary` on a parse error so the map step degrades
@@ -1179,12 +1179,12 @@ def _summarise_one_chunk(
 
 
 def _synthesise_summaries(
-    provider: "TextProvider",
+    provider: TextProvider,
     partials: list[Summary],
     *,
-    kind: Optional[str] = None,
+    kind: str | None = None,
     transcript_chars: int = 0,
-    language: Optional[str] = None,
+    language: str | None = None,
 ) -> Summary:
     """Run the synthesis LLM call that merges the notes on each
     part into the final summary.
@@ -1211,14 +1211,14 @@ def _synthesise_summaries(
 
 
 def _extract_one_chunk(
-    provider: "TextProvider",
+    provider: TextProvider,
     chunk: str,
     *,
     kind: str,
     section_index: int,
     total_sections: int,
-    language: Optional[str] = None,
-    recorded_at: Optional[str] = None,
+    language: str | None = None,
+    recorded_at: str | None = None,
 ) -> list[dict]:
     """Run the per-chunk extract LLM call. Returns an empty list
     on a parse error so the dedupe step is robust to a single
@@ -1392,7 +1392,7 @@ def _pick_language(detected: object) -> str:
     return langs[0]
 
 
-def _language_rule(language: Optional[str] = None) -> str:
+def _language_rule(language: str | None = None) -> str:
     """Prompt line fixing the output language. Asking the model to
     choose the language itself proved unreliable (a German meeting
     came back in German, English or even Russian), so the language
@@ -1423,8 +1423,8 @@ _SYNTHESIS_MAX_CHARS = 60_000
 
 
 def _summary_shape(
-    kind: Optional[str], transcript_chars: int,
-    language: Optional[str] = None,
+    kind: str | None, transcript_chars: int,
+    language: str | None = None,
 ) -> str:
     """The JSON shape, length and structure rules for a summary."""
     overview, sections, points = next(
@@ -1459,8 +1459,8 @@ def _summary_shape(
 
 
 def _summarise_prompt(
-    kind: Optional[str], transcript_chars: int,
-    language: Optional[str] = None,
+    kind: str | None, transcript_chars: int,
+    language: str | None = None,
 ) -> str:
     return (
         "You are a personal-note summariser. Given an audio transcript, "
@@ -1654,9 +1654,9 @@ class TextProvider(LLMProvider):
         self,
         api_key: str,
         *,
-        model: Optional[str] = None,
-        chat_url: Optional[str] = None,
-        http_transport: Optional[HttpTransport] = None,
+        model: str | None = None,
+        chat_url: str | None = None,
+        http_transport: HttpTransport | None = None,
     ) -> None:
         if not api_key:
             raise LLMConfigError(
@@ -1804,7 +1804,7 @@ class TextProvider(LLMProvider):
             return ""
 
     def summarize(
-        self, transcript: str, kind: Optional[str] = None,
+        self, transcript: str, kind: str | None = None,
     ) -> Summary:
         """Produce an overview, sections and key points, sized to the
         transcript and structured by ``kind`` (see
@@ -1848,7 +1848,7 @@ class TextProvider(LLMProvider):
         )
 
     def extract(
-        self, transcript: str, kind: str, recorded_at: Optional[str] = None,
+        self, transcript: str, kind: str, recorded_at: str | None = None,
     ) -> list[dict]:
         """Pull structured items out of a transcript.
 
@@ -1911,9 +1911,9 @@ class TextProvider(LLMProvider):
 
 def default_providers(
     *,
-    transcription_key: Optional[str] = None,
-    text_key: Optional[str] = None,
-    http_transport: Optional[HttpTransport] = None,
+    transcription_key: str | None = None,
+    text_key: str | None = None,
+    http_transport: HttpTransport | None = None,
 ) -> dict[str, LLMProvider]:
     """Return the provider registry based on supplied keys.
 

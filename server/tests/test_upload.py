@@ -6,7 +6,6 @@ Tests that require ffmpeg are skipped if it isn't available.
 from __future__ import annotations
 
 import io
-import os
 import shutil
 import struct
 import tempfile
@@ -284,7 +283,7 @@ class TranscodeUnitTests(unittest.TestCase):
 
     @skip_without_ffmpeg
     def test_sniff_aac(self) -> None:
-        from services.transcode import sniff_format, is_canonical_aac
+        from services.transcode import is_canonical_aac, sniff_format
         wav = _make_wav_bytes()
         with tempfile.TemporaryDirectory() as d:
             src = Path(d) / "sniff.wav"

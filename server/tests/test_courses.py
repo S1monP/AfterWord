@@ -12,7 +12,6 @@ import uuid
 
 from tests.conftest import LRTestCase
 
-
 # ---------------------------------------------------------------------------
 # Service-level tests
 # ---------------------------------------------------------------------------
@@ -478,8 +477,9 @@ class CoursesSettingsUiTests(LRTestCase):
 
 class CoursesServiceIsRealTests(unittest.TestCase):
     def test_courses_service_init_signature(self):
-        from services.courses import CoursesService
         import inspect
+
+        from services.courses import CoursesService
         sig = inspect.signature(CoursesService.__init__)
         self.assertGreaterEqual(
             len(sig.parameters), 2,
@@ -679,7 +679,7 @@ class DeleteExportTests(LRTestCase):
         return store, sid, task
 
     def test_export_markdown(self):
-        store, sid, _ = self._recording()
+        _store, sid, _ = self._recording()
         resp = self.client.get(f"/sessions/{sid}/export.md")
         self.assertEqual(resp.status_code, 200)
         self.assertIn("2026-01-15 Entropy and the second law.md",

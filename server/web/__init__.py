@@ -11,9 +11,16 @@
 
 ``BLUEPRINTS`` is what ``app.create_app`` registers.
 """
-from web import (  # noqa: E402
-    api_courses, api_events, api_notes, api_search, api_sessions,
-    api_settings, api_subscriptions, api_tasks, pages,
+from web import (
+    api_courses,
+    api_events,
+    api_notes,
+    api_search,
+    api_sessions,
+    api_settings,
+    api_subscriptions,
+    api_tasks,
+    pages,
 )
 
 BLUEPRINTS = (

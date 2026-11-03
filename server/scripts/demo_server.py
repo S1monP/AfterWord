@@ -19,9 +19,9 @@ from pathlib import Path
 
 SERVER = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SERVER))
-import config as config_mod  # noqa: E402
-import logsetup  # noqa: E402
-import timeutil  # noqa: E402
+import config as config_mod
+import logsetup
+import timeutil
 
 DATA = Path(tempfile.gettempdir()) / "afterword-demo-data"
 shutil.rmtree(DATA, ignore_errors=True)
@@ -32,7 +32,7 @@ NOW = dt.datetime.combine(TODAY, dt.time(13, 42), tzinfo=timeutil.local_tz())
 timeutil.local_now = lambda: NOW
 timeutil.local_today = lambda: TODAY
 
-from app import create_app  # noqa: E402
+from app import create_app
 
 logsetup.setup(log_file="")
 
@@ -121,7 +121,8 @@ notes.create(title="Ideas for the essay", course_id=wr.id, body_md=(
     "- [ ] Mueller and Oppenheimer (2014), longhand vs laptop notes\n- [x] The university policy on recording lectures"))
 notes.create(title="Exam topics", course_id=mi.id, body_md=(
     "## Midterm, Thu 12 Nov\n- Price elasticity of demand\n- Consumer surplus\n\nRevise the elasticity examples from lecture 5 *first*."))
-from services.notes import sync_memo_notes  # noqa: E402
+from services.notes import sync_memo_notes
+
 sync_memo_notes(store)
 
 print("[demo] http://localhost:8010", flush=True)

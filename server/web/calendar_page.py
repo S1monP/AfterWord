@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import datetime as _dt
 import math
-from typing import Any, Optional
+from typing import Any
 
 import timeutil
-from web.common import course_cls, current_app_tasks_service
+from web.common import current_app_tasks_service
 from web.home import _Ctx, _events_between
 
 HOURS = (8, 21)            # the time grid, widened to fit events
@@ -63,7 +63,7 @@ def _hours_for(events: list[dict[str, Any]]) -> tuple[int, int]:
     return start_h, min(end_h, 24)
 
 
-def _now_pct(ctx: _Ctx, start_h: int, end_h: int) -> Optional[float]:
+def _now_pct(ctx: _Ctx, start_h: int, end_h: int) -> float | None:
     now_min = ctx.now.hour * 60 + ctx.now.minute
     if not start_h * 60 <= now_min <= end_h * 60:
         return None
@@ -91,7 +91,7 @@ def _day(ctx: _Ctx, day: _dt.date) -> dict[str, Any]:
     }
 
 
-def calendar_context(view: str, anchor: _dt.date, chosen: Optional[_dt.date]) -> dict[str, Any]:
+def calendar_context(view: str, anchor: _dt.date, chosen: _dt.date | None) -> dict[str, Any]:
     ctx = _Ctx()
     if view == "month":
         first_of_month = anchor.replace(day=1)

@@ -19,10 +19,13 @@ import uuid
 from pathlib import Path
 
 import storage
-from services.llm import (
-    Classification, LLMError, LLMProvider, Summary,
-)
 from services import processing
+from services.llm import (
+    Classification,
+    LLMError,
+    LLMProvider,
+    Summary,
+)
 from tests.conftest import LRTestCase
 
 
@@ -483,7 +486,10 @@ class PipelineSummariseExtractTests(LRTestCase):
 
     def test_summary_gets_kind_keeps_sections_and_resumes(self):
         from services.llm import (
-            Classification, LLMError, LLMProvider, Summary,
+            Classification,
+            LLMError,
+            LLMProvider,
+            Summary,
         )
 
         class T(LLMProvider):
@@ -514,10 +520,11 @@ class PipelineSummariseExtractTests(LRTestCase):
         store = self.app.config["AFTERWORD_STORAGE"]
         sid = _make_ready_session(self)
         t = T()
-        run = lambda resume: processing.run_post_finish_pipeline(
-            store, sid, transcript_provider=t, classifier=t,
-            llm_provider=t, resume=resume,
-        )
+        def run(resume):
+            return processing.run_post_finish_pipeline(
+                    store, sid, transcript_provider=t, classifier=t,
+                    llm_provider=t, resume=resume,
+                )
         self.assertFalse(run(False)["ok"])
         self.assertEqual(t.summary_kinds, ["lecture"])
         parsed = json.loads(store.get_artifact(sid, "summary")["content"])
@@ -534,7 +541,9 @@ class PipelineSummariseExtractTests(LRTestCase):
 
     def test_summarise_failure_marks_failed(self):
         from services.llm import (
-            Classification, LLMError, LLMProvider,
+            Classification,
+            LLMError,
+            LLMProvider,
         )
 
         class T(LLMProvider):
@@ -573,7 +582,10 @@ class PipelineSummariseExtractTests(LRTestCase):
 
     def test_extract_failure_keeps_summary_artifact(self):
         from services.llm import (
-            Classification, LLMError, LLMProvider, Summary,
+            Classification,
+            LLMError,
+            LLMProvider,
+            Summary,
         )
 
         class T(LLMProvider):
@@ -742,7 +754,7 @@ class CalendarTimeMatchTests(LRTestCase):
         self.assertEqual(matched, sid)
 
     def test_matched_lecture_is_course_and_topic(self):
-        sid, ev, course_id = self._seed(
+        sid, _ev, _course_id = self._seed(
             event_title="Lecture 5", event_kind="lecture",
             starts_at="2026-01-15T10:05:00Z",
             ends_at="2026-01-15T11:00:00Z",
@@ -754,7 +766,7 @@ class CalendarTimeMatchTests(LRTestCase):
         self.assertEqual(sess.title_source, "calendar")
 
     def test_time_match_without_course_uses_event_name(self):
-        sid, ev, _ = self._seed(
+        sid, _ev, _ = self._seed(
             event_title="Lecture 5", event_kind="lecture",
             starts_at="2026-01-15T10:05:00Z",
             ends_at="2026-01-15T11:00:00Z",
@@ -767,7 +779,7 @@ class CalendarTimeMatchTests(LRTestCase):
         self.assertEqual(classifier.calls, [])
 
     def test_time_match_meeting_uses_event_name(self):
-        sid, ev, _ = self._seed(
+        sid, _ev, _ = self._seed(
             event_title="Weekly sync", event_kind="meeting",
             starts_at="2026-01-15T10:00:00Z",
             ends_at="2026-01-15T11:00:00Z",

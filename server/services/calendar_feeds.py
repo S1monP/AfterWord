@@ -33,8 +33,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
 
 import storage
 import timeutil
@@ -69,9 +68,9 @@ class FeedEvent:
     key: str
     title: str
     starts_at: str
-    ends_at: Optional[str]
-    location: Optional[str]
-    description: Optional[str]
+    ends_at: str | None
+    location: str | None
+    description: str | None
 
 
 @dataclass
@@ -141,14 +140,14 @@ def _utc(value, *, end_of_day: bool = False) -> _dt.datetime:
         value = _dt.datetime.combine(value, t, tzinfo=timeutil.local_tz())
     elif value.tzinfo is None:
         value = value.replace(tzinfo=timeutil.local_tz())
-    return value.astimezone(_dt.timezone.utc)
+    return value.astimezone(_dt.UTC)
 
 
 def _iso(value: _dt.datetime) -> str:
     return value.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _clean(value, limit: int) -> Optional[str]:
+def _clean(value, limit: int) -> str | None:
     if value is None:
         return None
     text = _CONTROL.sub("", str(value)).strip()
@@ -158,8 +157,8 @@ def _clean(value, limit: int) -> Optional[str]:
 def parse(data: bytes, start: _dt.date, end: _dt.date, cap: int = MAX_EVENTS) -> Feed:
     """The feed's events between ``start`` and ``end`` (repeats
     expanded, cancelled ones left out), each with its key."""
-    from icalendar import Calendar
     import recurring_ical_events
+    from icalendar import Calendar
 
     head = (data or b"").lstrip(b"\xef\xbb\xbf \t\r\n")[:15].upper()
     if not head.startswith(b"BEGIN:VCALENDAR"):
@@ -240,7 +239,7 @@ def module_of(title: str) -> tuple[str, str]:
     return code, _PART.sub("", name).strip() or name
 
 
-def match_course(title: str, courses: list) -> Optional[str]:
+def match_course(title: str, courses: list) -> str | None:
     """The course an event belongs to: its code in the title, or else
     the longest course name in it."""
     low = title.lower()
@@ -273,17 +272,17 @@ class SubscriptionsService:
     def list(self) -> list[Subscription]:
         return self._store.list_subscriptions()
 
-    def get(self, sub_id: str) -> Optional[Subscription]:
+    def get(self, sub_id: str) -> Subscription | None:
         return self._store.get_subscription(sub_id)
 
-    def _check(self, kind: str, course_id: Optional[str]) -> None:
+    def _check(self, kind: str, course_id: str | None) -> None:
         if kind not in KINDS:
             raise ValueError(f"kind must be one of {', '.join(KINDS)}")
         if course_id and self._store.get_course(course_id) is None:
             raise ValueError("That course doesn't exist")
 
     def add(self, url: str, *, name: str = "", kind: str = "lecture",
-            course_id: Optional[str] = None) -> tuple[Subscription, SyncResult]:
+            course_id: str | None = None) -> tuple[Subscription, SyncResult]:
         """Check the link (it must return a calendar), save it and add
         its events. Raises ``ValueError`` / ``FeedError`` and saves
         nothing when the link doesn't work."""
@@ -300,7 +299,7 @@ class SubscriptionsService:
             result = self._apply_subscription(sub, feed)
         return self._store.get_subscription(sub.id), result  # type: ignore[return-value]
 
-    def update(self, sub_id: str, *, name: Optional[str] = None, kind: Optional[str] = None,
+    def update(self, sub_id: str, *, name: str | None = None, kind: str | None = None,
                course_id: object = storage._UNSET) -> Subscription:
         """Rename, or change what its events are: a new kind or course
         applies to all of them (``course_id=None``: match by name)."""
@@ -341,7 +340,7 @@ class SubscriptionsService:
         """The user deleted a subscribed event: keep it out from now on."""
         sub = self._store.get_subscription(event.subscription_id or "")
         if sub is not None and event.source_ref:
-            self._store.update_subscription(sub.id, hidden_keys=sub.hidden_keys + [event.source_ref])
+            self._store.update_subscription(sub.id, hidden_keys=[*sub.hidden_keys, event.source_ref])
 
     # --- syncing --------------------------------------------------------------------
     def _read(self, url: str) -> Feed:
@@ -365,7 +364,7 @@ class SubscriptionsService:
 
     def sync_due(self, every: _dt.timedelta = SYNC_EVERY) -> None:
         """Sync each subscription not tried in the last ``every``."""
-        now = _dt.datetime.now(_dt.timezone.utc)
+        now = _dt.datetime.now(_dt.UTC)
         for sub in self.list():
             last = timeutil.to_local(sub.last_attempt_at)
             if last is not None and now - last < every:

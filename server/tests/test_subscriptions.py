@@ -301,7 +301,7 @@ class ApiAndPageTests(_Base):
         self.assertIn('href="/calendar/subscriptions"', self.client.get("/calendar").get_data(as_text=True))
 
     def test_subscribed_events_keep_their_feed_fields(self):
-        sub, _ = self.svc.add(URL)
+        _sub, _ = self.svc.add(URL)
         ev = next(e for e in self.events() if e.source_ref == "a")
         page = self.client.get(f"/events/{ev.id}/edit").get_data(as_text=True)
         self.assertIn("From “Uni timetable”", page)
