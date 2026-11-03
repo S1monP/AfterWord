@@ -79,14 +79,14 @@ Toolchain: **ESP-IDF v6.1**, installed with Espressif's EIM installer
 
 **VS Code (ESP-IDF extension):** the extension finds EIM installs by itself.
 Run *ESP-IDF: Select Current ESP-IDF Version* → `v6.1`. Open the
-`Hardware/firmware` folder, set the target to `esp32s3`, select the COM
+`hardware/firmware` folder, set the target to `esp32s3`, select the COM
 port, then *Build, Flash and Monitor* (the flame icon in the status bar).
 
 **Command line (PowerShell):**
 
 ```powershell
 . C:\Espressif\tools\Microsoft.v6.1.PowerShell_profile.ps1
-cd Hardware\firmware
+cd hardware\firmware
 idf.py build
 idf.py -p COM5 flash monitor     # your port; Ctrl+] quits the monitor
 ```
@@ -101,7 +101,7 @@ Logs are printed at 115200 baud on both USB ports.
 builds on a PC with zig's C compiler:
 
 ```powershell
-cd Hardware\firmware\test
+cd hardware\firmware\test
 uv run --no-project --with ziglang python -m ziglang cc -O2 -Wall -I ../main test_adts.c ../main/adts.c -o test_adts.exe
 .\test_adts.exe [some\chunk.aac ...]
 ```

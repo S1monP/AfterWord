@@ -11,7 +11,7 @@ summarises them through OpenRouter, and serves a web UI for lectures,
 meetings, notes, tasks, deadlines and a calendar.
 
 ```
-Hardware/            the recorder
+hardware/            the recorder
 ├── firmware/        ESP-IDF v6.1 project (C)
 ├── tools/           serial logger, chunk-seam and audio checks
 └── README.md        wiring, build/flash, using the device, test plan
@@ -31,22 +31,22 @@ copy .env.example .env             # then add your OpenRouter key
 ```
 
 **Firmware:** install ESP-IDF v6.1 (Espressif's EIM installer), create
-`Hardware/firmware/main/secrets.h` from `secrets.example.h` with this PC's
+`hardware/firmware/main/secrets.h` from `secrets.example.h` with this PC's
 address, then:
 
 ```powershell
 . C:\Espressif\tools\Microsoft.v6.1.PowerShell_profile.ps1
-cd Hardware\firmware
+cd hardware\firmware
 idf.py -p COM3 flash monitor
 ```
 
-Details: [Hardware/README.md](Hardware/README.md) and
+Details: [hardware/README.md](hardware/README.md) and
 [server/README.md](server/README.md).
 
 ## Status
 
 - Firmware: the breadboard prototype passed the whole test plan in
-  [Hardware/README.md](Hardware/README.md) (boot, Wi-Fi setup, recording,
+  [hardware/README.md](hardware/README.md) (boot, Wi-Fi setup, recording,
   power cut, upload, offline, abort). The SD card dropped out during long
   uploads until decoupling capacitors were added at the SD module and mic.
 - Server: runs locally; ready for a VPS behind Caddy (`serve.py`, device

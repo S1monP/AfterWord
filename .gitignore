@@ -1,4 +1,4 @@
-# Repo root: AI_NoteTaker monorepo (server/ + Hardware/).
+# Repo root: AI_NoteTaker monorepo (server/ + hardware/).
 # server/ has its own .gitignore for Python/data rules.
 
 # Editor / OS
@@ -10,21 +10,21 @@ Thumbs.db
 *.swp
 *~
 
-# Python caches (Hardware/tools scripts)
+# Python caches (hardware/tools scripts)
 __pycache__/
 
-# Hardware: ESP-IDF firmware build output.  sdkconfig is generated from
+# Firmware: ESP-IDF firmware build output.  sdkconfig is generated from
 # sdkconfig.defaults; managed_components/ is re-downloaded from
 # dependencies.lock (which is committed).
-Hardware/firmware/build/
-Hardware/firmware/sdkconfig
-Hardware/firmware/sdkconfig.old
-Hardware/firmware/managed_components/
+hardware/firmware/build/
+hardware/firmware/sdkconfig
+hardware/firmware/sdkconfig.old
+hardware/firmware/managed_components/
 
-# Hardware: per-device secrets (copy secrets.example.h -> secrets.h).
-Hardware/firmware/main/secrets.h
+# Firmware: per-device secrets (copy secrets.example.h -> secrets.h).
+hardware/firmware/main/secrets.h
 
-# Host test build output (Hardware/firmware/test).
-Hardware/firmware/test/*.exe
-Hardware/firmware/test/*.tmp
+# Host test build output (hardware/firmware/test).
+hardware/firmware/test/*.exe
+hardware/firmware/test/*.tmp
 

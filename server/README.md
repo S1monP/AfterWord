@@ -1,6 +1,6 @@
 # AI NoteTaker server
 
-A small Flask server for the lecture recorder in [`../Hardware`](../Hardware).
+A small Flask server for the lecture recorder in [`../hardware`](../hardware).
 The device uploads each recording in AAC chunks; the server stitches them,
 then transcribes, classifies, summarises and extracts tasks in the
 background, and serves a web UI for lectures, meetings, notes (with voice
