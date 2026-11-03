@@ -1,5 +1,5 @@
-"""Notes API.
-"""
+"""Notes API."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -32,26 +32,27 @@ def api_list_notes() -> Any:
     except ValueError:
         return jsonify({"error": "invalid_limit_or_offset"}), 400
     if limit < 1 or limit > 200:
-        return jsonify({"error": "invalid_limit",
-                        "detail": "limit must be 1..200"}), 400
+        return jsonify({"error": "invalid_limit", "detail": "limit must be 1..200"}), 400
     if offset < 0:
-        return jsonify({"error": "invalid_offset",
-                        "detail": "offset must be >= 0"}), 400
+        return jsonify({"error": "invalid_offset", "detail": "offset must be >= 0"}), 400
     q = request.args.get("q", "").strip() or None
     try:
         notes, total = current_app_notes_service().list(
-            limit=limit, offset=offset, search=q,
+            limit=limit,
+            offset=offset,
+            search=q,
         )
     except ValueError as exc:
-        return jsonify({"error": "invalid_payload",
-                        "detail": str(exc)}), 400
-    return jsonify({
-        "notes": [_note_to_dict(n) for n in notes],
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-        "q": q,
-    })
+        return jsonify({"error": "invalid_payload", "detail": str(exc)}), 400
+    return jsonify(
+        {
+            "notes": [_note_to_dict(n) for n in notes],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "q": q,
+        }
+    )
 
 
 @bp.post("/api/v1/notes")
@@ -68,8 +69,7 @@ def api_create_note() -> Any:
             course_id=payload.get("course_id"),
         )
     except ValueError as exc:
-        return jsonify({"error": "invalid_payload",
-                        "detail": str(exc)}), 400
+        return jsonify({"error": "invalid_payload", "detail": str(exc)}), 400
     return jsonify({"note": _note_to_dict(note)}), 201
 
 
@@ -100,8 +100,7 @@ def api_update_note(note_id: str) -> Any:
     except KeyError:
         return jsonify({"error": "not_found"}), 404
     except ValueError as exc:
-        return jsonify({"error": "invalid_payload",
-                        "detail": str(exc)}), 400
+        return jsonify({"error": "invalid_payload", "detail": str(exc)}), 400
     return jsonify({"note": _note_to_dict(note)})
 
 
@@ -114,7 +113,7 @@ def api_delete_note(note_id: str) -> Any:
         return jsonify({"error": "not_found"}), 404
     store = current_app_storage()
     if note.source == "voice_memo" and note.source_ref and store.get_session(note.source_ref):
-        store.delete_session(note.source_ref)     # takes the note too
+        store.delete_session(note.source_ref)  # takes the note too
     else:
         current_app_notes_service().delete(note_id)
     return ("", 204)

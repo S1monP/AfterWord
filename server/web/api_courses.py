@@ -1,5 +1,5 @@
-"""Courses API.
-"""
+"""Courses API."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -27,22 +27,31 @@ def api_list_courses() -> Any:
     except ValueError:
         return jsonify({"error": "invalid_limit_or_offset"}), 400
     if limit < 1 or limit > 500:
-        return jsonify({
-            "error": "invalid_limit", "detail": "limit must be 1..500",
-        }), 400
+        return jsonify(
+            {
+                "error": "invalid_limit",
+                "detail": "limit must be 1..500",
+            }
+        ), 400
     if offset < 0:
-        return jsonify({
-            "error": "invalid_offset", "detail": "offset must be >= 0",
-        }), 400
+        return jsonify(
+            {
+                "error": "invalid_offset",
+                "detail": "offset must be >= 0",
+            }
+        ), 400
     courses, total = current_app_courses_service().list(
-        limit=limit, offset=offset,
+        limit=limit,
+        offset=offset,
     )
-    return jsonify({
-        "courses": [_course_to_dict(c) for c in courses],
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-    })
+    return jsonify(
+        {
+            "courses": [_course_to_dict(c) for c in courses],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+    )
 
 
 @bp.post("/api/v1/courses")
@@ -58,9 +67,12 @@ def api_create_course() -> Any:
             sort_order=payload.get("sort_order") or 0,
         )
     except ValueError as exc:
-        return jsonify({
-            "error": "invalid_payload", "detail": str(exc),
-        }), 400
+        return jsonify(
+            {
+                "error": "invalid_payload",
+                "detail": str(exc),
+            }
+        ), 400
     return jsonify({"course": _course_to_dict(course)}), 201
 
 
@@ -83,14 +95,18 @@ def api_update_course(course_id: str) -> Any:
             kwargs[field] = payload[field]
     try:
         course = current_app_courses_service().update(
-            course_id, **kwargs,
+            course_id,
+            **kwargs,
         )
     except KeyError:
         return jsonify({"error": "not_found"}), 404
     except ValueError as exc:
-        return jsonify({
-            "error": "invalid_payload", "detail": str(exc),
-        }), 400
+        return jsonify(
+            {
+                "error": "invalid_payload",
+                "detail": str(exc),
+            }
+        ), 400
     return jsonify({"course": _course_to_dict(course)})
 
 

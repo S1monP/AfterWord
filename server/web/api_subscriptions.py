@@ -3,6 +3,7 @@
 The link itself is a secret (it lets anyone read the timetable), so
 responses show only ``url_display``.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -18,10 +19,15 @@ bp = Blueprint("subscriptions_api", __name__)
 
 def sub_dict(sub: storage.Subscription) -> dict[str, Any]:
     return {
-        "id": sub.id, "name": sub.name, "url_display": display_url(sub.url),
-        "kind": sub.kind, "course_id": sub.course_id,
-        "last_synced_at": sub.last_synced_at, "last_attempt_at": sub.last_attempt_at,
-        "last_error": sub.last_error, "event_count": sub.event_count,
+        "id": sub.id,
+        "name": sub.name,
+        "url_display": display_url(sub.url),
+        "kind": sub.kind,
+        "course_id": sub.course_id,
+        "last_synced_at": sub.last_synced_at,
+        "last_attempt_at": sub.last_attempt_at,
+        "last_error": sub.last_error,
+        "event_count": sub.event_count,
         "hidden": len(sub.hidden_keys),
     }
 
@@ -32,7 +38,9 @@ def _bad(exc: Exception, status: int = 400):
 
 @bp.get("/api/v1/subscriptions")
 def api_list_subscriptions() -> Any:
-    return jsonify({"subscriptions": [sub_dict(s) for s in current_app_subscriptions_service().list()]})
+    return jsonify(
+        {"subscriptions": [sub_dict(s) for s in current_app_subscriptions_service().list()]}
+    )
 
 
 @bp.post("/api/v1/subscriptions")
@@ -42,12 +50,16 @@ def api_add_subscription() -> Any:
     body = request.get_json(silent=True) or {}
     try:
         sub, result = current_app_subscriptions_service().add(
-            str(body.get("url") or ""), name=str(body.get("name") or ""),
-            kind=str(body.get("kind") or "lecture"), course_id=body.get("course_id") or None,
+            str(body.get("url") or ""),
+            name=str(body.get("name") or ""),
+            kind=str(body.get("kind") or "lecture"),
+            course_id=body.get("course_id") or None,
         )
     except (ValueError, FeedError) as exc:
         return _bad(exc)
-    return jsonify({"subscription": sub_dict(sub), "result": vars(result), "summary": result.summary()}), 201
+    return jsonify(
+        {"subscription": sub_dict(sub), "result": vars(result), "summary": result.summary()}
+    ), 201
 
 
 @bp.patch("/api/v1/subscriptions/<sub_id>")
@@ -77,9 +89,16 @@ def api_sync_subscription(sub_id: str) -> Any:
         return jsonify({"error": "not_found"}), 404
     except FeedError as exc:
         # Nothing changed; the page shows the error on the subscription.
-        return jsonify({"error": "sync_failed", "detail": str(exc),
-                        "subscription": sub_dict(svc.get(sub_id))}), 502
-    return jsonify({"subscription": sub_dict(svc.get(sub_id)), "result": vars(result), "summary": result.summary()})
+        return jsonify(
+            {"error": "sync_failed", "detail": str(exc), "subscription": sub_dict(svc.get(sub_id))}
+        ), 502
+    return jsonify(
+        {
+            "subscription": sub_dict(svc.get(sub_id)),
+            "result": vars(result),
+            "summary": result.summary(),
+        }
+    )
 
 
 @bp.delete("/api/v1/subscriptions/<sub_id>")

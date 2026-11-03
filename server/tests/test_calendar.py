@@ -1,6 +1,7 @@
 """Web UI tests for the Calendar page (month, week, the day) and the
 event forms.
 """
+
 from __future__ import annotations
 
 import json
@@ -32,7 +33,7 @@ class CalendarPageTests(LRTestCase):
 
     def _day_panel(self, url):
         body = self._get(url)
-        return body[body.index('id="cday-title"'):]
+        return body[body.index('id="cday-title"') :]
 
     def test_month_renders_42_days(self):
         body = self._get("/calendar?date=2026-01-10")
@@ -53,7 +54,7 @@ class CalendarPageTests(LRTestCase):
     def test_day_cells_choose_the_day(self):
         body = self._get("/calendar?date=2026-01-10")
         self.assertIn("day=2026-01-01", body)
-        self.assertIn("day=2025-12-29", body)   # out-of-month cells too
+        self.assertIn("day=2025-12-29", body)  # out-of-month cells too
 
     def test_event_chip_and_day_panel(self):
         _create_event(self, title="Calc II Lecture", location="Room 4")
@@ -67,9 +68,17 @@ class CalendarPageTests(LRTestCase):
         self.assertIn("/events/new?date=2027-03-15", panel)
 
     def test_deadlines_show_as_due_chips(self):
-        self.client.post("/api/v1/tasks", data=json.dumps({
-            "title": "Problem set 4", "kind": "deadline", "due_at": "2027-03-16T23:59:00Z",
-        }), content_type="application/json")
+        self.client.post(
+            "/api/v1/tasks",
+            data=json.dumps(
+                {
+                    "title": "Problem set 4",
+                    "kind": "deadline",
+                    "due_at": "2027-03-16T23:59:00Z",
+                }
+            ),
+            content_type="application/json",
+        )
         body = self._get("/calendar?date=2027-03-01")
         self.assertIn("Due · Problem set 4", body)
         panel = self._day_panel("/calendar?day=2027-03-16")
@@ -77,8 +86,9 @@ class CalendarPageTests(LRTestCase):
 
     def test_overflow_after_three(self):
         for i in range(4):
-            _create_event(self, title=f"Event {i}",
-                          starts_at=f"2027-03-15T{9 + i:02d}:00:00Z", ends_at=None)
+            _create_event(
+                self, title=f"Event {i}", starts_at=f"2027-03-15T{9 + i:02d}:00:00Z", ends_at=None
+            )
         body = self._get("/calendar?date=2027-03-01")
         self.assertIn("+ 1 more", body)
         # The day panel lists all four.
@@ -86,8 +96,9 @@ class CalendarPageTests(LRTestCase):
 
     def test_no_overflow_when_three_or_fewer(self):
         for i in range(3):
-            _create_event(self, title=f"Event {i}",
-                          starts_at=f"2027-03-15T{9 + i:02d}:00:00Z", ends_at=None)
+            _create_event(
+                self, title=f"Event {i}", starts_at=f"2027-03-15T{9 + i:02d}:00:00Z", ends_at=None
+            )
         self.assertNotIn(" more</span>", self._get("/calendar?date=2027-03-01"))
 
     def test_week_view(self):
@@ -187,7 +198,8 @@ class EventFormTests(LRTestCase):
         self.assertEqual(resp.status_code, 302)
         get_resp = self.client.get(f"/api/v1/events/{ev['id']}")
         self.assertEqual(
-            get_resp.get_json()["event"]["title"], "New Title",
+            get_resp.get_json()["event"]["title"],
+            "New Title",
         )
 
     def test_delete_event_form_action_redirects(self):

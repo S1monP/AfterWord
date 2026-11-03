@@ -4,6 +4,7 @@ file if present).
 Keep this module dependency-free so it can be imported anywhere (including
 tests) without risk of import side effects.
 """
+
 from __future__ import annotations
 
 import codecs
@@ -60,7 +61,8 @@ PREFIX = "AFTERWORD_"
 _LEGACY_ALIASES: dict[str, tuple[str, ...]] = {
     "LR_MINIMAX_API_KEY": ("AFTERWORD_TEXT_API_KEY",),
     "LR_OPENROUTER_API_KEY": (
-        "AFTERWORD_TRANSCRIPTION_API_KEY", "AFTERWORD_TEXT_API_KEY",
+        "AFTERWORD_TRANSCRIPTION_API_KEY",
+        "AFTERWORD_TEXT_API_KEY",
     ),
 }
 
@@ -71,6 +73,7 @@ def apply_legacy_names(environ=os.environ) -> None:
     A value already set under the new name always wins, so an old
     ``.env`` keeps working and can be renamed at any time.
     """
+
     def copy(old: str, new: str) -> None:
         value = environ.get(old, "")
         if value != "" and environ.get(new, "") == "":
@@ -78,7 +81,7 @@ def apply_legacy_names(environ=os.environ) -> None:
 
     for old in [k for k in environ if k.startswith(LEGACY_PREFIX)]:
         if old not in _LEGACY_ALIASES:
-            copy(old, PREFIX + old[len(LEGACY_PREFIX):])
+            copy(old, PREFIX + old[len(LEGACY_PREFIX) :])
     for old, targets in _LEGACY_ALIASES.items():
         for new in targets:
             copy(old, new)
@@ -118,6 +121,7 @@ class Config:
 
     Construct via :func:`load` so defaults are applied consistently.
     """
+
     data_dir: Path
     host: str
     port: int
@@ -126,11 +130,11 @@ class Config:
     ffmpeg_path: str
     max_upload_bytes: int
     # Access control (see auth.py). Empty = off, for local development.
-    device_token: str = ""      # devices send "Authorization: Bearer <token>"
-    web_password: str = ""      # one password for the web UI
-    secret_key: str = ""        # session cookie key; empty = generated + kept
+    device_token: str = ""  # devices send "Authorization: Bearer <token>"
+    web_password: str = ""  # one password for the web UI
+    secret_key: str = ""  # session cookie key; empty = generated + kept
     cookie_secure: bool = False  # True behind HTTPS (Caddy)
-    allow_open: bool = False    # serve beyond this PC without a password
+    allow_open: bool = False  # serve beyond this PC without a password
 
     # Convenience paths derived from data_dir.
     @property

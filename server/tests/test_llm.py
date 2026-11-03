@@ -6,6 +6,7 @@ ever made. We also exercise the response-parsing code paths
 that the providers share (code-fence stripping, JSON
 extraction, etc.).
 """
+
 from __future__ import annotations
 
 import json
@@ -39,9 +40,14 @@ def _write_aac(path_dir, seconds: float = 5.0, rate: int = 8000):
     from pathlib import Path as _P
 
     from services import transcode as tx
+
     data = b"\x00\x01" * int(seconds * rate)
     wav = _write_real_wav(
-        _P(path_dir), name="gen.wav", rate=rate, channels=1, bits=16,
+        _P(path_dir),
+        name="gen.wav",
+        rate=rate,
+        channels=1,
+        bits=16,
         data=data,
     )
     aac = _P(path_dir) / "gen.aac"
@@ -72,18 +78,26 @@ def _write_wav(tmp_path, name="x.wav", payload=b"RIFF\x00\x00\x00\x00"):
     return p
 
 
-def _write_real_wav(path_dir, name="real.wav", rate=10, channels=1,
-                    bits=16, data=b"\x00\x01" * 50):
+def _write_real_wav(path_dir, name="real.wav", rate=10, channels=1, bits=16, data=b"\x00\x01" * 50):
     """Build a well-formed PCM WAV. Defaults: rate 10 Hz, 16-bit
     mono, 100 bytes of data -> 50 whole frames = 5 s of audio."""
     frame = channels * (bits // 8)
     usable = (len(data) // frame) * frame
     header = struct.pack(
         "<4sI4s4sIHHIIHH4sI",
-        b"RIFF", 36 + usable, b"WAVE",
-        b"fmt ", 16, 1, channels, rate,
-        rate * channels * (bits // 8), channels * (bits // 8), bits,
-        b"data", usable,
+        b"RIFF",
+        36 + usable,
+        b"WAVE",
+        b"fmt ",
+        16,
+        1,
+        channels,
+        rate,
+        rate * channels * (bits // 8),
+        channels * (bits // 8),
+        bits,
+        b"data",
+        usable,
     )
     p = path_dir / name
     p.write_bytes(header + data[:usable])
@@ -96,8 +110,10 @@ def _write_real_wav(path_dir, name="real.wav", rate=10, channels=1,
 class MultipartBuilderTests(unittest.TestCase):
     def test_builds_body_with_file_and_fields(self):
         body = _build_multipart_body(
-            file_field="file", filename="x.wav",
-            content=b"AAAA", content_type="audio/wav",
+            file_field="file",
+            filename="x.wav",
+            content=b"AAAA",
+            content_type="audio/wav",
             fields={"model": "openai/whisper-large-v3"},
             boundary="BOUND",
         )
@@ -116,7 +132,12 @@ class MultipartBuilderTests(unittest.TestCase):
 
     def test_body_is_bytes(self):
         b = _build_multipart_body(
-            "f", "x", b"x", "text/plain", {}, "B",
+            "f",
+            "x",
+            b"x",
+            "text/plain",
+            {},
+            "B",
         )
         self.assertIsInstance(b, bytes)
 
@@ -132,12 +153,16 @@ class TranscriptionProviderTests(unittest.TestCase):
     def test_transcribe_plain_text_response(self):
         capture = {}
         p = TranscriptionProvider(
-            "key", http_transport=_fake(
-                200, b"hello world", capture,
+            "key",
+            http_transport=_fake(
+                200,
+                b"hello world",
+                capture,
             ),
         )
         import tempfile
         from pathlib import Path
+
         with tempfile.TemporaryDirectory() as d:
             audio = _write_wav(Path(d))
             text = p.transcribe(audio)
@@ -146,7 +171,8 @@ class TranscriptionProviderTests(unittest.TestCase):
         self.assertIn("/audio/transcriptions", capture["url"])
         # Auth header is set.
         self.assertEqual(
-            capture["headers"].get("Authorization"), "Bearer key",
+            capture["headers"].get("Authorization"),
+            "Bearer key",
         )
         # JSON request with base64 input_audio.
         ct = capture["headers"].get("Content-Type", "")
@@ -156,12 +182,15 @@ class TranscriptionProviderTests(unittest.TestCase):
 
     def test_transcribe_json_response_with_text(self):
         p = TranscriptionProvider(
-            "k", http_transport=_fake(
-                200, b'{"text": "the quick brown fox"}',
+            "k",
+            http_transport=_fake(
+                200,
+                b'{"text": "the quick brown fox"}',
             ),
         )
         import tempfile
         from pathlib import Path
+
         with tempfile.TemporaryDirectory() as d:
             text = p.transcribe(_write_wav(Path(d)))
         self.assertEqual(text, "the quick brown fox")
@@ -169,10 +198,12 @@ class TranscriptionProviderTests(unittest.TestCase):
     def test_transcribe_sends_response_format_field(self):
         capture = {}
         p = TranscriptionProvider(
-            "k", http_transport=_fake(200, b'{"text": "x"}', capture),
+            "k",
+            http_transport=_fake(200, b'{"text": "x"}', capture),
         )
         import tempfile
         from pathlib import Path
+
         with tempfile.TemporaryDirectory() as d:
             p.transcribe(_write_wav(Path(d)))
         self.assertIn(b'"response_format"', capture["data"])
@@ -182,10 +213,12 @@ class TranscriptionProviderTests(unittest.TestCase):
     def test_transcribe_sends_azure_diarization_by_default(self):
         capture = {}
         p = TranscriptionProvider(
-            "k", http_transport=_fake(200, b'{"text": "x"}', capture),
+            "k",
+            http_transport=_fake(200, b'{"text": "x"}', capture),
         )
         import tempfile
         from pathlib import Path
+
         with tempfile.TemporaryDirectory() as d:
             p.transcribe(_write_wav(Path(d)))
         self.assertIn(b'"azure"', capture["data"])
@@ -199,10 +232,12 @@ class TranscriptionProviderTests(unittest.TestCase):
         os.environ[env_name] = "{}"
         try:
             p = TranscriptionProvider(
-                "k", http_transport=_fake(200, b'{"text": "x"}', capture),
+                "k",
+                http_transport=_fake(200, b'{"text": "x"}', capture),
             )
             import tempfile
             from pathlib import Path
+
             with tempfile.TemporaryDirectory() as d:
                 p.transcribe(_write_wav(Path(d)))
         finally:
@@ -218,11 +253,13 @@ class TranscriptionProviderTests(unittest.TestCase):
         AAC (raw or in M4A) with a bare "Provider returned 400"."""
         capture = {}
         p = TranscriptionProvider(
-            "k", ffmpeg_path=FFMPEG_PATH,
+            "k",
+            ffmpeg_path=FFMPEG_PATH,
             http_transport=_fake(200, b'{"text": "x"}', capture),
         )
         import base64
         import tempfile
+
         with tempfile.TemporaryDirectory() as d:
             audio = _write_aac(d, seconds=0.5)
             p.transcribe(audio)
@@ -236,11 +273,13 @@ class TranscriptionProviderTests(unittest.TestCase):
         """A short recording is sent whole; its MP3 copy goes in the
         temp work dir, never into the session folder."""
         p = TranscriptionProvider(
-            "k", ffmpeg_path=FFMPEG_PATH,
+            "k",
+            ffmpeg_path=FFMPEG_PATH,
             http_transport=_fake(200, b'{"text": "x"}'),
         )
         import tempfile
         from pathlib import Path
+
         with tempfile.TemporaryDirectory() as d:
             audio = _write_aac(d, seconds=0.5)
             before = sorted(Path(d).iterdir())
@@ -250,10 +289,12 @@ class TranscriptionProviderTests(unittest.TestCase):
     def test_transcribe_unsniffable_audio_defaults_to_aac(self):
         capture = {}
         p = TranscriptionProvider(
-            "k", http_transport=_fake(200, b'{"text": "x"}', capture),
+            "k",
+            http_transport=_fake(200, b'{"text": "x"}', capture),
         )
         import tempfile
         from pathlib import Path
+
         with tempfile.TemporaryDirectory() as d:
             audio = _write_wav(Path(d))  # 8 junk bytes
             p.transcribe(audio)
@@ -263,6 +304,7 @@ class TranscriptionProviderTests(unittest.TestCase):
     def test_segment_audio_short_stays_whole(self):
         import tempfile
         from pathlib import Path
+
         p = TranscriptionProvider("k", chunk_max_seconds=1500)
         with tempfile.TemporaryDirectory() as d:
             audio = _write_aac(d, seconds=1.0)
@@ -275,8 +317,11 @@ class TranscriptionProviderTests(unittest.TestCase):
         stream copy into consecutive pieces with cumulative offsets."""
         import tempfile
         from pathlib import Path
+
         p = TranscriptionProvider(
-            "k", chunk_max_seconds=2, ffmpeg_path=FFMPEG_PATH,
+            "k",
+            chunk_max_seconds=2,
+            ffmpeg_path=FFMPEG_PATH,
         )
         with tempfile.TemporaryDirectory() as d:
             audio = _write_aac(d, seconds=5.0)
@@ -289,6 +334,7 @@ class TranscriptionProviderTests(unittest.TestCase):
             self.assertAlmostEqual(offsets[2], 4.0, delta=0.6)
             # Pieces are real AAC.
             from services import transcode as tx
+
             for piece, _ in pieces:
                 self.assertEqual(tx.sniff_format(piece).kind, "aac")
 
@@ -299,30 +345,32 @@ class TranscriptionProviderTests(unittest.TestCase):
         def transport(url, *, data=None, headers=None, timeout=60.0):
             calls.append(json.loads(data.decode("utf-8")))
             n = len(calls)
-            body = json.dumps({
-                "text": f"part {n}",
-                "segments": [
-                    {"start": 0.0, "end": 1.0, "text": f"part {n}",
-                     "speaker": 0},
-                ],
-            }).encode("utf-8")
+            body = json.dumps(
+                {
+                    "text": f"part {n}",
+                    "segments": [
+                        {"start": 0.0, "end": 1.0, "text": f"part {n}", "speaker": 0},
+                    ],
+                }
+            ).encode("utf-8")
             return (200, body)
 
         # 5 s of AAC, segmented at 2 s -> 3 pieces with continuous
         # timestamps after the offsets are applied.
         p = TranscriptionProvider(
-            "k", chunk_max_seconds=2, ffmpeg_path=FFMPEG_PATH,
+            "k",
+            chunk_max_seconds=2,
+            ffmpeg_path=FFMPEG_PATH,
             http_transport=transport,
         )
         import tempfile
+
         with tempfile.TemporaryDirectory() as d:
             text = p.transcribe(_write_aac(d, seconds=5.0))
         self.assertEqual(len(calls), 3)
         self.assertEqual(
             text,
-            "[00:00] Speaker 1: part 1\n"
-            "[00:02] Speaker 1: part 2\n"
-            "[00:04] Speaker 1: part 3",
+            "[00:00] Speaker 1: part 1\n[00:02] Speaker 1: part 2\n[00:04] Speaker 1: part 3",
         )
 
     @skip_without_ffmpeg
@@ -337,25 +385,29 @@ class TranscriptionProviderTests(unittest.TestCase):
             if len(calls) == 1:
                 return (503, b"upstream overloaded")
             n = len(calls)
-            body = json.dumps({
-                "text": f"part {n}",
-                "segments": [
-                    {"start": 0.0, "end": 1.0, "text": f"part {n}",
-                     "speaker": 0},
-                ],
-            }).encode("utf-8")
+            body = json.dumps(
+                {
+                    "text": f"part {n}",
+                    "segments": [
+                        {"start": 0.0, "end": 1.0, "text": f"part {n}", "speaker": 0},
+                    ],
+                }
+            ).encode("utf-8")
             return (200, body)
 
         # ~50 s of AAC (silence at 64 kbps target) sent as a single
         # piece; the 90 s floor keeps the halves from being halved
         # again.
         p = TranscriptionProvider(
-            "k", chunk_max_seconds=10 ** 9, ffmpeg_path=FFMPEG_PATH,
+            "k",
+            chunk_max_seconds=10**9,
+            ffmpeg_path=FFMPEG_PATH,
             http_transport=transport,
         )
         import tempfile
 
         from services import transcode as tx
+
         with tempfile.TemporaryDirectory() as d:
             audio = _write_aac(d, seconds=100.0)
             dur = tx.decode_duration(audio, ffmpeg_path=FFMPEG_PATH)
@@ -372,6 +424,7 @@ class TranscriptionProviderTests(unittest.TestCase):
         """Auth errors (401) are not retried by halving."""
         import tempfile
         from pathlib import Path
+
         calls = []
 
         def transport(url, *, data=None, headers=None, timeout=60.0):
@@ -379,12 +432,16 @@ class TranscriptionProviderTests(unittest.TestCase):
             return (401, b"unauthorized")
 
         p = TranscriptionProvider(
-            "k", chunk_max_seconds=100, ffmpeg_path=FFMPEG_PATH,
+            "k",
+            chunk_max_seconds=100,
+            ffmpeg_path=FFMPEG_PATH,
             http_transport=transport,
         )
         with tempfile.TemporaryDirectory() as d:
             audio = _write_real_wav(
-                Path(d), rate=10, data=b"\x00\x01" * 1000,
+                Path(d),
+                rate=10,
+                data=b"\x00\x01" * 1000,
             )
             with self.assertRaises(LLMHTTPError):
                 p.transcribe(audio)
@@ -400,26 +457,39 @@ class TranscriptionProviderTests(unittest.TestCase):
         def transport(url, *, data=None, headers=None, timeout=60.0):
             bodies.append(len(data or b""))
             n = len(bodies)
-            return (200, json.dumps({
-                "text": f"part {n}",
-                "segments": [],
-            }).encode("utf-8"))
+            return (
+                200,
+                json.dumps(
+                    {
+                        "text": f"part {n}",
+                        "segments": [],
+                    }
+                ).encode("utf-8"),
+            )
 
         # 10 min of 8 kHz WAV sent whole -> ~2.4 MB of 32 kbps MP3,
         # ~3.2 MB as base64. With the cap lowered to 2.5 MB it is cut
         # in half -> two ~1.6 MB bodies, fine.
         from unittest import mock
+
         cap = int(2.5 * 1024 * 1024)
         p = TranscriptionProvider(
-            "k", chunk_max_seconds=10 ** 9, ffmpeg_path=FFMPEG_PATH,
+            "k",
+            chunk_max_seconds=10**9,
+            ffmpeg_path=FFMPEG_PATH,
             http_transport=transport,
         )
         import tempfile
         from pathlib import Path
-        with tempfile.TemporaryDirectory() as d, \
-                mock.patch.object(llm, "MAX_TRANSCRIBE_BODY_BYTES", cap):
+
+        with (
+            tempfile.TemporaryDirectory() as d,
+            mock.patch.object(llm, "MAX_TRANSCRIBE_BODY_BYTES", cap),
+        ):
             audio = _write_real_wav(
-                Path(d), rate=8000, data=b"\x00" * (600 * 8000 * 2),
+                Path(d),
+                rate=8000,
+                data=b"\x00" * (600 * 8000 * 2),
             )
             text = p.transcribe(audio)
         self.assertEqual(len(bodies), 2)
@@ -427,91 +497,109 @@ class TranscriptionProviderTests(unittest.TestCase):
         self.assertEqual(text, "part 1\npart 2")
 
     def test_transcribe_verbose_json_with_speakers(self):
-        body = json.dumps({
-            "text": "Hello there. General Kanobi!",
-            "segments": [
-                {"id": 0, "start": 0.0, "end": 1.2,
-                 "text": "Hello there.", "speaker": 0},
-                {"id": 1, "start": 61.5, "end": 62.4,
-                 "text": "General Kanobi!", "speaker": 1},
-            ],
-        }).encode("utf-8")
+        body = json.dumps(
+            {
+                "text": "Hello there. General Kanobi!",
+                "segments": [
+                    {"id": 0, "start": 0.0, "end": 1.2, "text": "Hello there.", "speaker": 0},
+                    {"id": 1, "start": 61.5, "end": 62.4, "text": "General Kanobi!", "speaker": 1},
+                ],
+            }
+        ).encode("utf-8")
         p = TranscriptionProvider("k", http_transport=_fake(200, body))
         import tempfile
         from pathlib import Path
+
         with tempfile.TemporaryDirectory() as d:
             text = p.transcribe(_write_wav(Path(d)))
         self.assertEqual(
             text,
-            "[00:00] Speaker 1: Hello there.\n"
-            "[01:01] Speaker 2: General Kanobi!",
+            "[00:00] Speaker 1: Hello there.\n[01:01] Speaker 2: General Kanobi!",
         )
 
     def test_transcribe_verbose_json_uses_speaker_label(self):
-        body = json.dumps({
-            "segments": [
-                {"id": 0, "start": 5.0, "end": 6.0,
-                 "text": "Good morning.", "speaker_label": "Prof"},
-            ],
-        }).encode("utf-8")
+        body = json.dumps(
+            {
+                "segments": [
+                    {
+                        "id": 0,
+                        "start": 5.0,
+                        "end": 6.0,
+                        "text": "Good morning.",
+                        "speaker_label": "Prof",
+                    },
+                ],
+            }
+        ).encode("utf-8")
         p = TranscriptionProvider("k", http_transport=_fake(200, body))
         import tempfile
         from pathlib import Path
+
         with tempfile.TemporaryDirectory() as d:
             text = p.transcribe(_write_wav(Path(d)))
         self.assertEqual(text, "[00:05] Prof: Good morning.")
 
     def test_transcribe_verbose_json_without_speakers(self):
-        body = json.dumps({
-            "text": "Hello there. General Kanobi!",
-            "segments": [
-                {"id": 0, "start": 0.0, "end": 1.2, "text": "Hello there."},
-                {"id": 1, "start": 1.5, "end": 2.4,
-                 "text": "General Kanobi!"},
-            ],
-        }).encode("utf-8")
+        body = json.dumps(
+            {
+                "text": "Hello there. General Kanobi!",
+                "segments": [
+                    {"id": 0, "start": 0.0, "end": 1.2, "text": "Hello there."},
+                    {"id": 1, "start": 1.5, "end": 2.4, "text": "General Kanobi!"},
+                ],
+            }
+        ).encode("utf-8")
         p = TranscriptionProvider("k", http_transport=_fake(200, body))
         import tempfile
         from pathlib import Path
+
         with tempfile.TemporaryDirectory() as d:
             text = p.transcribe(_write_wav(Path(d)))
         self.assertEqual(text, "Hello there.\nGeneral Kanobi!")
 
     def test_transcribe_speaker_annotation_disabled(self):
-        body = json.dumps({
-            "segments": [
-                {"id": 0, "start": 0.0, "end": 1.2,
-                 "text": "Hello there.", "speaker": 0},
-            ],
-        }).encode("utf-8")
+        body = json.dumps(
+            {
+                "segments": [
+                    {"id": 0, "start": 0.0, "end": 1.2, "text": "Hello there.", "speaker": 0},
+                ],
+            }
+        ).encode("utf-8")
         p = TranscriptionProvider(
-            "k", annotate_speakers=False,
+            "k",
+            annotate_speakers=False,
             http_transport=_fake(200, body),
         )
         import tempfile
         from pathlib import Path
+
         with tempfile.TemporaryDirectory() as d:
             text = p.transcribe(_write_wav(Path(d)))
         self.assertEqual(text, "Hello there.")
 
     def test_transcribe_empty_segments_falls_back_to_text(self):
-        body = json.dumps({
-            "text": "fallback text",
-            "segments": [],
-        }).encode("utf-8")
+        body = json.dumps(
+            {
+                "text": "fallback text",
+                "segments": [],
+            }
+        ).encode("utf-8")
         p = TranscriptionProvider("k", http_transport=_fake(200, body))
         import tempfile
         from pathlib import Path
+
         with tempfile.TemporaryDirectory() as d:
             text = p.transcribe(_write_wav(Path(d)))
         self.assertEqual(text, "fallback text")
 
     def test_transcribe_4xx_raises_http_error(self):
         p = TranscriptionProvider(
-            "k", http_transport=_fake(401, b"unauthorized"),
+            "k",
+            http_transport=_fake(401, b"unauthorized"),
         )
         import tempfile
         from pathlib import Path
+
         with tempfile.TemporaryDirectory() as d:
             with self.assertRaises(LLMHTTPError) as ctx:
                 p.transcribe(_write_wav(Path(d)))
@@ -519,10 +607,12 @@ class TranscriptionProviderTests(unittest.TestCase):
 
     def test_transcribe_5xx_raises_http_error(self):
         p = TranscriptionProvider(
-            "k", http_transport=_fake(500, b"upstream dead"),
+            "k",
+            http_transport=_fake(500, b"upstream dead"),
         )
         import tempfile
         from pathlib import Path
+
         with tempfile.TemporaryDirectory() as d:
             with self.assertRaises(LLMHTTPError) as ctx:
                 p.transcribe(_write_wav(Path(d)))
@@ -530,6 +620,7 @@ class TranscriptionProviderTests(unittest.TestCase):
 
     def test_transcribe_missing_file_raises_filenotfound(self):
         from pathlib import Path
+
         p = TranscriptionProvider("k", http_transport=_fake(200, b"x"))
         with self.assertRaises(FileNotFoundError):
             p.transcribe(Path("/no/such/file.wav"))
@@ -555,15 +646,19 @@ class TextProviderTests(unittest.TestCase):
 
     def test_classify_each_kind(self):
         for kind in VALID_KINDS:
-            body = json.dumps({
-                "choices": [{
-                    "message": {
-                        "content": json.dumps(
-                            {"kind": kind, "confidence": 0.8},
-                        ),
-                    },
-                }],
-            }).encode("utf-8")
+            body = json.dumps(
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json.dumps(
+                                    {"kind": kind, "confidence": 0.8},
+                                ),
+                            },
+                        }
+                    ],
+                }
+            ).encode("utf-8")
             p = TextProvider("k", http_transport=_fake(200, body))
             result = p.classify("some transcript text")
             self.assertEqual(result.kind, kind)
@@ -571,18 +666,24 @@ class TextProviderTests(unittest.TestCase):
 
     def test_classify_sends_chat_completions_request(self):
         capture = {}
-        body = json.dumps({
-            "choices": [{
-                "message": {"content": '{"kind": "lecture", "confidence": 0.9}'},
-            }],
-        }).encode("utf-8")
+        body = json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {"content": '{"kind": "lecture", "confidence": 0.9}'},
+                    }
+                ],
+            }
+        ).encode("utf-8")
         p = TextProvider(
-            "k", http_transport=_fake(200, body, capture),
+            "k",
+            http_transport=_fake(200, body, capture),
         )
         p.classify("transcript")
         self.assertIn("chat/completions", capture["url"])
         self.assertEqual(
-            capture["headers"].get("Authorization"), "Bearer k",
+            capture["headers"].get("Authorization"),
+            "Bearer k",
         )
         # The body is JSON with a messages field.
         sent = json.loads(capture["data"].decode("utf-8"))
@@ -595,26 +696,34 @@ class TextProviderTests(unittest.TestCase):
         self.assertIn("transcript", user_msg)
 
     def test_classify_handles_markdown_fenced_response(self):
-        body = json.dumps({
-            "choices": [{
-                "message": {
-                    "content": '```json\n{"kind": "meeting", "confidence": 0.7}\n```',
-                },
-            }],
-        }).encode("utf-8")
+        body = json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '```json\n{"kind": "meeting", "confidence": 0.7}\n```',
+                        },
+                    }
+                ],
+            }
+        ).encode("utf-8")
         p = TextProvider("k", http_transport=_fake(200, body))
         result = p.classify("x")
         self.assertEqual(result.kind, "meeting")
         self.assertAlmostEqual(result.confidence, 0.7)
 
     def test_classify_handles_prose_around_json(self):
-        body = json.dumps({
-            "choices": [{
-                "message": {
-                    "content": 'Sure! Here you go: {"kind": "voice_memo", "confidence": 0.6} -- hope that helps.',
-                },
-            }],
-        }).encode("utf-8")
+        body = json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": 'Sure! Here you go: {"kind": "voice_memo", "confidence": 0.6} -- hope that helps.',
+                        },
+                    }
+                ],
+            }
+        ).encode("utf-8")
         p = TextProvider("k", http_transport=_fake(200, body))
         result = p.classify("x")
         self.assertEqual(result.kind, "voice_memo")
@@ -626,37 +735,47 @@ class TextProviderTests(unittest.TestCase):
         self.assertEqual(ctx.exception.status, 429)
 
     def test_classify_malformed_response_raises_llm_error(self):
-        body = json.dumps({
-            "choices": [{"message": {"content": "not json at all"}}],
-        }).encode("utf-8")
+        body = json.dumps(
+            {
+                "choices": [{"message": {"content": "not json at all"}}],
+            }
+        ).encode("utf-8")
         p = TextProvider("k", http_transport=_fake(200, body))
         with self.assertRaises(LLMError):
             p.classify("x")
 
     def test_classify_unknown_kind_raises_llm_error(self):
-        body = json.dumps({
-            "choices": [{
-                "message": {
-                    "content": json.dumps(
-                        {"kind": "gathering", "confidence": 0.5},
-                    ),
-                },
-            }],
-        }).encode("utf-8")
+        body = json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {"kind": "gathering", "confidence": 0.5},
+                            ),
+                        },
+                    }
+                ],
+            }
+        ).encode("utf-8")
         p = TextProvider("k", http_transport=_fake(200, body))
         with self.assertRaises(LLMError):
             p.classify("x")
 
     def test_classify_bad_confidence_raises_llm_error(self):
-        body = json.dumps({
-            "choices": [{
-                "message": {
-                    "content": json.dumps(
-                        {"kind": "lecture", "confidence": 1.5},
-                    ),
-                },
-            }],
-        }).encode("utf-8")
+        body = json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {"kind": "lecture", "confidence": 1.5},
+                            ),
+                        },
+                    }
+                ],
+            }
+        ).encode("utf-8")
         p = TextProvider("k", http_transport=_fake(200, body))
         with self.assertRaises(LLMError):
             p.classify("x")
@@ -669,13 +788,18 @@ class TextProviderTests(unittest.TestCase):
 
     def test_classify_truncates_long_transcripts(self):
         capture = {}
-        body = json.dumps({
-            "choices": [{
-                "message": {"content": '{"kind": "lecture", "confidence": 0.5}'},
-            }],
-        }).encode("utf-8")
+        body = json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {"content": '{"kind": "lecture", "confidence": 0.5}'},
+                    }
+                ],
+            }
+        ).encode("utf-8")
         p = TextProvider(
-            "k", http_transport=_fake(200, body, capture),
+            "k",
+            http_transport=_fake(200, body, capture),
         )
         long = "x" * 50_000
         p.classify(long)
@@ -691,59 +815,98 @@ class TextProviderTests(unittest.TestCase):
             p.transcribe("/tmp/x.wav")
 
     def test_summarize_returns_summary(self):
-        body = json.dumps({
-            "choices": [{
-                "message": {
-                    "content": json.dumps({
-                        "text": "A meeting about the new design.",
-                        "key_points": ["Point 1", "Point 2"],
-                    }),
-                },
-            }],
-        }).encode("utf-8")
+        body = json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "text": "A meeting about the new design.",
+                                    "key_points": ["Point 1", "Point 2"],
+                                }
+                            ),
+                        },
+                    }
+                ],
+            }
+        ).encode("utf-8")
         p = TextProvider("k", http_transport=_fake(200, body))
         out = p.summarize("a long transcript")
         self.assertEqual(out.text, "A meeting about the new design.")
         self.assertEqual(out.key_points, ["Point 1", "Point 2"])
 
     def test_summary_title_and_suggest_title(self):
-        body = json.dumps({"choices": [{"message": {"content": json.dumps({
-            "title": ' "Entropy  and the second law." ', "text": "t",
-            "key_points": []})}}]}).encode("utf-8")
+        body = json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "title": ' "Entropy  and the second law." ',
+                                    "text": "t",
+                                    "key_points": [],
+                                }
+                            )
+                        }
+                    }
+                ]
+            }
+        ).encode("utf-8")
         p = TextProvider("k", http_transport=_fake(200, body))
         self.assertEqual(p.summarize("x").title, "Entropy and the second law")
-        body = json.dumps({"choices": [{"message": {
-            "content": '{"title": "Buy milk"}'}}]}).encode("utf-8")
+        body = json.dumps({"choices": [{"message": {"content": '{"title": "Buy milk"}'}}]}).encode(
+            "utf-8"
+        )
         p = TextProvider("k", http_transport=_fake(200, body))
         self.assertEqual(p.suggest_title("remember to buy milk"), "Buy milk")
         p = TextProvider("k", http_transport=_fake(503, b"down"))
         self.assertEqual(p.suggest_title("remember to buy milk"), "")
 
     def test_summarize_parses_sections(self):
-        body = json.dumps({"choices": [{"message": {"content": json.dumps({
-            "text": "Overview.", "key_points": [],
-            "sections": [
-                {"heading": "Entropy", "text": " Notes. "},
-                {"heading": "Empty", "text": ""},       # dropped
-                "not an object",                          # dropped
-                {"text": "No heading."},
-            ],
-        })}}]}).encode("utf-8")
+        body = json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "text": "Overview.",
+                                    "key_points": [],
+                                    "sections": [
+                                        {"heading": "Entropy", "text": " Notes. "},
+                                        {"heading": "Empty", "text": ""},  # dropped
+                                        "not an object",  # dropped
+                                        {"text": "No heading."},
+                                    ],
+                                }
+                            )
+                        }
+                    }
+                ]
+            }
+        ).encode("utf-8")
         p = TextProvider("k", http_transport=_fake(200, body))
         out = p.summarize("x", kind="lecture")
-        self.assertEqual(out.sections, [
-            {"heading": "Entropy", "text": "Notes."},
-            {"heading": "", "text": "No heading."},
-        ])
+        self.assertEqual(
+            out.sections,
+            [
+                {"heading": "Entropy", "text": "Notes."},
+                {"heading": "", "text": "No heading."},
+            ],
+        )
 
     def test_summary_length_follows_transcript_and_kind(self):
-        body = json.dumps({"choices": [{"message": {
-            "content": '{"text": "t", "key_points": []}'}}]}).encode("utf-8")
+        body = json.dumps(
+            {"choices": [{"message": {"content": '{"text": "t", "key_points": []}'}}]}
+        ).encode("utf-8")
 
         def system_prompt(transcript, kind):
             capture = {}
             TextProvider(
-                "k", http_transport=_fake(200, body, capture),
+                "k",
+                http_transport=_fake(200, body, capture),
             ).summarize(transcript, kind=kind)
             return json.loads(capture["data"])["messages"][0]["content"]
 
@@ -766,10 +929,14 @@ class TextProviderTests(unittest.TestCase):
             def transport(url, *, data=None, headers=None, timeout=60.0):
                 sent = json.loads(data)
                 calls.append(sent["messages"][0]["content"])
-                content = (detected_reply if "main language" in calls[-1]
-                           else '{"text": "t", "key_points": [], "items": []}')
-                return 200, json.dumps({"choices": [{"message": {
-                    "content": content}}]}).encode("utf-8")
+                content = (
+                    detected_reply
+                    if "main language" in calls[-1]
+                    else '{"text": "t", "key_points": [], "items": []}'
+                )
+                return 200, json.dumps({"choices": [{"message": {"content": content}}]}).encode(
+                    "utf-8"
+                )
 
             p = TextProvider("k", http_transport=transport)
             p.summarize("some transcript", kind="meeting")
@@ -784,7 +951,7 @@ class TextProviderTests(unittest.TestCase):
             self.assertIn("in Russian, translating", calls[2])
             calls = run('{"language": "German"}')
             self.assertIn("in English, translating", calls[1])
-            calls = run("not json")                # detection failed
+            calls = run("not json")  # detection failed
             self.assertIn("in English, translating", calls[1])
         env = {llm.SUMMARY_LANGUAGES_ENV: "German"}
         with mock.patch.dict(os.environ, env):
@@ -800,16 +967,23 @@ class TextProviderTests(unittest.TestCase):
             sent = json.loads(data)
             calls.append(sent)
             if "Combine them" in sent["messages"][1]["content"]:
-                content = {"text": "Whole lecture.", "key_points": ["k"],
-                           "sections": [{"heading": "A", "text": "B"}]}
+                content = {
+                    "text": "Whole lecture.",
+                    "key_points": ["k"],
+                    "sections": [{"heading": "A", "text": "B"}],
+                }
             else:
-                content = {"heading": f"H{len(calls) - 1}",
-                           "text": "Detailed notes.", "key_points": []}
-            return 200, json.dumps({"choices": [{"message": {
-                "content": json.dumps(content)}}]}).encode("utf-8")
+                content = {
+                    "heading": f"H{len(calls) - 1}",
+                    "text": "Detailed notes.",
+                    "key_points": [],
+                }
+            return 200, json.dumps(
+                {"choices": [{"message": {"content": json.dumps(content)}}]}
+            ).encode("utf-8")
 
         p = TextProvider("k", http_transport=transport)
-        out = p.summarize("word " * 12_000, kind="lecture")   # 60k chars
+        out = p.summarize("word " * 12_000, kind="lecture")  # 60k chars
         self.assertEqual(out.text, "Whole lecture.")
         self.assertEqual(out.sections, [{"heading": "A", "text": "B"}])
         detect, *notes, synthesis = calls
@@ -821,13 +995,17 @@ class TextProviderTests(unittest.TestCase):
         self.assertIn("[Part 1: H1]", synthesis["messages"][1]["content"])
 
     def test_summarize_handles_fenced_json(self):
-        body = json.dumps({
-            "choices": [{
-                "message": {
-                    "content": "```json\n{\"text\": \"hi\", \"key_points\": []}\n```",
-                },
-            }],
-        }).encode("utf-8")
+        body = json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '```json\n{"text": "hi", "key_points": []}\n```',
+                        },
+                    }
+                ],
+            }
+        ).encode("utf-8")
         p = TextProvider("k", http_transport=_fake(200, body))
         out = p.summarize("x")
         self.assertEqual(out.text, "hi")
@@ -839,38 +1017,50 @@ class TextProviderTests(unittest.TestCase):
             p.summarize("x")
 
     def test_summarize_raises_on_malformed_response(self):
-        body = json.dumps({
-            "choices": [{"message": {"content": "no json here"}}],
-        }).encode("utf-8")
+        body = json.dumps(
+            {
+                "choices": [{"message": {"content": "no json here"}}],
+            }
+        ).encode("utf-8")
         p = TextProvider("k", http_transport=_fake(200, body))
         with self.assertRaises(LLMError):
             p.summarize("x")
 
     def test_summarize_rejects_non_dict_text(self):
-        body = json.dumps({
-            "choices": [{
-                "message": {
-                    "content": json.dumps({"text": 42, "key_points": []}),
-                },
-            }],
-        }).encode("utf-8")
+        body = json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps({"text": 42, "key_points": []}),
+                        },
+                    }
+                ],
+            }
+        ).encode("utf-8")
         p = TextProvider("k", http_transport=_fake(200, body))
         with self.assertRaises(LLMError):
             p.summarize("x")
 
     def test_extract_returns_items(self):
-        body = json.dumps({
-            "choices": [{
-                "message": {
-                    "content": json.dumps({
-                        "items": [
-                            {"type": "deadline", "text": "Ship by Friday"},
-                            {"type": "topic", "text": "Auth flow"},
-                        ],
-                    }),
-                },
-            }],
-        }).encode("utf-8")
+        body = json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "items": [
+                                        {"type": "deadline", "text": "Ship by Friday"},
+                                        {"type": "topic", "text": "Auth flow"},
+                                    ],
+                                }
+                            ),
+                        },
+                    }
+                ],
+            }
+        ).encode("utf-8")
         p = TextProvider("k", http_transport=_fake(200, body))
         out = p.extract("transcript text", kind="meeting")
         self.assertEqual(len(out), 2)
@@ -879,13 +1069,17 @@ class TextProviderTests(unittest.TestCase):
         self.assertEqual(out[0]["text"], "Ship by Friday")
 
     def test_extract_handles_fenced_json(self):
-        body = json.dumps({
-            "choices": [{
-                "message": {
-                    "content": "```json\n{\"items\": [{\"type\": \"x\", \"text\": \"y\"}]}\n```",
-                },
-            }],
-        }).encode("utf-8")
+        body = json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '```json\n{"items": [{"type": "x", "text": "y"}]}\n```',
+                        },
+                    }
+                ],
+            }
+        ).encode("utf-8")
         p = TextProvider("k", http_transport=_fake(200, body))
         out = p.extract("x", kind="lecture")
         self.assertEqual(out, [{"type": "x", "text": "y"}])
@@ -896,15 +1090,21 @@ class TextProviderTests(unittest.TestCase):
             p.extract("x", kind="alien")
 
     def test_extract_raises_on_item_missing_keys(self):
-        body = json.dumps({
-            "choices": [{
-                "message": {
-                    "content": json.dumps({
-                        "items": [{"type": "x"}],  # no 'text'
-                    }),
-                },
-            }],
-        }).encode("utf-8")
+        body = json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "items": [{"type": "x"}],  # no 'text'
+                                }
+                            ),
+                        },
+                    }
+                ],
+            }
+        ).encode("utf-8")
         p = TextProvider("k", http_transport=_fake(200, body))
         with self.assertRaises(LLMError):
             p.extract("x", kind="lecture")
@@ -915,13 +1115,17 @@ class TextProviderTests(unittest.TestCase):
             p.extract("x", kind="lecture")
 
     def test_extract_returns_empty_list_when_items_empty(self):
-        body = json.dumps({
-            "choices": [{
-                "message": {
-                    "content": json.dumps({"items": []}),
-                },
-            }],
-        }).encode("utf-8")
+        body = json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps({"items": []}),
+                        },
+                    }
+                ],
+            }
+        ).encode("utf-8")
         p = TextProvider("k", http_transport=_fake(200, body))
         self.assertEqual(p.extract("x", kind="meeting"), [])
 
@@ -949,7 +1153,7 @@ class ParseClassifyResponseTests(unittest.TestCase):
 
     def test_strips_fences(self):
         c = _parse_classify_response(
-            b"```json\n{\"kind\": \"meeting\", \"confidence\": 0.5}\n```",
+            b'```json\n{"kind": "meeting", "confidence": 0.5}\n```',
         )
         self.assertEqual(c.kind, "meeting")
 
@@ -974,14 +1178,16 @@ class ParseClassifyResponseTests(unittest.TestCase):
 class DefaultProvidersTests(unittest.TestCase):
     def test_no_keys_returns_noops(self):
         providers = llm.default_providers(
-            transcription_key="", text_key="",
+            transcription_key="",
+            text_key="",
         )
         self.assertEqual(providers["transcript"].name, "noop")
         self.assertEqual(providers["text"].name, "noop")
 
     def test_keys_return_real_providers(self):
         providers = llm.default_providers(
-            transcription_key="k1", text_key="k2",
+            transcription_key="k1",
+            text_key="k2",
             http_transport=_fake(200, b"x"),
         )
         self.assertIsInstance(providers["transcript"], TranscriptionProvider)
@@ -989,19 +1195,23 @@ class DefaultProvidersTests(unittest.TestCase):
 
     def test_models_default_and_env_override(self):
         from unittest import mock
+
         env = {llm.TRANSCRIPTION_MODEL_ENV: "", llm.TEXT_MODEL_ENV: ""}
         with mock.patch.dict(os.environ, env):
             t = TranscriptionProvider("k")
             x = TextProvider("k")
         self.assertEqual(t.name, llm.TRANSCRIPTION_MODEL)
         self.assertEqual(x.name, llm.TEXT_MODEL)
-        env = {llm.TRANSCRIPTION_MODEL_ENV: "openai/whisper-1",
-               llm.TEXT_MODEL_ENV: "some/text-model"}
+        env = {
+            llm.TRANSCRIPTION_MODEL_ENV: "openai/whisper-1",
+            llm.TEXT_MODEL_ENV: "some/text-model",
+        }
         capture = {}
         with mock.patch.dict(os.environ, env):
             t = TranscriptionProvider("k")
             x = TextProvider(
-                "k", http_transport=_fake(200, b'{"choices": []}', capture),
+                "k",
+                http_transport=_fake(200, b'{"choices": []}', capture),
             )
         # name is what artifacts record as the generating model.
         self.assertEqual(t.name, "openai/whisper-1")
@@ -1009,21 +1219,32 @@ class DefaultProvidersTests(unittest.TestCase):
         try:
             x.classify("hello")
         except llm.LLMError:
-            pass                    # empty choices; only the request matters
+            pass  # empty choices; only the request matters
         self.assertEqual(json.loads(capture["data"])["model"], "some/text-model")
 
     def test_text_base_url_env_override(self):
         from unittest import mock
-        body = json.dumps({"choices": [{"message": {"content":
-            '<think>{"kind": "meeting"} maybe?</think>\n'
-            '{"kind": "lecture", "confidence": 0.8}'}}]}).encode("utf-8")
+
+        body = json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '<think>{"kind": "meeting"} maybe?</think>\n'
+                            '{"kind": "lecture", "confidence": 0.8}'
+                        }
+                    }
+                ]
+            }
+        ).encode("utf-8")
         capture = {}
         env = {llm.TEXT_BASE_URL_ENV: "https://api.minimax.io/v1/"}
         with mock.patch.dict(os.environ, env):
             p = TextProvider("k", http_transport=_fake(200, body, capture))
         result = p.classify("x")
         self.assertEqual(
-            capture["url"], "https://api.minimax.io/v1/chat/completions",
+            capture["url"],
+            "https://api.minimax.io/v1/chat/completions",
         )
         # The <think> block is dropped before the JSON is parsed.
         self.assertEqual(result.kind, "lecture")
@@ -1034,7 +1255,8 @@ class DefaultProvidersTests(unittest.TestCase):
 
     def test_get_provider_default(self):
         llm.default_providers(
-            transcription_key="", text_key="",
+            transcription_key="",
+            text_key="",
         )
         p = llm.get_provider("transcript")
         self.assertEqual(p.name, "noop")

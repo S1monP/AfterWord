@@ -3,6 +3,7 @@
 The LLM path is tested with stub classifiers; no real API calls are
 made.
 """
+
 from __future__ import annotations
 
 import json
@@ -12,7 +13,10 @@ from tests.conftest import LRTestCase
 
 
 def _make_session(
-    self, *, status: str = "ready", kind: object = None,
+    self,
+    *,
+    status: str = "ready",
+    kind: object = None,
 ) -> str:
     """Create a session row with the desired ``status`` and ``kind``.
 
@@ -21,6 +25,7 @@ def _make_session(
     via the storage layer's connection.
     """
     import uuid
+
     sid = uuid.uuid4().hex
     store = self.app.config["AFTERWORD_STORAGE"]
     store.upsert_session(
@@ -102,15 +107,19 @@ class ClassificationServiceTests(LRTestCase):
 
             def classify(self, transcript):
                 return Classification(
-                    kind="lecture", confidence=0.77,
+                    kind="lecture",
+                    confidence=0.77,
                 )
 
         sid = _make_session(self)
         self.app.config["AFTERWORD_STORAGE"].add_artifact(
-            sid, "transcript", "lorem ipsum transcript",
+            sid,
+            "transcript",
+            "lorem ipsum transcript",
         )
         out = self._service().classify_session(
-            sid, classifier=StubClassifier(),
+            sid,
+            classifier=StubClassifier(),
         )
         self.assertEqual(out, ("lecture", 0.77))
 
@@ -131,11 +140,14 @@ class ClassificationServiceTests(LRTestCase):
 
         sid = _make_session(self)
         self.app.config["AFTERWORD_STORAGE"].add_artifact(
-            sid, "transcript", "something",
+            sid,
+            "transcript",
+            "something",
         )
         self.assertIsNone(
             self._service().classify_session(
-                sid, classifier=FailingClassifier(),
+                sid,
+                classifier=FailingClassifier(),
             )
         )
 
@@ -169,7 +181,8 @@ class ClassificationApiTests(LRTestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.get_json()["session"]["kind"], "lecture")
         self.assertEqual(
-            resp.get_json()["session"]["kind_confidence"], 1.0,
+            resp.get_json()["session"]["kind_confidence"],
+            1.0,
         )
 
     def test_api_classify_session_returns_stub_shape(self):
@@ -196,18 +209,19 @@ class ClassificationApiTests(LRTestCase):
 
             def classify(self, transcript):
                 return Classification(
-                    kind="meeting", confidence=0.65,
+                    kind="meeting",
+                    confidence=0.65,
                 )
 
         sid = self._make()
         self.app.config["AFTERWORD_STORAGE"].add_artifact(
-            sid, "transcript", "all-hands meeting notes",
+            sid,
+            "transcript",
+            "all-hands meeting notes",
         )
         # Replace the registered classifier with the stub.
         original = self.app.config["AFTERWORD_LLM_PROVIDERS"]["text"]
-        self.app.config["AFTERWORD_LLM_PROVIDERS"]["text"] = (
-            StubClassifier()
-        )
+        self.app.config["AFTERWORD_LLM_PROVIDERS"]["text"] = StubClassifier()
         try:
             resp = self.client.post(
                 f"/api/v1/sessions/{sid}/classify",
@@ -254,9 +268,11 @@ class ClassificationServiceIsRealTests(unittest.TestCase):
         import inspect
 
         from services.classification import ClassificationService
+
         sig = inspect.signature(ClassificationService.__init__)
         self.assertGreaterEqual(
-            len(sig.parameters), 2,
+            len(sig.parameters),
+            2,
             "ClassificationService.__init__ should take (self, store)",
         )
 

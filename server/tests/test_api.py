@@ -1,4 +1,5 @@
 """API-layer tests using Flask's test client."""
+
 from __future__ import annotations
 
 import json
@@ -11,7 +12,6 @@ from tests.conftest import LRTestCase
 
 
 class DeviceFlowTests(LRTestCase):
-
     def test_announce_then_list_then_finish(self) -> None:
         # The no-op providers (no API keys in the test config)
         # return stub data so the pipeline completes successfully
@@ -21,15 +21,17 @@ class DeviceFlowTests(LRTestCase):
         # 1) announce
         r = self.client.post(
             "/api/v1/sessions",
-            data=json.dumps({
-                "id": "abcdef1234567890",
-                "title": "CS101 Lecture 1",
-                "expected_count": 2,
-                "sample_rate": 22050,
-                "channels": 1,
-                "bits_per_sample": 32,
-                "started_at": "2026-10-03T12:00:00Z",
-            }),
+            data=json.dumps(
+                {
+                    "id": "abcdef1234567890",
+                    "title": "CS101 Lecture 1",
+                    "expected_count": 2,
+                    "sample_rate": 22050,
+                    "channels": 1,
+                    "bits_per_sample": 32,
+                    "started_at": "2026-10-03T12:00:00Z",
+                }
+            ),
             content_type="application/json",
         )
         self.assertEqual(r.status_code, 201)
@@ -42,12 +44,14 @@ class DeviceFlowTests(LRTestCase):
         wav2 = self.make_wav(b"BBB" * 100)
         r = self.client.put(
             "/api/v1/sessions/abcdef1234567890/chunks/1",
-            data=wav1, content_type="audio/wav",
+            data=wav1,
+            content_type="audio/wav",
         )
         self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
         r = self.client.put(
             "/api/v1/sessions/abcdef1234567890/chunks/2",
-            data=wav2, content_type="audio/wav",
+            data=wav2,
+            content_type="audio/wav",
         )
         self.assertEqual(r.status_code, 200)
 
@@ -95,11 +99,13 @@ class DeviceFlowTests(LRTestCase):
         b = self.make_wav(b"BBBB")
         r1 = self.client.put(
             "/api/v1/sessions/abcdef1234567890/chunks/1",
-            data=a, content_type="audio/wav",
+            data=a,
+            content_type="audio/wav",
         )
         r2 = self.client.put(
             "/api/v1/sessions/abcdef1234567890/chunks/1",
-            data=b, content_type="audio/wav",
+            data=b,
+            content_type="audio/wav",
         )
         self.assertEqual(r1.status_code, 200)
         self.assertEqual(r2.status_code, 200)
@@ -128,7 +134,8 @@ class DeviceFlowTests(LRTestCase):
         r = self.client.post("/api/v1/sessions/nope/finish")
         self.assertEqual(r.status_code, 404)
         r = self.client.put(
-            "/api/v1/sessions/nope/chunks/1", data=self.make_wav(),
+            "/api/v1/sessions/nope/chunks/1",
+            data=self.make_wav(),
         )
         self.assertEqual(r.status_code, 404)
 
@@ -137,7 +144,7 @@ class DeviceFlowTests(LRTestCase):
         r = self.client.get("/api/v1/sessions/abcdef1234567890/audio")
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.mimetype, "audio/aac")
-        r.close()   # the file is streamed; close it so it isn't left open
+        r.close()  # the file is streamed; close it so it isn't left open
         r2 = self.client.get(
             "/api/v1/sessions/abcdef1234567890/audio",
             headers={"Range": "bytes=0-99"},
@@ -159,11 +166,13 @@ class DeviceFlowTests(LRTestCase):
     def _upload_complete_session(self) -> None:
         self.client.post(
             "/api/v1/sessions",
-            data=json.dumps({
-                "id": "abcdef1234567890",
-                "title": "Test",
-                "expected_count": 2,
-            }),
+            data=json.dumps(
+                {
+                    "id": "abcdef1234567890",
+                    "title": "Test",
+                    "expected_count": 2,
+                }
+            ),
             content_type="application/json",
         )
         for i in (1, 2):
@@ -183,8 +192,7 @@ class TranscribeRouteTests(LRTestCase):
     stub providers; no real HTTP is performed.
     """
 
-    def _stub_providers(self, transcript="t", kind="meeting", conf=0.7,
-                        fail_classify=False):
+    def _stub_providers(self, transcript="t", kind="meeting", conf=0.7, fail_classify=False):
         from services.llm import Classification, LLMProvider
 
         class StubT(LLMProvider):
@@ -202,6 +210,7 @@ class TranscribeRouteTests(LRTestCase):
             def classify(self, t):
                 if fail_classify:
                     from services.llm import LLMError
+
                     raise LLMError("simulated")
                 return Classification(kind=kind, confidence=conf)
 
@@ -209,6 +218,7 @@ class TranscribeRouteTests(LRTestCase):
                 # M9: stub returns an empty Summary so the pipeline
                 # can complete without an LLM.
                 from services.llm import Summary
+
                 return Summary(text="", key_points=[])
 
             def extract(self, transcript, kind, recorded_at=None):
@@ -225,10 +235,15 @@ class TranscribeRouteTests(LRTestCase):
 
     def _make_ready_session(self, sid="trnsc0000001"):
         import storage
+
         store = self.app.config["AFTERWORD_STORAGE"]
         store.upsert_session(
-            sid, title="x", expected_count=1,
-            sample_rate=22050, channels=1, bits_per_sample=32,
+            sid,
+            title="x",
+            expected_count=1,
+            sample_rate=22050,
+            channels=1,
+            bits_per_sample=32,
             started_at="2026-01-15T10:00:00Z",
         )
         store.full_audio_path(sid).write_bytes(
@@ -236,7 +251,9 @@ class TranscribeRouteTests(LRTestCase):
         )
         store.update_status(sid, storage.STATUS_STITCHING)
         store.update_status(
-            sid, storage.STATUS_READY, finished_at=storage.now_iso(),
+            sid,
+            storage.STATUS_READY,
+            finished_at=storage.now_iso(),
         )
         return sid
 
@@ -262,8 +279,12 @@ class TranscribeRouteTests(LRTestCase):
         self._stub_providers()
         store = self.app.config["AFTERWORD_STORAGE"]
         store.upsert_session(
-            "trnsc0000002", title="x", expected_count=1,
-            sample_rate=22050, channels=1, bits_per_sample=32,
+            "trnsc0000002",
+            title="x",
+            expected_count=1,
+            sample_rate=22050,
+            channels=1,
+            bits_per_sample=32,
             started_at="2026-01-15T10:00:00Z",
         )
         r = self.client.post("/api/v1/sessions/trnsc0000002/transcribe")
@@ -280,6 +301,7 @@ class TranscribeRouteTests(LRTestCase):
         forever."""
         self._stub_providers(kind="lecture", conf=0.9)
         import storage
+
         sid = self._make_ready_session("stranded0001")
         store = self.app.config["AFTERWORD_STORAGE"]
         # Force the stuck state (ready -> transcribing is a legal
@@ -297,6 +319,7 @@ class TranscribeRouteTests(LRTestCase):
         same session (e.g. a manual retry racing a background
         upload run)."""
         import app as app_mod
+
         self._stub_providers()
         sid = self._make_ready_session("stranded0002")
         with app_mod._PIPELINE_LOCK:
@@ -334,7 +357,8 @@ class TranscribeRouteTests(LRTestCase):
                 raise LLMError("first run fails")
 
         self.app.config["AFTERWORD_LLM_PROVIDERS"] = {
-            "transcript": Bad(), "text": Bad(),
+            "transcript": Bad(),
+            "text": Bad(),
         }
         sid = self._make_ready_session("trnsc0000003")
         r1 = self.client.post(f"/api/v1/sessions/{sid}/transcribe")
@@ -344,6 +368,7 @@ class TranscribeRouteTests(LRTestCase):
             self.app.config["AFTERWORD_STORAGE"].get_session(sid).status,
             storage.STATUS_FAILED,
         )
+
         # Swap in working providers and retry.
         class Good(LLMProvider):
             name = "good"
@@ -353,12 +378,14 @@ class TranscribeRouteTests(LRTestCase):
 
             def classify(self, transcript):
                 return Classification(
-                    kind="other", confidence=0.5,
+                    kind="other",
+                    confidence=0.5,
                 )
 
             def summarize(self, transcript, kind=None):
                 # M9: empty Summary so the pipeline reaches done.
                 from services.llm import Summary
+
                 return Summary(text="", key_points=[])
 
             def extract(self, transcript, kind, recorded_at=None):
@@ -366,7 +393,8 @@ class TranscribeRouteTests(LRTestCase):
                 return []
 
         self.app.config["AFTERWORD_LLM_PROVIDERS"] = {
-            "transcript": Good(), "text": Good(),
+            "transcript": Good(),
+            "text": Good(),
         }
         r2 = self.client.post(f"/api/v1/sessions/{sid}/transcribe")
         self.assertEqual(r2.status_code, 200)
@@ -401,7 +429,8 @@ class TranscribeRouteTests(LRTestCase):
                 raise RuntimeError("not used")
 
         self.app.config["AFTERWORD_LLM_PROVIDERS"] = {
-            "transcript": T(), "text": C(),
+            "transcript": T(),
+            "text": C(),
         }
         sid = self._make_ready_session("trnsc0000004")
         r = self.client.post(f"/api/v1/sessions/{sid}/transcribe")
@@ -413,36 +442,41 @@ class TranscribeRouteTests(LRTestCase):
 
 
 class WebUITests(LRTestCase):
-
     def test_dashboard_shows_real_data(self):
         """With a lecture, a meeting, and an event in the DB, the
         dashboard cards show them instead of the empty states."""
         import datetime as _dt
 
         import storage as storage_mod
+
         store = self.app.config["AFTERWORD_STORAGE"]
         for sid, kind, title in (
             ("lect00000001", "lecture", "Linear Algebra"),
             ("meet00000001", "meeting", "Weekly sync"),
         ):
             store.upsert_session(
-                sid, title=title, expected_count=1,
-                sample_rate=22050, channels=1, bits_per_sample=32,
+                sid,
+                title=title,
+                expected_count=1,
+                sample_rate=22050,
+                channels=1,
+                bits_per_sample=32,
                 started_at="2026-10-01T10:00:00Z",
             )
             store.update_status(sid, storage_mod.STATUS_STITCHING)
             store.update_status(
-                sid, storage_mod.STATUS_READY,
+                sid,
+                storage_mod.STATUS_READY,
                 finished_at=storage_mod.now_iso(),
             )
             store.set_kind(sid, kind, confidence=1.0)
         # An event starting tomorrow lands in the "This week" list.
-        tomorrow = (
-            _dt.datetime.now(_dt.UTC) + _dt.timedelta(days=1)
-        )
+        tomorrow = _dt.datetime.now(_dt.UTC) + _dt.timedelta(days=1)
         event_starts = tomorrow.strftime("%Y-%m-%dT") + "10:00:00Z"
         self.app.config["AFTERWORD_EVENTS_SERVICE"].create(
-            title="Project demo", kind="other", starts_at=event_starts,
+            title="Project demo",
+            kind="other",
+            starts_at=event_starts,
         )
         r = self.client.get("/")
         self.assertEqual(r.status_code, 200)
@@ -482,9 +516,16 @@ class WebUITests(LRTestCase):
         """Set a session's kind to 'lecture' and verify it shows on
         /lectures but not on /meetings."""
         sid = "filtertest0001ab"
-        self.client.post("/api/v1/sessions", data=json.dumps({
-            "id": sid, "expected_count": 1,
-        }), content_type="application/json")
+        self.client.post(
+            "/api/v1/sessions",
+            data=json.dumps(
+                {
+                    "id": sid,
+                    "expected_count": 1,
+                }
+            ),
+            content_type="application/json",
+        )
         self.client.put(
             f"/api/v1/sessions/{sid}/chunks/1",
             data=self.make_wav(bytes([1]) * 200),
@@ -506,11 +547,13 @@ class WebUITests(LRTestCase):
     def _upload_complete_session(self) -> None:
         self.client.post(
             "/api/v1/sessions",
-            data=json.dumps({
-                "id": "abcdef1234567890",
-                "title": "Test",
-                "expected_count": 2,
-            }),
+            data=json.dumps(
+                {
+                    "id": "abcdef1234567890",
+                    "title": "Test",
+                    "expected_count": 2,
+                }
+            ),
             content_type="application/json",
         )
         for i in (1, 2):
@@ -547,7 +590,8 @@ class EventsApiTests(LRTestCase):
         body = resp.get_json()
         self.assertEqual(body["event"]["title"], "Lecture")
         self.assertEqual(
-            body["event"]["starts_at"], "2027-03-15T10:00:00Z",
+            body["event"]["starts_at"],
+            "2027-03-15T10:00:00Z",
         )
 
     def test_create_validates_title(self):
@@ -602,12 +646,11 @@ class EventsApiTests(LRTestCase):
 
     def test_get_returns_one(self):
         create = self._create().get_json()
-        resp = self.client.get(
-            f"/api/v1/events/{create['event']['id']}"
-        )
+        resp = self.client.get(f"/api/v1/events/{create['event']['id']}")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(
-            resp.get_json()["event"]["id"], create["event"]["id"],
+            resp.get_json()["event"]["id"],
+            create["event"]["id"],
         )
 
     def test_get_missing_returns_404(self):
@@ -644,14 +687,10 @@ class EventsApiTests(LRTestCase):
 
     def test_delete_returns_204(self):
         create = self._create().get_json()
-        resp = self.client.delete(
-            f"/api/v1/events/{create['event']['id']}"
-        )
+        resp = self.client.delete(f"/api/v1/events/{create['event']['id']}")
         self.assertEqual(resp.status_code, 204)
         self.assertEqual(
-            self.client.get(
-                f"/api/v1/events/{create['event']['id']}"
-            ).status_code,
+            self.client.get(f"/api/v1/events/{create['event']['id']}").status_code,
             404,
         )
 
@@ -661,6 +700,7 @@ class EventsApiTests(LRTestCase):
 
     def test_import_counts_events(self):
         import io as _io
+
         sample = (
             b"BEGIN:VCALENDAR\r\n"
             b"VERSION:2.0\r\n"
@@ -691,15 +731,17 @@ class PipelineResilienceTests(LRTestCase):
     def _announce_and_fill(self, sid: str, n: int = 1) -> None:
         self.client.post(
             "/api/v1/sessions",
-            data=json.dumps({
-                "id": sid,
-                "title": "Resilience",
-                "expected_count": n,
-                "sample_rate": 22050,
-                "channels": 1,
-                "bits_per_sample": 32,
-                "started_at": "2026-10-15T12:00:00Z",
-            }),
+            data=json.dumps(
+                {
+                    "id": sid,
+                    "title": "Resilience",
+                    "expected_count": n,
+                    "sample_rate": 22050,
+                    "channels": 1,
+                    "bits_per_sample": 32,
+                    "started_at": "2026-10-15T12:00:00Z",
+                }
+            ),
             content_type="application/json",
         )
         for i in range(1, n + 1):
@@ -715,8 +757,12 @@ class PipelineResilienceTests(LRTestCase):
         (simulating a server restart mid-pipeline)."""
         store = self.app.config["AFTERWORD_STORAGE"]
         store.upsert_session(
-            sid, title="Stranded", expected_count=1,
-            sample_rate=22050, channels=1, bits_per_sample=32,
+            sid,
+            title="Stranded",
+            expected_count=1,
+            sample_rate=22050,
+            channels=1,
+            bits_per_sample=32,
             started_at=storage.now_iso(),
         )
         store.write_chunk(sid, 1, self.make_wav(b"\x00" * 200))
@@ -817,7 +863,8 @@ class PipelineResilienceTests(LRTestCase):
 
         noop_text = self.app.config["AFTERWORD_LLM_PROVIDERS"]["text"]
         self.app.config["AFTERWORD_LLM_PROVIDERS"] = {
-            "transcript": _Boom(), "text": noop_text,
+            "transcript": _Boom(),
+            "text": noop_text,
         }
         requeued = sweep_stranded_sessions(self.app)
         self.assertIn(sid, requeued)
@@ -833,24 +880,32 @@ class PipelineResilienceTests(LRTestCase):
         self._stranded_session(sid, storage.STATUS_TRANSCRIBING)
         store = self.app.config["AFTERWORD_STORAGE"]
         store.update_status(
-            sid, storage.STATUS_FAILED, status_detail="boom",
+            sid,
+            storage.STATUS_FAILED,
+            status_detail="boom",
         )
         requeued = sweep_stranded_sessions(self.app)
         self.assertNotIn(sid, requeued)
         self.assertEqual(
-            store.get_session(sid).status, storage.STATUS_FAILED,
+            store.get_session(sid).status,
+            storage.STATUS_FAILED,
         )
 
     def test_worker_processes_sessions_in_fifo_order(self) -> None:
         """Two queued sessions are transcribed one at a time, in
         queue order."""
         from pathlib import Path
+
         store = self.app.config["AFTERWORD_STORAGE"]
         sids = ["resfifo0000000001", "resfifo0000000002"]
         for k, sid in enumerate(sids):
             store.upsert_session(
-                sid, title=f"fifo{k}", expected_count=1,
-                sample_rate=22050, channels=1, bits_per_sample=32,
+                sid,
+                title=f"fifo{k}",
+                expected_count=1,
+                sample_rate=22050,
+                channels=1,
+                bits_per_sample=32,
                 started_at=storage.now_iso(),
             )
             store.write_chunk(sid, 1, self.make_wav(b"\x00" * 200))
@@ -879,7 +934,8 @@ class PipelineResilienceTests(LRTestCase):
 
         rec = _Recorder()
         self.app.config["AFTERWORD_LLM_PROVIDERS"] = {
-            "transcript": rec, "text": noop_text,
+            "transcript": rec,
+            "text": noop_text,
         }
         for sid in sids:
             self.assertTrue(_enqueue_pipeline(self.app, sid))

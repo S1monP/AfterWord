@@ -13,6 +13,7 @@ The service layer owns three concerns the storage layer doesn't:
 * Generating ids (``uuid4().hex``) so callers don't have to.
 * Giving a new course the first course colour not used yet.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -27,6 +28,7 @@ MAX_CODE_LEN = 50
 
 
 # --- Validators -------------------------------------------------------------
+
 
 def _validate_name(name: object) -> str:
     if not isinstance(name, str):
@@ -67,18 +69,15 @@ def _validate_sort_order(sort_order: object) -> int:
         try:
             value = int(sort_order)
         except ValueError as exc:
-            raise ValueError(
-                f"sort_order must be an integer; got {sort_order!r}"
-            ) from exc
+            raise ValueError(f"sort_order must be an integer; got {sort_order!r}") from exc
         if value < 0:
             raise ValueError("sort_order must be >= 0")
         return value
-    raise ValueError(
-        f"sort_order must be an integer; got {type(sort_order).__name__}"
-    )
+    raise ValueError(f"sort_order must be an integer; got {type(sort_order).__name__}")
 
 
 # --- Service ----------------------------------------------------------------
+
 
 class CoursesService:
     """Coordinates validation, id generation, and storage for
@@ -99,14 +98,15 @@ class CoursesService:
         code = _validate_code(code)
         color = _validate_color(color)
         if color is None:
-            color = palette.next_free(
-                c.color for c in self._store.list_courses(limit=500)[0]
-            )
+            color = palette.next_free(c.color for c in self._store.list_courses(limit=500)[0])
         sort_order = _validate_sort_order(sort_order)
         course_id = uuid.uuid4().hex
         return self._store.create_course(
             course_id,
-            name=name, code=code, color=color, sort_order=sort_order,
+            name=name,
+            code=code,
+            color=color,
+            sort_order=sort_order,
         )
 
     def update(self, course_id: str, **fields: object) -> Course:
@@ -122,9 +122,7 @@ class CoursesService:
         if "color" in fields:
             cleaned["color"] = _validate_color(fields["color"])
         if "sort_order" in fields:
-            cleaned["sort_order"] = _validate_sort_order(
-                fields["sort_order"]
-            )
+            cleaned["sort_order"] = _validate_sort_order(fields["sort_order"])
         if not cleaned:
             existing = self._store.get_course(course_id)
             assert existing is not None

@@ -1,4 +1,5 @@
 """Tests for logsetup: format, level, log file and uncaught exceptions."""
+
 from __future__ import annotations
 
 import logging
@@ -18,7 +19,6 @@ LINE = re.compile(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d (INFO|WARNING|ERROR) +[\w.]+
 
 
 class LogSetupTests(unittest.TestCase):
-
     def setUp(self) -> None:
         root = logging.getLogger()
         self._handlers = list(root.handlers)

@@ -19,6 +19,7 @@ Concurrency model:
   write that touches the session's directory, so a retry-in-flight and a
   new chunk cannot interleave on the same session.
 """
+
 from __future__ import annotations
 
 import json
@@ -65,10 +66,16 @@ STATUS_DONE = "done"
 STATUS_FAILED = "failed"
 
 ALL_STATUSES: tuple[str, ...] = (
-    STATUS_RECEIVING, STATUS_STITCHING, STATUS_READY,
-    STATUS_TRANSCRIBING, STATUS_TRANSCRIBED, STATUS_CLASSIFYING,
-    STATUS_SUMMARISING, STATUS_EXTRACTING,
-    STATUS_DONE, STATUS_FAILED,
+    STATUS_RECEIVING,
+    STATUS_STITCHING,
+    STATUS_READY,
+    STATUS_TRANSCRIBING,
+    STATUS_TRANSCRIBED,
+    STATUS_CLASSIFYING,
+    STATUS_SUMMARISING,
+    STATUS_EXTRACTING,
+    STATUS_DONE,
+    STATUS_FAILED,
 )
 
 # Allowed status transitions enforced by the pipeline. ``ready`` is
@@ -80,32 +87,61 @@ ALL_STATUSES: tuple[str, ...] = (
 ALLOWED_STATUS_TRANSITIONS: dict[str, frozenset[str]] = {
     STATUS_RECEIVING: frozenset({STATUS_STITCHING, STATUS_FAILED}),
     STATUS_STITCHING: frozenset({STATUS_READY, STATUS_FAILED}),
-    STATUS_READY: frozenset({
-        STATUS_TRANSCRIBING, STATUS_FAILED,
-    }),
+    STATUS_READY: frozenset(
+        {
+            STATUS_TRANSCRIBING,
+            STATUS_FAILED,
+        }
+    ),
     # ``done`` straight after transcribing: no speech in the recording.
-    STATUS_TRANSCRIBING: frozenset({
-        STATUS_TRANSCRIBED, STATUS_DONE, STATUS_FAILED, STATUS_READY,
-    }),
+    STATUS_TRANSCRIBING: frozenset(
+        {
+            STATUS_TRANSCRIBED,
+            STATUS_DONE,
+            STATUS_FAILED,
+            STATUS_READY,
+        }
+    ),
     # ``done`` after transcribed/classifying: a voice memo, which keeps
     # only its transcript (no summary or extraction).
-    STATUS_TRANSCRIBED: frozenset({
-        STATUS_CLASSIFYING, STATUS_SUMMARISING, STATUS_DONE,
-        STATUS_FAILED, STATUS_READY,
-    }),
-    STATUS_CLASSIFYING: frozenset({
-        STATUS_SUMMARISING, STATUS_DONE, STATUS_FAILED, STATUS_READY,
-    }),
-    STATUS_SUMMARISING: frozenset({
-        STATUS_EXTRACTING, STATUS_FAILED, STATUS_READY,
-    }),
-    STATUS_EXTRACTING: frozenset({
-        STATUS_DONE, STATUS_FAILED, STATUS_READY,
-    }),
+    STATUS_TRANSCRIBED: frozenset(
+        {
+            STATUS_CLASSIFYING,
+            STATUS_SUMMARISING,
+            STATUS_DONE,
+            STATUS_FAILED,
+            STATUS_READY,
+        }
+    ),
+    STATUS_CLASSIFYING: frozenset(
+        {
+            STATUS_SUMMARISING,
+            STATUS_DONE,
+            STATUS_FAILED,
+            STATUS_READY,
+        }
+    ),
+    STATUS_SUMMARISING: frozenset(
+        {
+            STATUS_EXTRACTING,
+            STATUS_FAILED,
+            STATUS_READY,
+        }
+    ),
+    STATUS_EXTRACTING: frozenset(
+        {
+            STATUS_DONE,
+            STATUS_FAILED,
+            STATUS_READY,
+        }
+    ),
     STATUS_DONE: frozenset({STATUS_READY, STATUS_FAILED}),
-    STATUS_FAILED: frozenset({
-        STATUS_RECEIVING, STATUS_READY,
-    }),
+    STATUS_FAILED: frozenset(
+        {
+            STATUS_RECEIVING,
+            STATUS_READY,
+        }
+    ),
 }
 
 
@@ -124,6 +160,8 @@ def title_is_placeholder(sess: Session) -> bool:
     if sess.title_source == "user":
         return False
     return not sess.title or bool(_DEVICE_NAME.match(sess.title))
+
+
 _CHUNK_INDEX_MIN = 1
 WAV_HEADER_SIZE = 44
 
@@ -404,6 +442,7 @@ SCHEMA_ALTERS: tuple[str, ...] = (
 # WAV helpers (pure functions; usable from tests)
 # ---------------------------------------------------------------------------
 
+
 def _validate_wav_header(header: bytes) -> None:
     if len(header) < 12:
         raise ValueError("WAV header too short")
@@ -440,7 +479,7 @@ def _find_chunk(data: bytes, chunk_id: bytes) -> bytes | None:
         return None
     pos = 12  # skip RIFF header
     while pos + 8 <= len(data):
-        if data[pos:pos + 4] != chunk_id:
+        if data[pos : pos + 4] != chunk_id:
             size = struct.unpack_from("<I", data, pos + 4)[0]
             pos += 8 + size + (size & 1)  # word-aligned
             continue
@@ -458,7 +497,7 @@ def _wav_data_chunk_size(data: bytes) -> int:
     pos = 12
     while pos + 8 <= len(data):
         size = struct.unpack_from("<I", data, pos + 4)[0]
-        if data[pos:pos + 4] == b"data":
+        if data[pos : pos + 4] == b"data":
             return size
         pos += 8 + size + (size & 1)
     return 0
@@ -468,7 +507,7 @@ def _wav_data_offset(data: bytes) -> int | None:
     """Return the byte offset of the ``data`` chunk payload, or None."""
     pos = 12
     while pos + 8 <= len(data):
-        if data[pos:pos + 4] == b"data":
+        if data[pos : pos + 4] == b"data":
             return pos + 8
         size = struct.unpack_from("<I", data, pos + 4)[0]
         pos += 8 + size + (size & 1)
@@ -499,22 +538,20 @@ def _build_wav_header(
     return bytes(header)
 
 
-def make_wav_bytes(
-    sample_rate: int, channels: int, bits_per_sample: int, payload: bytes
-) -> bytes:
+def make_wav_bytes(sample_rate: int, channels: int, bits_per_sample: int, payload: bytes) -> bytes:
     """Wrap raw PCM ``payload`` in a fresh WAV header. Useful in tests."""
-    return _build_wav_header(
-        sample_rate, channels, bits_per_sample, len(payload)
-    ) + payload
+    return _build_wav_header(sample_rate, channels, bits_per_sample, len(payload)) + payload
 
 
 # ---------------------------------------------------------------------------
 # In-memory view
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class Session:
     """In-memory view of a session row."""
+
     id: str
     course_id: str | None
     title: str | None
@@ -560,7 +597,8 @@ class Session:
             "full_audio_size": self.full_audio_size,
             "full_audio_url": (
                 f"/api/v1/sessions/{self.id}/audio"
-                if self.status in (
+                if self.status
+                in (
                     STATUS_READY,
                     STATUS_TRANSCRIBING,
                     STATUS_TRANSCRIBED,
@@ -568,7 +606,8 @@ class Session:
                     STATUS_SUMMARISING,
                     STATUS_EXTRACTING,
                     STATUS_DONE,
-                ) and self.full_audio_size > 0
+                )
+                and self.full_audio_size > 0
                 else None
             ),
             "kind": self.kind,
@@ -586,6 +625,7 @@ class Note:
     on every fetch. The service layer is responsible for keeping these
     two in sync; this dataclass is just a view.
     """
+
     id: str
     title: str
     body_md: str
@@ -623,6 +663,7 @@ class Task:
     difference is which fields are typically populated and which
     page renders the row.
     """
+
     id: str
     title: str
     body_md: str | None
@@ -671,14 +712,15 @@ class Event:
     are stored as ISO-8601 strings with a trailing ``Z``; ``ends_at``
     is optional (a lecture with no declared end).
     """
+
     id: str
     title: str
     description: str | None
-    kind: str                          # 'lecture' | 'meeting' | 'other'
+    kind: str  # 'lecture' | 'meeting' | 'other'
     starts_at: str
     ends_at: str | None
     location: str | None
-    source: str                        # 'manual' | 'ical_import' | 'subscription' | 'extracted'
+    source: str  # 'manual' | 'ical_import' | 'subscription' | 'extracted'
     source_ref: str | None
     course_id: str | None
     matched_session_id: str | None
@@ -710,11 +752,12 @@ class Event:
 @dataclass
 class Subscription:
     """A calendar link kept in step with the events it adds."""
+
     id: str
     name: str
     url: str
-    kind: str                       # the kind its events get
-    course_id: str | None        # None: match each event to a course by name
+    kind: str  # the kind its events get
+    course_id: str | None  # None: match each event to a course by name
     hidden_keys: list[str]
     last_attempt_at: str | None
     last_synced_at: str | None
@@ -733,6 +776,7 @@ class Course:
     ``sort_order`` is an int used to order the sidebar; lower numbers
     come first. ``created_at`` is ISO-8601 UTC.
     """
+
     id: str
     name: str
     code: str | None
@@ -754,6 +798,7 @@ class Course:
 # ---------------------------------------------------------------------------
 # Storage facade
 # ---------------------------------------------------------------------------
+
 
 class Storage:
     """High-level storage facade.
@@ -812,8 +857,7 @@ class Storage:
         announce endpoint now does. Idempotent: normalised rows end in Z.
         """
         rows = conn.execute(
-            "SELECT id, started_at FROM sessions "
-            "WHERE started_at NOT LIKE '%Z'"
+            "SELECT id, started_at FROM sessions WHERE started_at NOT LIKE '%Z'"
         ).fetchall()
         for row in rows:
             try:
@@ -833,16 +877,14 @@ class Storage:
         slots ("1".."12", ``services/palette.py``). Map old hex values
         to the nearest slot. Idempotent: slots are left alone."""
         from services import palette
-        rows = conn.execute(
-            "SELECT id, color FROM courses WHERE color LIKE '#%'"
-        ).fetchall()
+
+        rows = conn.execute("SELECT id, color FROM courses WHERE color LIKE '#%'").fetchall()
         for row in rows:
             try:
                 slot = palette.to_slot(row[1])
             except ValueError:
                 slot = None
-            conn.execute("UPDATE courses SET color = ? WHERE id = ?",
-                         (slot, row[0]))
+            conn.execute("UPDATE courses SET color = ? WHERE id = ?", (slot, row[0]))
         if rows:
             self._log(f"mapped {len(rows)} course colour(s) to palette slots")
 
@@ -857,9 +899,7 @@ class Storage:
         ``pinned`` column doesn't exist on the old ``todos`` table;
         we default it to 0.
         """
-        cur = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='todos'"
-        )
+        cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='todos'")
         if cur.fetchone() is None:
             return  # already migrated
         self._log("migrating todos -> tasks (one-shot)")
@@ -976,9 +1016,7 @@ class Storage:
             raise ValueError("audio format fields must be positive")
         now = now_iso()
         with self._tx() as conn:
-            row = conn.execute(
-                "SELECT * FROM sessions WHERE id = ?", (session_id,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
             if row is not None:
                 return self._row_to_session(conn, row), False
             conn.execute(
@@ -990,9 +1028,16 @@ class Storage:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    session_id, title, started_at, STATUS_RECEIVING,
-                    expected_count, sample_rate, channels,
-                    bits_per_sample, now, now,
+                    session_id,
+                    title,
+                    started_at,
+                    STATUS_RECEIVING,
+                    expected_count,
+                    sample_rate,
+                    channels,
+                    bits_per_sample,
+                    now,
+                    now,
                 ),
             )
         # Create the on-disk directory now so chunk PUTs can write to it.
@@ -1004,9 +1049,7 @@ class Storage:
 
     def get_session(self, session_id: str) -> Session | None:
         with self._tx() as conn:
-            row = conn.execute(
-                "SELECT * FROM sessions WHERE id = ?", (session_id,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
             if row is None:
                 return None
             return self._row_to_session(conn, row)
@@ -1018,10 +1061,7 @@ class Storage:
             ).fetchall()
             return [self._row_to_session(conn, r) for r in rows]
 
-
-    def _row_to_session(
-        self, conn: sqlite3.Connection, row: sqlite3.Row
-    ) -> Session:
+    def _row_to_session(self, conn: sqlite3.Connection, row: sqlite3.Row) -> Session:
         received = conn.execute(
             "SELECT COUNT(*) AS c FROM chunks WHERE session_id = ?",
             (row["id"],),
@@ -1048,9 +1088,7 @@ class Storage:
             kind=row["kind"] if "kind" in row.keys() else None,
             kind_confidence=row["kind_confidence"] if "kind_confidence" in row.keys() else None,
             kind_set_at=row["kind_set_at"] if "kind_set_at" in row.keys() else None,
-            title_source=(
-                row["title_source"] if "title_source" in row.keys() else None
-            ),
+            title_source=(row["title_source"] if "title_source" in row.keys() else None),
         )
 
     def _write_meta_json(self, session_id: str) -> None:
@@ -1103,12 +1141,11 @@ class Storage:
                 raise KeyError(session_id)
             current = row["status"]
             allowed = ALLOWED_STATUS_TRANSITIONS.get(
-                current, frozenset(),
+                current,
+                frozenset(),
             )
             if status not in allowed and current != status:
-                raise ValueError(
-                    f"illegal status transition: {current} -> {status}"
-                )
+                raise ValueError(f"illegal status transition: {current} -> {status}")
             conn.execute(
                 """
                 UPDATE sessions
@@ -1132,7 +1169,9 @@ class Storage:
         status_detail: str | None = None,
     ) -> None:
         self.update_status(
-            session_id, status, status_detail=status_detail,
+            session_id,
+            status,
+            status_detail=status_detail,
         )
 
     # --- kind classification ------------------------------------------------
@@ -1145,15 +1184,11 @@ class Storage:
     # Allowed values for events.kind. Events are user-owned calendar
     # entries (a lecture slot, a meeting slot) — there's no "unclassified"
     # equivalent; the LLM matches sessions to events, not the other way.
-    EVENT_KINDS: frozenset[str] = frozenset(
-        {"lecture", "meeting", "other"}
-    )
+    EVENT_KINDS: frozenset[str] = frozenset({"lecture", "meeting", "other"})
 
     # Allowed values for events.source. ``manual`` is created in the UI,
     # ``ical_import`` is bulk-imported from a .ics file.
-    EVENT_SOURCES: frozenset[str] = frozenset(
-        {"manual", "ical_import"}
-    )
+    EVENT_SOURCES: frozenset[str] = frozenset({"manual", "ical_import"})
 
     def set_kind(
         self,
@@ -1170,8 +1205,7 @@ class Storage:
         """
         if kind is not None and kind not in self.RECORDING_KINDS:
             raise ValueError(
-                f"unknown kind: {kind!r}; expected one of "
-                f"{sorted(self.RECORDING_KINDS)} or None"
+                f"unknown kind: {kind!r}; expected one of {sorted(self.RECORDING_KINDS)} or None"
             )
         if confidence is not None and not (0.0 <= confidence <= 1.0):
             raise ValueError(f"confidence must be in [0, 1], got {confidence}")
@@ -1241,9 +1275,7 @@ class Storage:
 
     def get_course(self, course_id: str) -> Course | None:
         with self._tx() as conn:
-            row = conn.execute(
-                "SELECT * FROM courses WHERE id = ?", (course_id,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM courses WHERE id = ?", (course_id,)).fetchone()
             if row is None:
                 return None
             return self._row_to_course(row)
@@ -1264,13 +1296,17 @@ class Storage:
         sets: list[str] = []
         params: list[Any] = []
         if name is not None:
-            sets.append("name = ?"); params.append(name)
+            sets.append("name = ?")
+            params.append(name)
         if code is not _UNSET:
-            sets.append("code = ?"); params.append(code)
+            sets.append("code = ?")
+            params.append(code)
         if color is not _UNSET:
-            sets.append("color = ?"); params.append(color)
+            sets.append("color = ?")
+            params.append(color)
         if sort_order is not None:
-            sets.append("sort_order = ?"); params.append(int(sort_order))
+            sets.append("sort_order = ?")
+            params.append(int(sort_order))
         if not sets:
             existing = self.get_course(course_id)
             if existing is None:
@@ -1290,13 +1326,14 @@ class Storage:
 
     def delete_course(self, course_id: str) -> bool:
         with self._tx() as conn:
-            cur = conn.execute(
-                "DELETE FROM courses WHERE id = ?", (course_id,)
-            )
+            cur = conn.execute("DELETE FROM courses WHERE id = ?", (course_id,))
             return cur.rowcount > 0
 
     def list_courses(
-        self, *, limit: int = 200, offset: int = 0,
+        self,
+        *,
+        limit: int = 200,
+        offset: int = 0,
     ) -> tuple[list[Course], int]:
         """List courses: ``(sort_order ASC, created_at ASC, id ASC)``."""
         if limit < 1:
@@ -1304,9 +1341,7 @@ class Storage:
         if offset < 0:
             raise ValueError("offset must be >= 0")
         with self._tx() as conn:
-            total = conn.execute(
-                "SELECT COUNT(*) AS c FROM courses"
-            ).fetchone()["c"]
+            total = conn.execute("SELECT COUNT(*) AS c FROM courses").fetchone()["c"]
             # Use rowid as the final tiebreaker so that courses
             # created in the same second (and therefore with the
             # same ``created_at``) still sort deterministically
@@ -1338,7 +1373,9 @@ class Storage:
         )
 
     def list_sessions_by_course(
-        self, course_id: str | None, *,
+        self,
+        course_id: str | None,
+        *,
         status: str | list[str] | None = "ready",
         kind: str | None = None,
     ) -> list[Session]:
@@ -1379,14 +1416,15 @@ class Storage:
         where_sql = "WHERE " + " AND ".join(clauses)
         with self._tx() as conn:
             rows = conn.execute(
-                f"SELECT * FROM sessions {where_sql} "
-                f"ORDER BY created_at DESC, id DESC",
+                f"SELECT * FROM sessions {where_sql} ORDER BY created_at DESC, id DESC",
                 params,
             ).fetchall()
         return [self._row_to_session(conn, r) for r in rows]
 
     def set_session_course(
-        self, session_id: str, course_id: str | None,
+        self,
+        session_id: str,
+        course_id: str | None,
     ) -> Session:
         """Assign or unassign a course on a session.
 
@@ -1404,8 +1442,7 @@ class Storage:
         now = now_iso()
         with self._tx() as conn:
             conn.execute(
-                "UPDATE sessions SET course_id = ?, updated_at = ? "
-                "WHERE id = ?",
+                "UPDATE sessions SET course_id = ?, updated_at = ? WHERE id = ?",
                 (course_id, now, session_id),
             )
         sess = self.get_session(session_id)
@@ -1415,7 +1452,11 @@ class Storage:
     TITLE_SOURCES: frozenset[str] = frozenset({"calendar", "ai", "user"})
 
     def set_session_title(
-        self, session_id: str, title: str, *, source: str | None = None,
+        self,
+        session_id: str,
+        title: str,
+        *,
+        source: str | None = None,
     ) -> Session:
         """Rename a session and record where the name came from
         (``source``, one of :attr:`TITLE_SOURCES`, or None).
@@ -1441,8 +1482,7 @@ class Storage:
         now = now_iso()
         with self._tx() as conn:
             conn.execute(
-                "UPDATE sessions SET title = ?, title_source = ?, "
-                "updated_at = ? WHERE id = ?",
+                "UPDATE sessions SET title = ?, title_source = ?, updated_at = ? WHERE id = ?",
                 (title, source, now, session_id),
             )
         self._write_meta_json(session_id)
@@ -1459,14 +1499,15 @@ class Storage:
         """
         with self._tx() as conn:
             row = conn.execute(
-                "SELECT COUNT(*) AS c FROM sessions "
-                "WHERE course_id = ? AND status IN (?, ?)",
+                "SELECT COUNT(*) AS c FROM sessions WHERE course_id = ? AND status IN (?, ?)",
                 (course_id, STATUS_READY, STATUS_DONE),
             ).fetchone()
         return int(row["c"])
 
     def get_artifact(
-        self, session_id: str, kind: str,
+        self,
+        session_id: str,
+        kind: str,
     ) -> dict[str, Any] | None:
         """Fetch one artifact for a session, by kind.
 
@@ -1555,8 +1596,7 @@ class Storage:
         params = (session_id, *kinds)
         with self._tx() as conn:
             conn.execute(
-                "DELETE FROM artifacts WHERE session_id = ? "
-                f"AND kind IN ({placeholders})",
+                f"DELETE FROM artifacts WHERE session_id = ? AND kind IN ({placeholders})",
                 params,
             )
 
@@ -1590,16 +1630,24 @@ class Storage:
                      pinned, course_id, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (note_id, title, body_md, body_html, source, source_ref,
-                 1 if pinned else 0, course_id, created_at or now, now),
+                (
+                    note_id,
+                    title,
+                    body_md,
+                    body_html,
+                    source,
+                    source_ref,
+                    1 if pinned else 0,
+                    course_id,
+                    created_at or now,
+                    now,
+                ),
             )
         return self.get_note(note_id)  # type: ignore[return-value]
 
     def get_note(self, note_id: str) -> Note | None:
         with self._tx() as conn:
-            row = conn.execute(
-                "SELECT * FROM notes WHERE id = ?", (note_id,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM notes WHERE id = ?", (note_id,)).fetchone()
             if row is None:
                 return None
             return self._row_to_note(row)
@@ -1664,7 +1712,8 @@ class Storage:
         with self._tx() as conn:
             row = conn.execute(
                 "SELECT * FROM notes WHERE source = 'voice_memo' AND source_ref = ? "
-                "ORDER BY created_at LIMIT 1", (session_id,),
+                "ORDER BY created_at LIMIT 1",
+                (session_id,),
             ).fetchone()
         return self._row_to_note(row) if row else None
 
@@ -1761,19 +1810,30 @@ class Storage:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                         ?, ?)
                 """,
-                (task_id, title, body_md, description, priority, status,
-                 kind, due_at, source, source_ref, source_offset_ms,
-                 course_id, 1 if pinned else 0,
-                 now if status == "done" else completed_at,
-                 now, now),
+                (
+                    task_id,
+                    title,
+                    body_md,
+                    description,
+                    priority,
+                    status,
+                    kind,
+                    due_at,
+                    source,
+                    source_ref,
+                    source_offset_ms,
+                    course_id,
+                    1 if pinned else 0,
+                    now if status == "done" else completed_at,
+                    now,
+                    now,
+                ),
             )
         return self.get_task(task_id)  # type: ignore[return-value]
 
     def get_task(self, task_id: str) -> Task | None:
         with self._tx() as conn:
-            row = conn.execute(
-                "SELECT * FROM tasks WHERE id = ?", (task_id,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
             if row is None:
                 return None
             return self._row_to_task(row)
@@ -1941,10 +2001,7 @@ class Storage:
             due_at=row["due_at"] if "due_at" in keys else None,
             source=row["source"],
             source_ref=row["source_ref"],
-            source_offset_ms=(
-                row["source_offset_ms"]
-                if "source_offset_ms" in keys else None
-            ),
+            source_offset_ms=(row["source_offset_ms"] if "source_offset_ms" in keys else None),
             course_id=row["course_id"] if "course_id" in keys else None,
             pinned=bool(row["pinned"]) if "pinned" in keys else False,
             completed_at=row["completed_at"],
@@ -1970,13 +2027,10 @@ class Storage:
         if sess is None:
             raise KeyError(session_id)
         if sess.status not in (STATUS_RECEIVING, STATUS_FAILED):
-            raise RuntimeError(
-                f"session {session_id} is {sess.status}; cannot accept chunks"
-            )
+            raise RuntimeError(f"session {session_id} is {sess.status}; cannot accept chunks")
         if chunk_index > sess.expected_count and sess.expected_count > 0:
             raise ValueError(
-                f"chunk_index {chunk_index} exceeds expected_count "
-                f"{sess.expected_count}"
+                f"chunk_index {chunk_index} exceeds expected_count {sess.expected_count}"
             )
 
         lock = self._lock_for(session_id)
@@ -2009,9 +2063,7 @@ class Storage:
                     (now, session_id),
                 )
             if sess.status == STATUS_FAILED:
-                self.update_status(
-                    session_id, STATUS_RECEIVING, status_detail=None
-                )
+                self.update_status(session_id, STATUS_RECEIVING, status_detail=None)
             self._write_meta_json(session_id)
         return len(payload)
 
@@ -2028,9 +2080,7 @@ class Storage:
         if sess is None:
             return []
         present = set(self.list_received_chunks(session_id))
-        return [
-            n for n in range(1, sess.expected_count + 1) if n not in present
-        ]
+        return [n for n in range(1, sess.expected_count + 1) if n not in present]
 
     # --- finish / stitching ----------------------------------------------
 
@@ -2050,19 +2100,20 @@ class Storage:
         sess = self.get_session(session_id)
         if sess is None:
             raise KeyError(session_id)
-        if (
-            sess.status == STATUS_READY
-            and self.full_audio_path(session_id).exists()
-        ):
+        if sess.status == STATUS_READY and self.full_audio_path(session_id).exists():
             return Storage.FinishResult(
-                ok=True, reason="already_ready", missing=[],
+                ok=True,
+                reason="already_ready",
+                missing=[],
                 full_audio_size=self.full_audio_path(session_id).stat().st_size,
             )
 
         missing = self.missing_chunks(session_id)
         if missing:
             return Storage.FinishResult(
-                ok=False, reason="missing_chunks", missing=missing,
+                ok=False,
+                reason="missing_chunks",
+                missing=missing,
                 full_audio_size=0,
             )
 
@@ -2070,12 +2121,11 @@ class Storage:
         with lock:
             sess = self.get_session(session_id)
             assert sess is not None
-            if (
-                sess.status == STATUS_READY
-                and self.full_audio_path(session_id).exists()
-            ):
+            if sess.status == STATUS_READY and self.full_audio_path(session_id).exists():
                 return Storage.FinishResult(
-                    ok=True, reason="already_ready", missing=[],
+                    ok=True,
+                    reason="already_ready",
+                    missing=[],
                     full_audio_size=self.full_audio_path(session_id).stat().st_size,
                 )
             self.update_status(session_id, STATUS_STITCHING, status_detail=None)
@@ -2083,19 +2133,27 @@ class Storage:
                 size = self._stitch_chunks(session_id, sess)
             except Exception as exc:
                 self.update_status(
-                    session_id, STATUS_FAILED,
+                    session_id,
+                    STATUS_FAILED,
                     status_detail=f"stitch error: {exc!r}",
                 )
                 return Storage.FinishResult(
-                    ok=False, reason="stitch_error", missing=[],
+                    ok=False,
+                    reason="stitch_error",
+                    missing=[],
                     full_audio_size=0,
                 )
             self.update_status(
-                session_id, STATUS_READY,
-                status_detail=None, finished_at=now_iso(),
+                session_id,
+                STATUS_READY,
+                status_detail=None,
+                finished_at=now_iso(),
             )
         return Storage.FinishResult(
-            ok=True, reason="stitched", missing=[], full_audio_size=size,
+            ok=True,
+            reason="stitched",
+            missing=[],
+            full_audio_size=size,
         )
 
     def _stitch_chunks(self, session_id: str, sess: Session) -> int:
@@ -2119,13 +2177,11 @@ class Storage:
             chunk_files.append(p)
 
         from services import transcode as _tx
-        kinds = {
-            _tx.sniff_format(p).kind for p in chunk_files
-        }
+
+        kinds = {_tx.sniff_format(p).kind for p in chunk_files}
         if len(kinds) > 1 or kinds == {"unknown"}:
             raise ValueError(
-                "chunks are not a consistent audio stream: "
-                + ", ".join(sorted(kinds))
+                "chunks are not a consistent audio stream: " + ", ".join(sorted(kinds))
             )
 
         full_tmp = session_dir / "full.aac.tmp"
@@ -2192,18 +2248,29 @@ class Storage:
                      created_at, updated_at, subscription_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (event_id, title, description, kind, starts_at, ends_at,
-                 location, source, source_ref, course_id,
-                 matched_session_id, match_confidence, now, now,
-                 subscription_id),
+                (
+                    event_id,
+                    title,
+                    description,
+                    kind,
+                    starts_at,
+                    ends_at,
+                    location,
+                    source,
+                    source_ref,
+                    course_id,
+                    matched_session_id,
+                    match_confidence,
+                    now,
+                    now,
+                    subscription_id,
+                ),
             )
         return self.get_event(event_id)  # type: ignore[return-value]
 
     def get_event(self, event_id: str) -> Event | None:
         with self._tx() as conn:
-            row = conn.execute(
-                "SELECT * FROM events WHERE id = ?", (event_id,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
             if row is None:
                 return None
             return self._row_to_event(row)
@@ -2233,23 +2300,32 @@ class Storage:
         sets: list[str] = []
         params: list[Any] = []
         if title is not None:
-            sets.append("title = ?"); params.append(title)
+            sets.append("title = ?")
+            params.append(title)
         if description is not _UNSET:
-            sets.append("description = ?"); params.append(description)
+            sets.append("description = ?")
+            params.append(description)
         if kind is not None:
-            sets.append("kind = ?"); params.append(kind)
+            sets.append("kind = ?")
+            params.append(kind)
         if starts_at is not None:
-            sets.append("starts_at = ?"); params.append(starts_at)
+            sets.append("starts_at = ?")
+            params.append(starts_at)
         if ends_at is not _UNSET:
-            sets.append("ends_at = ?"); params.append(ends_at)
+            sets.append("ends_at = ?")
+            params.append(ends_at)
         if location is not _UNSET:
-            sets.append("location = ?"); params.append(location)
+            sets.append("location = ?")
+            params.append(location)
         if source is not None:
-            sets.append("source = ?"); params.append(source)
+            sets.append("source = ?")
+            params.append(source)
         if source_ref is not _UNSET:
-            sets.append("source_ref = ?"); params.append(source_ref)
+            sets.append("source_ref = ?")
+            params.append(source_ref)
         if course_id is not _UNSET:
-            sets.append("course_id = ?"); params.append(course_id)
+            sets.append("course_id = ?")
+            params.append(course_id)
         if matched_session_id is not _UNSET:
             sets.append("matched_session_id = ?")
             params.append(matched_session_id)
@@ -2257,7 +2333,8 @@ class Storage:
             sets.append("match_confidence = ?")
             params.append(match_confidence)
         if subscription_id is not _UNSET:
-            sets.append("subscription_id = ?"); params.append(subscription_id)
+            sets.append("subscription_id = ?")
+            params.append(subscription_id)
         if not sets:
             existing = self.get_event(event_id)
             if existing is None:
@@ -2279,9 +2356,7 @@ class Storage:
 
     def delete_event(self, event_id: str) -> bool:
         with self._tx() as conn:
-            cur = conn.execute(
-                "DELETE FROM events WHERE id = ?", (event_id,)
-            )
+            cur = conn.execute("DELETE FROM events WHERE id = ?", (event_id,))
             return cur.rowcount > 0
 
     def list_events(
@@ -2329,7 +2404,9 @@ class Storage:
             ).fetchall()
         return [self._row_to_event(r) for r in rows], int(total)
 
-    def events_from_feed(self, subscription_id: str | None, *, source: str | None = None) -> list[Event]:
+    def events_from_feed(
+        self, subscription_id: str | None, *, source: str | None = None
+    ) -> list[Event]:
         """Every event a subscription added (``subscription_id``), or,
         with ``subscription_id=None`` and a ``source``, every event of
         that source that isn't a subscription's (one-off imports)."""
@@ -2347,8 +2424,9 @@ class Storage:
                 ).fetchall()
         return [self._row_to_event(r) for r in rows]
 
-    def create_subscription(self, sub_id: str, *, name: str, url: str, kind: str,
-                            course_id: str | None) -> Subscription:
+    def create_subscription(
+        self, sub_id: str, *, name: str, url: str, kind: str, course_id: str | None
+    ) -> Subscription:
         now = now_iso()
         with self._tx() as conn:
             conn.execute(
@@ -2372,8 +2450,17 @@ class Storage:
             ).fetchall()
         return [self._row_to_subscription(r) for r in rows]
 
-    _SUB_FIELDS = ("name", "url", "kind", "course_id", "hidden_keys", "last_attempt_at",
-                   "last_synced_at", "last_error", "event_count")
+    _SUB_FIELDS = (
+        "name",
+        "url",
+        "kind",
+        "course_id",
+        "hidden_keys",
+        "last_attempt_at",
+        "last_synced_at",
+        "last_error",
+        "event_count",
+    )
 
     def update_subscription(self, sub_id: str, **fields: Any) -> Subscription:
         """Set any of ``_SUB_FIELDS`` (``hidden_keys`` as a list)."""
@@ -2383,8 +2470,10 @@ class Storage:
                 raise ValueError(f"unknown subscription field {key!r}")
             if key == "hidden_keys":
                 value = json.dumps(sorted(set(value)))
-            sets.append(f"{key} = ?"); params.append(value)
-        sets.append("updated_at = ?"); params.append(now_iso())
+            sets.append(f"{key} = ?")
+            params.append(value)
+        sets.append("updated_at = ?")
+        params.append(now_iso())
         with self._tx() as conn:
             cur = conn.execute(
                 f"UPDATE calendar_subscriptions SET {', '.join(sets)} WHERE id = ?",
@@ -2408,11 +2497,18 @@ class Storage:
         except ValueError:
             hidden = []
         return Subscription(
-            id=row["id"], name=row["name"], url=row["url"], kind=row["kind"],
-            course_id=row["course_id"], hidden_keys=list(hidden),
-            last_attempt_at=row["last_attempt_at"], last_synced_at=row["last_synced_at"],
-            last_error=row["last_error"], event_count=int(row["event_count"] or 0),
-            created_at=row["created_at"], updated_at=row["updated_at"],
+            id=row["id"],
+            name=row["name"],
+            url=row["url"],
+            kind=row["kind"],
+            course_id=row["course_id"],
+            hidden_keys=list(hidden),
+            last_attempt_at=row["last_attempt_at"],
+            last_synced_at=row["last_synced_at"],
+            last_error=row["last_error"],
+            event_count=int(row["event_count"] or 0),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
         )
 
     def clear_event_match_for_session(self, session_id: str) -> int:
@@ -2453,13 +2549,11 @@ class Storage:
         """Keep a deleted recording's filed items, minus their link."""
         with self._tx() as conn:
             conn.execute(
-                "UPDATE tasks SET source_ref = NULL, source_offset_ms = NULL "
-                "WHERE source_ref = ?",
+                "UPDATE tasks SET source_ref = NULL, source_offset_ms = NULL WHERE source_ref = ?",
                 (session_id,),
             )
             conn.execute(
-                "UPDATE events SET source_ref = NULL WHERE source_ref = ? "
-                "AND source = 'extracted'",
+                "UPDATE events SET source_ref = NULL WHERE source_ref = ? AND source = 'extracted'",
                 (session_id,),
             )
 
@@ -2496,15 +2590,16 @@ class Storage:
                 "AND source = 'extracted' ORDER BY starts_at",
                 (session_id,),
             ).fetchall()
-        return ([self._row_to_task(r) for r in task_rows],
-                [self._row_to_event(r) for r in event_rows])
+        return (
+            [self._row_to_task(r) for r in task_rows],
+            [self._row_to_event(r) for r in event_rows],
+        )
 
     def event_for_session(self, session_id: str) -> Event | None:
         """The calendar event a recording was matched to, if any."""
         with self._tx() as conn:
             row = conn.execute(
-                "SELECT * FROM events WHERE matched_session_id = ? "
-                "ORDER BY starts_at LIMIT 1",
+                "SELECT * FROM events WHERE matched_session_id = ? ORDER BY starts_at LIMIT 1",
                 (session_id,),
             ).fetchone()
         return self._row_to_event(row) if row is not None else None
@@ -2540,8 +2635,7 @@ class Storage:
                 ("task", "tasks", ("title", "description", "body_md")),
                 ("event", "events", ("title", "location", "description")),
             ):
-                text = " || char(31) || ".join(
-                    f"COALESCE({c}, '')" for c in columns)
+                text = " || char(31) || ".join(f"COALESCE({c}, '')" for c in columns)
                 for row in conn.execute(f"SELECT id, {text} FROM {table}"):
                     out[(item_type, row[0])] = row[1]
         return out
@@ -2549,12 +2643,16 @@ class Storage:
     def search_indexed_stamps(self) -> dict[tuple[str, str], str]:
         """``{(item_type, item_id): stamp}`` the index was built from."""
         with self._tx() as conn:
-            return {(r[0], r[1]): r[2] for r in conn.execute(
-                "SELECT item_type, item_id, stamp FROM search_items"
-            )}
+            return {
+                (r[0], r[1]): r[2]
+                for r in conn.execute("SELECT item_type, item_id, stamp FROM search_items")
+            }
 
     def search_put_item(
-        self, item_type: str, item_id: str, stamp: str,
+        self,
+        item_type: str,
+        item_id: str,
+        stamp: str,
         rows: list[tuple[str, int | None, str, str, str]],
     ) -> None:
         """Replace an item's search rows: ``(field, at_ms, text, words,
@@ -2571,8 +2669,7 @@ class Storage:
                 [(item_type, item_id, *row) for row in rows],
             )
             conn.execute(
-                "INSERT OR REPLACE INTO search_items (item_type, item_id, stamp) "
-                "VALUES (?, ?, ?)",
+                "INSERT OR REPLACE INTO search_items (item_type, item_id, stamp) VALUES (?, ?, ?)",
                 (item_type, item_id, stamp),
             )
 
@@ -2616,20 +2713,12 @@ class Storage:
             location=row["location"],
             source=row["source"],
             source_ref=row["source_ref"] if "source_ref" in keys else None,
-            course_id=(
-                row["course_id"] if "course_id" in keys else None
-            ),
+            course_id=(row["course_id"] if "course_id" in keys else None),
             matched_session_id=(
-                row["matched_session_id"]
-                if "matched_session_id" in keys else None
+                row["matched_session_id"] if "matched_session_id" in keys else None
             ),
-            match_confidence=(
-                row["match_confidence"]
-                if "match_confidence" in keys else None
-            ),
-            subscription_id=(
-                row["subscription_id"] if "subscription_id" in keys else None
-            ),
+            match_confidence=(row["match_confidence"] if "match_confidence" in keys else None),
+            subscription_id=(row["subscription_id"] if "subscription_id" in keys else None),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
@@ -2668,9 +2757,7 @@ class Storage:
         self.write_chunk(session_id, 1, audio_bytes)
         result = self.finish_session(session_id)
         if not result.ok:
-            raise RuntimeError(
-                f"ingest_single_audio: finish failed: {result.reason}"
-            )
+            raise RuntimeError(f"ingest_single_audio: finish failed: {result.reason}")
         sess = self.get_session(session_id)
         assert sess is not None
         return sess

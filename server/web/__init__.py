@@ -11,6 +11,7 @@
 
 ``BLUEPRINTS`` is what ``app.create_app`` registers.
 """
+
 from web import (
     api_courses,
     api_events,
@@ -24,6 +25,13 @@ from web import (
 )
 
 BLUEPRINTS = (
-    pages.bp, api_sessions.bp, api_search.bp, api_notes.bp, api_tasks.bp,
-    api_events.bp, api_courses.bp, api_settings.bp, api_subscriptions.bp,
+    pages.bp,
+    api_sessions.bp,
+    api_search.bp,
+    api_notes.bp,
+    api_tasks.bp,
+    api_events.bp,
+    api_courses.bp,
+    api_settings.bp,
+    api_subscriptions.bp,
 )

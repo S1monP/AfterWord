@@ -15,6 +15,7 @@ Usage from a shell::
     python scripts/run_tests.py tests.test_tasks  # one module
     python scripts/run_tests.py --list          # just list the test files
 """
+
 from __future__ import annotations
 
 import argparse
@@ -87,16 +88,19 @@ def run(args: list[str], log_path: Path, timeout: int) -> int:
         popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
     try:
         result = subprocess.run(cmd, timeout=timeout, **popen_kwargs)
-        print(f"  subprocess returned: exit={result.returncode} "
-              f"stdout_len={len(result.stdout)} stderr_len={len(result.stderr)}")
+        print(
+            f"  subprocess returned: exit={result.returncode} "
+            f"stdout_len={len(result.stdout)} stderr_len={len(result.stderr)}"
+        )
     except subprocess.TimeoutExpired as exc:
         print(f"  subprocess TIMED OUT after {timeout}s")
         # Even on timeout, write what we have so the user can see how
         # far the suite got. ``exc.stdout`` / ``exc.stderr`` are bytes
         # here because capture_output returns the raw streams.
         with open(log_path, "wb") as fh:
-            fh.write(b"ERROR: test run timed out after "
-                    + str(timeout).encode("ascii") + b" seconds\n")
+            fh.write(
+                b"ERROR: test run timed out after " + str(timeout).encode("ascii") + b" seconds\n"
+            )
             fh.write(b"--- stdout (truncated) ---\n")
             fh.write(exc.stdout or b"")
             fh.write(b"\n--- stderr (truncated) ---\n")
@@ -140,18 +144,23 @@ def main() -> int:
         "args",
         nargs="*",
         help="Arguments to pass to ``python -m unittest``. "
-             "Defaults to ``discover -s tests --buffer``.",
+        "Defaults to ``discover -s tests --buffer``.",
     )
     parser.add_argument(
-        "--log", type=Path, default=DEFAULT_LOG,
+        "--log",
+        type=Path,
+        default=DEFAULT_LOG,
         help="Path to write the captured output. Default: %(default)s",
     )
     parser.add_argument(
-        "--timeout", type=int, default=DEFAULT_TIMEOUT,
+        "--timeout",
+        type=int,
+        default=DEFAULT_TIMEOUT,
         help="Maximum seconds to wait. Default: %(default)s",
     )
     parser.add_argument(
-        "--list", action="store_true",
+        "--list",
+        action="store_true",
         help="List discoverable test modules and exit.",
     )
     parsed = parser.parse_args()

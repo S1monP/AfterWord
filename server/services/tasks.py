@@ -12,6 +12,7 @@ differences are:
 The service is constructed with a :class:`storage.Storage` instance
 so it can be tested without a Flask app.
 """
+
 from __future__ import annotations
 
 import datetime as _dt
@@ -26,7 +27,7 @@ from storage import Task
 # --- Limits -----------------------------------------------------------------
 
 MAX_TITLE_LEN = 200
-MAX_BODY_MD_LEN = 200_000   # matches notes
+MAX_BODY_MD_LEN = 200_000  # matches notes
 MAX_DESCRIPTION_LEN = 4_000
 
 PRIORITIES: frozenset[str] = frozenset({"low", "medium", "high", "urgent"})
@@ -81,9 +82,7 @@ def _validate_description(description: object) -> str | None:
     if not isinstance(description, str):
         raise ValueError("description must be a string")
     if len(description) > MAX_DESCRIPTION_LEN:
-        raise ValueError(
-            f"description must be at most {MAX_DESCRIPTION_LEN} chars"
-        )
+        raise ValueError(f"description must be at most {MAX_DESCRIPTION_LEN} chars")
     return description
 
 
@@ -93,9 +92,7 @@ def _validate_priority(priority: object) -> str:
     if not isinstance(priority, str):
         raise ValueError("priority must be a string")
     if priority not in PRIORITIES:
-        raise ValueError(
-            f"priority must be one of {sorted(PRIORITIES)}; got {priority!r}"
-        )
+        raise ValueError(f"priority must be one of {sorted(PRIORITIES)}; got {priority!r}")
     return priority
 
 
@@ -105,9 +102,7 @@ def _validate_status(status: object) -> str:
     if not isinstance(status, str):
         raise ValueError("status must be a string")
     if status not in STATUSES:
-        raise ValueError(
-            f"status must be one of {sorted(STATUSES)}; got {status!r}"
-        )
+        raise ValueError(f"status must be one of {sorted(STATUSES)}; got {status!r}")
     return status
 
 
@@ -117,9 +112,7 @@ def _validate_kind(kind: object) -> str:
     if not isinstance(kind, str):
         raise ValueError("kind must be a string")
     if kind not in KINDS:
-        raise ValueError(
-            f"kind must be one of {sorted(KINDS)}; got {kind!r}"
-        )
+        raise ValueError(f"kind must be one of {sorted(KINDS)}; got {kind!r}")
     return kind
 
 
@@ -129,9 +122,7 @@ def _validate_source(source: object) -> str:
     if not isinstance(source, str):
         raise ValueError("source must be a string")
     if source not in VALID_SOURCES:
-        raise ValueError(
-            f"source must be one of {VALID_SOURCES}; got {source!r}"
-        )
+        raise ValueError(f"source must be one of {VALID_SOURCES}; got {source!r}")
     return source
 
 
@@ -186,9 +177,7 @@ def _validate_due_at(due_at: object) -> str | None:
     try:
         return timeutil.to_utc_iso(due_at)
     except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"due_at is not a valid ISO-8601 timestamp: {due_at!r}"
-        ) from exc
+        raise ValueError(f"due_at is not a valid ISO-8601 timestamp: {due_at!r}") from exc
 
 
 def is_overdue(task_due_at: str | None, now_iso: str) -> bool:
@@ -260,9 +249,7 @@ class TasksService:
 
         # Deadlines require a due date. Personal tasks can be date-less.
         if kind == "deadline" and due_at is None:
-            raise ValueError(
-                "deadlines require a due_at; pass an ISO-8601 timestamp"
-            )
+            raise ValueError("deadlines require a due_at; pass an ISO-8601 timestamp")
 
         task_id = uuid.uuid4().hex
         return self._store.create_task(
@@ -331,14 +318,9 @@ class TasksService:
         # (Only validate when the user actually changed kind or due_at;
         # otherwise trust the existing row.)
         resulting_kind = new_kind if new_kind is not None else existing.kind
-        resulting_due_at = (
-            new_due_at if new_due_at is not storage._UNSET
-            else existing.due_at
-        )
+        resulting_due_at = new_due_at if new_due_at is not storage._UNSET else existing.due_at
         if resulting_kind == "deadline" and resulting_due_at is None:
-            raise ValueError(
-                "deadlines require a due_at; pass an ISO-8601 timestamp"
-            )
+            raise ValueError("deadlines require a due_at; pass an ISO-8601 timestamp")
         return self._store.update_task(
             task_id,
             title=new_title,
@@ -382,7 +364,9 @@ class TasksService:
         else:
             completed_at = existing.completed_at
         return self._store.update_task(
-            task_id, status=status, completed_at=completed_at,
+            task_id,
+            status=status,
+            completed_at=completed_at,
         )
 
     def delete(self, task_id: str) -> bool:
@@ -415,6 +399,9 @@ class TasksService:
         if not isinstance(offset, int) or offset < 0:
             raise ValueError("offset must be a non-negative int")
         return self._store.list_tasks(
-            kind=kind, status=status, priority=priority,
-            limit=limit, offset=offset,
+            kind=kind,
+            status=status,
+            priority=priority,
+            limit=limit,
+            offset=offset,
         )

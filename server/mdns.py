@@ -11,6 +11,7 @@ Used by serve.py when ``AFTERWORD_MDNS_NAME`` is set. The LAN address is
 checked every few minutes, so the name follows a new address from the
 router.
 """
+
 from __future__ import annotations
 
 import logging
@@ -28,7 +29,7 @@ def lan_ip() -> str | None:
     is sent: connecting a UDP socket only picks the route)."""
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.connect(("192.0.2.1", 9))      # TEST-NET; never reached
+            s.connect(("192.0.2.1", 9))  # TEST-NET; never reached
             ip = s.getsockname()[0]
     except OSError:
         return None
@@ -41,16 +42,21 @@ def announce(name: str, port: int) -> threading.Thread | None:
     try:
         from zeroconf import IPVersion, ServiceInfo, Zeroconf
     except ImportError:
-        log.warning("AFTERWORD_MDNS_NAME is set but zeroconf isn't installed "
-                    "(pip install -r requirements.txt)")
+        log.warning(
+            "AFTERWORD_MDNS_NAME is set but zeroconf isn't installed "
+            "(pip install -r requirements.txt)"
+        )
         return None
     name = name.strip().lower().removesuffix(".local")
 
     def info_for(ip: str) -> ServiceInfo:
         return ServiceInfo(
-            "_http._tcp.local.", f"AfterWord ({name})._http._tcp.local.",
-            addresses=[socket.inet_aton(ip)], port=port,
-            server=f"{name}.local.", properties={"path": "/"},
+            "_http._tcp.local.",
+            f"AfterWord ({name})._http._tcp.local.",
+            addresses=[socket.inet_aton(ip)],
+            port=port,
+            server=f"{name}.local.",
+            properties={"path": "/"},
         )
 
     def run() -> None:
@@ -67,8 +73,12 @@ def announce(name: str, port: int) -> threading.Thread | None:
                         zc = Zeroconf(interfaces=[ip], ip_version=IPVersion.V4Only)
                         info = info_for(ip)
                         zc.register_service(info, allow_name_change=True)
-                        log.info("on the network as http://%s.local%s (%s)", name,
-                                 "" if port == 80 else f":{port}", ip)
+                        log.info(
+                            "on the network as http://%s.local%s (%s)",
+                            name,
+                            "" if port == 80 else f":{port}",
+                            ip,
+                        )
                 except Exception as exc:  # pragma: no cover  (try again later)
                     log.warning("network name: %r", exc)
                     zc, info, ip = None, None, None

@@ -5,6 +5,7 @@ Upcoming, No date) with High urgency first in a group, deadlines by week
 (Overdue, This week, Next week, Later) with a days-left tile. Done
 items close each list.
 """
+
 from __future__ import annotations
 
 import datetime as _dt
@@ -25,20 +26,29 @@ def _row(ctx: _Ctx, t) -> dict[str, Any]:
     prio = "high" if t.priority in ("high", "urgent") else (t.priority or "medium")
     days = (due.date() - ctx.today).days if due else None
     row = {
-        "id": t.id, "kind": t.kind, "title": t.title, "done": done,
-        "prio": prio, "prio_label": prio.capitalize(),
+        "id": t.id,
+        "kind": t.kind,
+        "title": t.title,
+        "done": done,
+        "prio": prio,
+        "prio_label": prio.capitalize(),
         "due": (("Late · " if late else "") + _due_label(due, ctx.today)) if due else "",
         "due_cls": "is-late" if late else ("is-today" if days == 0 and not done else ""),
         "due_date": f"{due:%Y-%m-%d}" if due else "",
         "due_time": "" if due is None or all_day else f"{due:%H:%M}",
-        "course_id": t.course_id or "", "course": ctx.course_name(t.course_id), "cc": ctx.cc(t.course_id),
+        "course_id": t.course_id or "",
+        "course": ctx.course_name(t.course_id),
+        "cc": ctx.cc(t.course_id),
         "said_in": _said_in(ctx, t),
-        "late": late, "days": days,
+        "late": late,
+        "days": days,
     }
     if t.kind == "deadline" and days is not None:
         # The days-left tile: "3 days", "1 day", "today", "2 late".
         row["tile_num"] = "" if days == 0 else abs(days)
-        row["tile_unit"] = "today" if days == 0 else ("late" if days < 0 else ("day" if days == 1 else "days"))
+        row["tile_unit"] = (
+            "today" if days == 0 else ("late" if days < 0 else ("day" if days == 1 else "days"))
+        )
     return row
 
 
@@ -84,7 +94,10 @@ def _list(ctx: _Ctx, kind: str) -> dict[str, Any]:
     done_tasks, done_total = svc.list(kind=kind, status="done", limit=DONE_SHOWN)
     rows = [_row(ctx, t) for t in open_tasks if kind == "task" or t.due_at]
     # Done: the most recently finished first.
-    done = [_row(ctx, t) for t in sorted(done_tasks, key=lambda t: t.completed_at or t.updated_at, reverse=True)]
+    done = [
+        _row(ctx, t)
+        for t in sorted(done_tasks, key=lambda t: t.completed_at or t.updated_at, reverse=True)
+    ]
     groups = _todo_groups(ctx, rows) if kind == "task" else _deadline_groups(ctx, rows)
     return {"groups": groups, "open": len(rows), "done": done, "done_total": done_total}
 

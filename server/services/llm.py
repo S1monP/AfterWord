@@ -21,6 +21,7 @@ Each provider takes an ``http_transport`` callable (or falls back
 to the stdlib ``urllib.request``) so tests can inject a fake
 transport without monkey-patching global state.
 """
+
 from __future__ import annotations
 
 import base64
@@ -46,6 +47,7 @@ log = logging.getLogger(__name__)
 @dataclass
 class Classification:
     """One kind + confidence pair from the classifier."""
+
     kind: str
     confidence: float
 
@@ -86,7 +88,9 @@ def _urllib_transport(
     imported in minimal test environments.
     """
     req = urllib.request.Request(
-        url, data=data, method="POST",
+        url,
+        data=data,
+        method="POST",
         headers=headers or {},
     )
     try:
@@ -144,6 +148,7 @@ class Summary:
 
 class LLMProvider:
     """Abstract provider. ``name`` is the short identifier for logging."""
+
     name: str = "base"
 
     def transcribe(self, audio_path: Path) -> str:
@@ -155,12 +160,17 @@ class LLMProvider:
         raise NotImplementedError
 
     def summarize(
-        self, transcript: str, kind: str | None = None,
+        self,
+        transcript: str,
+        kind: str | None = None,
     ) -> Summary:
         raise NotImplementedError
 
     def extract(
-        self, transcript: str, kind: str, recorded_at: str | None = None,
+        self,
+        transcript: str,
+        kind: str,
+        recorded_at: str | None = None,
     ) -> list[dict]:
         raise NotImplementedError
 
@@ -187,6 +197,7 @@ class _NoOpProvider(LLMProvider):
     raises :class:`LLMConfigError` because those endpoints
     don't have a sensible "no-op" shape.
     """
+
     name = "noop"
 
     def transcribe(self, audio_path: Path) -> str:
@@ -202,7 +213,9 @@ class _NoOpProvider(LLMProvider):
         return Classification(kind="other", confidence=0.0)
 
     def summarize(
-        self, transcript: str, kind: str | None = None,
+        self,
+        transcript: str,
+        kind: str | None = None,
     ) -> Summary:
         # Empty Summary so the pipeline persists an empty
         # summary artifact; the UI's "no summary yet" placeholder
@@ -213,7 +226,10 @@ class _NoOpProvider(LLMProvider):
         )
 
     def extract(
-        self, transcript: str, kind: str, recorded_at: str | None = None,
+        self,
+        transcript: str,
+        kind: str,
+        recorded_at: str | None = None,
     ) -> list[dict]:
         # Empty list so the pipeline persists an empty
         # extraction artifact. The UI can render "no
@@ -235,9 +251,7 @@ class _NoOpProvider(LLMProvider):
 # rendered as annotated dialogue lines; otherwise we fall back to
 # the plain text.
 
-OPENROUTER_TRANSCRIPTIONS_URL = (
-    "https://openrouter.ai/api/v1/audio/transcriptions"
-)
+OPENROUTER_TRANSCRIPTIONS_URL = "https://openrouter.ai/api/v1/audio/transcriptions"
 TRANSCRIPTION_MODEL = "microsoft/mai-transcribe-2"
 #: Env override for the transcription model (an OpenRouter slug).
 TRANSCRIPTION_MODEL_ENV = "AFTERWORD_TRANSCRIPTION_MODEL"
@@ -280,9 +294,7 @@ MAX_TRANSCRIBE_BODY_BYTES = 24 * 1024 * 1024
 #: Mirrors ``storage.RECORDING_KINDS`` and
 #: ``services.classification.VALID_KINDS``; kept here to avoid an
 #: import cycle.
-VALID_KINDS: frozenset[str] = frozenset(
-    {"lecture", "voice_memo", "meeting", "command", "other"}
-)
+VALID_KINDS: frozenset[str] = frozenset({"lecture", "voice_memo", "meeting", "command", "other"})
 
 
 def _build_multipart_body(
@@ -302,16 +314,15 @@ def _build_multipart_body(
     lines: list[bytes] = []
     for k, v in fields.items():
         lines.append(f"--{boundary}".encode("ascii"))
-        lines.append(
-            f'Content-Disposition: form-data; name="{k}"'.encode("ascii")
-        )
+        lines.append(f'Content-Disposition: form-data; name="{k}"'.encode("ascii"))
         lines.append(b"")
         lines.append(v.encode("utf-8"))
     # File part.
     lines.append(f"--{boundary}".encode("ascii"))
     lines.append(
-        f'Content-Disposition: form-data; name="{file_field}"; '
-        f'filename="{filename}"'.encode("ascii")
+        f'Content-Disposition: form-data; name="{file_field}"; filename="{filename}"'.encode(
+            "ascii"
+        )
     )
     lines.append(f"Content-Type: {content_type}".encode("ascii"))
     lines.append(b"")
@@ -362,8 +373,7 @@ def _segments_to_transcript(
     Returns ``""`` when no segment has usable text.
     """
     has_speakers = any(
-        isinstance(s, dict)
-        and (s.get("speaker") is not None or s.get("speaker_label"))
+        isinstance(s, dict) and (s.get("speaker") is not None or s.get("speaker_label"))
         for s in segments
     )
     lines: list[str] = []
@@ -405,15 +415,19 @@ def parse_transcript_lines(text: str | None) -> list[dict]:
             continue
         m = _TRANSCRIPT_LINE.match(line)
         if not m:
-            out.append({"t": None, "stamp": None, "speaker": None,
-                        "text": line.strip()})
+            out.append({"t": None, "stamp": None, "speaker": None, "text": line.strip()})
             continue
         seconds = 0
         for part in m.group("stamp").split(":"):
             seconds = seconds * 60 + int(part)
-        out.append({"t": seconds, "stamp": m.group("stamp"),
-                    "speaker": m.group("speaker"),
-                    "text": m.group("text").strip()})
+        out.append(
+            {
+                "t": seconds,
+                "stamp": m.group("stamp"),
+                "speaker": m.group("speaker"),
+                "text": m.group("text").strip(),
+            }
+        )
     return out
 
 
@@ -472,25 +486,22 @@ class TranscriptionProvider(LLMProvider):
         http_transport: HttpTransport | None = None,
     ) -> None:
         if not api_key:
-            raise LLMConfigError(
-                "TranscriptionProvider requires AFTERWORD_TRANSCRIPTION_API_KEY"
-            )
+            raise LLMConfigError("TranscriptionProvider requires AFTERWORD_TRANSCRIPTION_API_KEY")
         self._api_key = api_key
         self._model = (
-            model or os.environ.get(TRANSCRIPTION_MODEL_ENV, "").strip()
-            or TRANSCRIPTION_MODEL
+            model or os.environ.get(TRANSCRIPTION_MODEL_ENV, "").strip() or TRANSCRIPTION_MODEL
         )
         self.name = self._model
         self._annotate_speakers = (
-            _speakers_enabled()
-            if annotate_speakers is None
-            else bool(annotate_speakers)
+            _speakers_enabled() if annotate_speakers is None else bool(annotate_speakers)
         )
         self._chunk_max_seconds = (
-            float(_read_env_int(
-                TRANSCRIBE_CHUNK_SECONDS_ENV,
-                DEFAULT_TRANSCRIBE_CHUNK_SECONDS,
-            ))
+            float(
+                _read_env_int(
+                    TRANSCRIBE_CHUNK_SECONDS_ENV,
+                    DEFAULT_TRANSCRIBE_CHUNK_SECONDS,
+                )
+            )
             if chunk_max_seconds is None
             else float(chunk_max_seconds)
         )
@@ -510,9 +521,7 @@ class TranscriptionProvider(LLMProvider):
         self._provider_options = provider_options
         # ffmpeg path for segmentation/cutting; same env var the app
         # config uses so one setting covers both.
-        self._ffmpeg_path = (
-            ffmpeg_path or os.environ.get("AFTERWORD_FFMPEG_PATH", "ffmpeg")
-        )
+        self._ffmpeg_path = ffmpeg_path or os.environ.get("AFTERWORD_FFMPEG_PATH", "ffmpeg")
         self._ffmpeg_ok: bool | None = None
         self._http = http_transport or _urllib_transport
 
@@ -533,17 +542,21 @@ class TranscriptionProvider(LLMProvider):
             text_parts: list[str] = []
             all_had_segments = True
             for piece_no, (piece_path, offset) in enumerate(
-                pieces, start=1,
+                pieces,
+                start=1,
             ):
                 if total > 1:
                     # Progress in the log: a long multi-piece run is
                     # completely silent otherwise (the dev server
                     # only logs the HTTP request once it completes),
                     # which makes it look hung.
-                    log.info("transcribing: piece %d/%d (starts at %d s)",
-                             piece_no, total, int(offset))
+                    log.info(
+                        "transcribing: piece %d/%d (starts at %d s)", piece_no, total, int(offset)
+                    )
                 had, segs, texts = self._transcribe_piece(
-                    piece_path, offset, tmp_dir,
+                    piece_path,
+                    offset,
+                    tmp_dir,
                 )
                 all_had_segments = all_had_segments and had
                 seg_parts.extend(segs)
@@ -552,7 +565,8 @@ class TranscriptionProvider(LLMProvider):
                 log.info("transcribing: merged %d piece(s)", total)
             if all_had_segments and seg_parts:
                 rendered = _segments_to_transcript(
-                    seg_parts, annotate_speakers=self._annotate_speakers,
+                    seg_parts,
+                    annotate_speakers=self._annotate_speakers,
                 )
                 if rendered:
                     return rendered
@@ -561,7 +575,9 @@ class TranscriptionProvider(LLMProvider):
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
     def _post_transcription(
-        self, audio_path: Path, audio_format: str | None = None,
+        self,
+        audio_path: Path,
+        audio_format: str | None = None,
     ) -> bytes:
         """POST one audio piece and return the raw response body.
 
@@ -574,6 +590,7 @@ class TranscriptionProvider(LLMProvider):
         """
         if audio_format is None:
             from services import transcode as _tx
+
             fmt = _tx.sniff_format(audio_path).kind
             audio_format = fmt if fmt != "unknown" else "aac"
         content = audio_path.read_bytes()
@@ -605,18 +622,21 @@ class TranscriptionProvider(LLMProvider):
         status, raw = self._http(
             OPENROUTER_TRANSCRIPTIONS_URL,
             data=body,
-            headers=headers, timeout=120.0,
+            headers=headers,
+            timeout=120.0,
         )
         if status < 200 or status >= 300:
             raise LLMHTTPError(
-                status, raw,
-                f"OpenRouter transcription failed: HTTP {status}: "
-                f"{raw[:200]!r}",
+                status,
+                raw,
+                f"OpenRouter transcription failed: HTTP {status}: {raw[:200]!r}",
             )
         return raw
 
     def _extract_chunk(
-        self, raw: bytes, offset: float,
+        self,
+        raw: bytes,
+        offset: float,
     ) -> tuple[list[dict] | None, str | None]:
         """Parse one transcription response.
 
@@ -672,13 +692,16 @@ class TranscriptionProvider(LLMProvider):
         works anyway).
         """
         from services import transcode as _tx
+
         d = _tx.decode_duration(path, ffmpeg_path=self._ffmpeg_path)
         if d is not None:
             return d
         return _tx.probe_duration(path, ffmpeg_path=self._ffmpeg_path)
 
     def _segment_audio(
-        self, audio_path: Path, work_dir: Path,
+        self,
+        audio_path: Path,
+        work_dir: Path,
     ) -> list[tuple[Path, float]]:
         """Split a long recording into ≤``chunk_max_seconds`` pieces.
 
@@ -701,13 +724,23 @@ class TranscriptionProvider(LLMProvider):
             return [(audio_path, 0.0)]
         list_path = Path(work_dir) / "pieces.csv"
         cmd = [
-            self._ffmpeg_path, "-y", "-hide_banner", "-loglevel", "error",
-            "-i", str(audio_path),
-            "-f", "segment",
-            "-segment_time", str(int(self._chunk_max_seconds)),
-            "-c", "copy",
-            "-segment_list", str(list_path),
-            "-segment_list_type", "csv",
+            self._ffmpeg_path,
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(audio_path),
+            "-f",
+            "segment",
+            "-segment_time",
+            str(int(self._chunk_max_seconds)),
+            "-c",
+            "copy",
+            "-segment_list",
+            str(list_path),
+            "-segment_list_type",
+            "csv",
             str(Path(work_dir) / "piece_%04d.aac"),
         ]
         try:
@@ -715,9 +748,15 @@ class TranscriptionProvider(LLMProvider):
         except OSError as exc:
             raise LLMError(f"ffmpeg segmentation failed: {exc}") from exc
         if result.returncode != 0:
-            stderr = (result.stderr or b"").decode(
-                "utf-8", errors="replace",
-            ).strip().splitlines()
+            stderr = (
+                (result.stderr or b"")
+                .decode(
+                    "utf-8",
+                    errors="replace",
+                )
+                .strip()
+                .splitlines()
+            )
             raise LLMError(
                 "ffmpeg segmentation failed: "
                 + (stderr[-1] if stderr else f"exit {result.returncode}")
@@ -745,8 +784,13 @@ class TranscriptionProvider(LLMProvider):
         return pieces
 
     def _cut_piece(
-        self, src: Path, start: float, duration: float,
-        out_dir: Path, depth: int, idx: int,
+        self,
+        src: Path,
+        start: float,
+        duration: float,
+        out_dir: Path,
+        depth: int,
+        idx: int,
     ) -> Path:
         """Stream-copy ``[start, start+duration)`` of ``src`` to a
         new audio file for the halving retry.
@@ -759,10 +803,19 @@ class TranscriptionProvider(LLMProvider):
         suffix = src.suffix if src.suffix else ".aac"
         out = Path(out_dir) / f"cut_{depth}_{idx}_{int(start * 1000)}{suffix}"
         cmd = [
-            self._ffmpeg_path, "-y", "-hide_banner", "-loglevel", "error",
-            "-ss", f"{start:.3f}", "-i", str(src),
-            "-t", f"{duration:.3f}",
-            "-c", "copy",
+            self._ffmpeg_path,
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-ss",
+            f"{start:.3f}",
+            "-i",
+            str(src),
+            "-t",
+            f"{duration:.3f}",
+            "-c",
+            "copy",
             str(out),
         ]
         try:
@@ -770,13 +823,13 @@ class TranscriptionProvider(LLMProvider):
         except OSError as exc:
             raise LLMError(f"ffmpeg cut failed: {exc}") from exc
         if result.returncode != 0 or not out.exists():
-            raise LLMError(
-                f"ffmpeg cut failed: exit {result.returncode}"
-            )
+            raise LLMError(f"ffmpeg cut failed: exit {result.returncode}")
         return out
 
     def _stt_audio(
-        self, piece_path: Path, mp3: Path,
+        self,
+        piece_path: Path,
+        mp3: Path,
     ) -> tuple[Path, str | None]:
         """The file and format label to send for one piece.
 
@@ -790,9 +843,12 @@ class TranscriptionProvider(LLMProvider):
         if not self._probe_ffmpeg():
             return piece_path, None
         from services import transcode as _tx
+
         try:
             _tx.transcode_for_stt(
-                piece_path, mp3, ffmpeg_path=self._ffmpeg_path,
+                piece_path,
+                mp3,
+                ffmpeg_path=self._ffmpeg_path,
             )
         except _tx.TranscodeError:
             return piece_path, None
@@ -829,10 +885,12 @@ class TranscriptionProvider(LLMProvider):
         failing the whole recording.
         """
         try:
-            raw = self._post_transcription(*self._stt_audio(
-                piece_path,
-                Path(work_dir) / f"stt-{depth}-{int(offset * 1000)}.mp3",
-            ))
+            raw = self._post_transcription(
+                *self._stt_audio(
+                    piece_path,
+                    Path(work_dir) / f"stt-{depth}-{int(offset * 1000)}.mp3",
+                )
+            )
         except (LLMError, urllib.error.URLError, OSError) as exc:
             duration = self._probe_duration(piece_path)
             if (
@@ -842,26 +900,31 @@ class TranscriptionProvider(LLMProvider):
                 and self._probe_ffmpeg()
                 and self._is_transient_failure(exc)
             ):
-                log.warning("transcribing: piece failed (%s); cutting it in "
-                            "half and retrying", exc)
+                log.warning("transcribing: piece failed (%s); cutting it in half and retrying", exc)
                 # Sub-pieces go into their own directory so retry
                 # generations never overwrite each other's files.
-                sub_dir = Path(work_dir) / (
-                    f"retry-{depth}-{int(offset * 1000)}"
-                )
+                sub_dir = Path(work_dir) / (f"retry-{depth}-{int(offset * 1000)}")
                 sub_dir.mkdir(parents=True, exist_ok=True)
                 half = duration / 2.0
                 had_all = True
                 segs: list[dict] = []
                 texts: list[str] = []
                 for idx, (start, dur) in enumerate(
-                    ((0.0, half), (half, duration - half)), start=1,
+                    ((0.0, half), (half, duration - half)),
+                    start=1,
                 ):
                     sub_path = self._cut_piece(
-                        piece_path, start, dur, sub_dir, depth, idx,
+                        piece_path,
+                        start,
+                        dur,
+                        sub_dir,
+                        depth,
+                        idx,
                     )
                     h, s, t = self._transcribe_piece(
-                        sub_path, offset + start, work_dir,
+                        sub_path,
+                        offset + start,
+                        work_dir,
                         depth=depth + 1,
                     )
                     had_all = had_all and h
@@ -870,32 +933,32 @@ class TranscriptionProvider(LLMProvider):
                 return (had_all, segs, texts)
             raise
         segments, text = self._extract_chunk(raw, offset)
-        texts = (
-            [text] if isinstance(text, str) and text.strip() else []
-        )
+        texts = [text] if isinstance(text, str) and text.strip() else []
         return (segments is not None, segments or [], texts)
 
     # The transcription model only transcribes; raise for clarity.
     def classify(self, transcript: str) -> Classification:
         raise LLMConfigError(
-            "TranscriptionProvider only transcribes; use "
-            "TextProvider for classification"
+            "TranscriptionProvider only transcribes; use TextProvider for classification"
         )
 
     def summarize(
-        self, transcript: str, kind: str | None = None,
+        self,
+        transcript: str,
+        kind: str | None = None,
     ) -> Summary:
         raise LLMConfigError(
-            "TranscriptionProvider only transcribes; use "
-            "TextProvider for summarisation"
+            "TranscriptionProvider only transcribes; use TextProvider for summarisation"
         )
 
     def extract(
-        self, transcript: str, kind: str, recorded_at: str | None = None,
+        self,
+        transcript: str,
+        kind: str,
+        recorded_at: str | None = None,
     ) -> list[dict]:
         raise LLMConfigError(
-            "TranscriptionProvider only transcribes; use "
-            "TextProvider for extraction"
+            "TranscriptionProvider only transcribes; use TextProvider for extraction"
         )
 
 
@@ -936,17 +999,14 @@ _CLASSIFY_SYSTEM_PROMPT = (
     "live; not a video), "
     '"command" (the whole recording is only a request to add a '
     "to-do, deadline or calendar entry, or to be reminded of something, "
-    'e.g. \"remind me to call the dentist on Friday\"; if it also has '
-    'other notes or thoughts, it is a voice_memo), '
+    'e.g. "remind me to call the dentist on Friday"; if it also has '
+    "other notes or thoughts, it is a voice_memo), "
     '"other" (none of the above, including a video, podcast, stream or '
     "broadcast playing in the background: a channel intro or asking to "
-    'like or subscribe gives it away).\n\n'
+    "like or subscribe gives it away).\n\n"
     '"confidence" is your own 0..1 estimate; use 0.0 when you are '
     "guessing and 1.0 when you are certain."
 )
-
-
-
 
 
 # --- Map-reduce for long transcripts (M9.1) -----------------------------
@@ -974,7 +1034,9 @@ _CHUNK_OVERLAP = 1_000
 
 
 def _chunk_text(
-    text: str, *, chunk_size: int = _CHUNK_SIZE,
+    text: str,
+    *,
+    chunk_size: int = _CHUNK_SIZE,
     overlap: int = _CHUNK_OVERLAP,
 ) -> list[str]:
     """Split ``text`` into overlapping chunks of ``chunk_size`` chars.
@@ -997,8 +1059,7 @@ def _chunk_text(
         return [text]
     if overlap >= chunk_size:
         raise ValueError(
-            f"chunk overlap ({overlap}) must be smaller than "
-            f"chunk_size ({chunk_size})"
+            f"chunk overlap ({overlap}) must be smaller than chunk_size ({chunk_size})"
         )
     chunks: list[str] = []
     start = 0
@@ -1015,7 +1076,8 @@ def _chunk_text(
 # Map step for long recordings: notes on one part of the transcript,
 # with a heading. The synthesis step merges them into sections.
 def _section_notes_prompt(
-    kind: str | None, language: str | None = None,
+    kind: str | None,
+    language: str | None = None,
 ) -> str:
     return (
         "You write notes on ONE part of a longer audio transcript. "
@@ -1029,17 +1091,19 @@ def _section_notes_prompt(
         "- 'key_points' is a list of 0-5 short bullet points (each "
         "under 20 words) FROM THIS PART.\n\n"
         + _KIND_GUIDE.get(kind or "other", _KIND_GUIDE["other"])
-        + "\n\n" + _language_rule(language)
+        + "\n\n"
+        + _language_rule(language)
         + "\n\nIf the part is empty, repetitive, or has no useful "
-        "content, return {\"heading\": \"\", \"text\": \"\", "
-        "\"key_points\": []}."
+        'content, return {"heading": "", "text": "", '
+        '"key_points": []}.'
     )
 
 
 # Synthesis step: merges the notes on each part into one summary
 # without shortening them back down to a few sentences.
 def _synthesis_prompt(
-    kind: str | None, transcript_chars: int,
+    kind: str | None,
+    transcript_chars: int,
     language: str | None = None,
 ) -> str:
     return (
@@ -1052,8 +1116,8 @@ def _synthesis_prompt(
         "specifics from the notes; do not reduce them to one-line "
         "mentions. Do not refer to 'parts' or 'notes'.\n\n"
         "If the notes are empty, return "
-        "{\"text\": \"no content\", \"sections\": [], "
-        "\"key_points\": []}."
+        '{"text": "no content", "sections": [], '
+        '"key_points": []}.'
     )
 
 
@@ -1077,8 +1141,8 @@ _FILING_RULES = (
     "Three types are copied into the user's to-do list, deadlines and "
     "calendar, so use them precisely and sparingly. Only concrete "
     "commitments: something a listener is asked or agrees to do, or a "
-    "date they have to keep. Never general advice or tips (\"always "
-    "check the contract\"), opinions, or requests to like, subscribe or "
+    'date they have to keep. Never general advice or tips ("always '
+    'check the contract"), opinions, or requests to like, subscribe or '
     "comment.\n"
     "- 'deadline': something to hand in, finish or sit by a date "
     "(assignment due, application closes, an exam with a date but no "
@@ -1089,10 +1153,10 @@ _FILING_RULES = (
     "'other'.\n"
     "- 'action_item': something someone has to do. Give 'due' if a date "
     "is said. If it is clearly one named person's job, start the text "
-    "with their name and a colon (\"Anna: get three shelf quotes\").\n"
+    'with their name and a colon ("Anna: get three shelf quotes").\n'
     "'due', 'start' and 'end' are local time: 'YYYY-MM-DD', or "
     "'YYYY-MM-DDTHH:MM' only when a clock time is said. Work out relative dates "
-    "(\"next Friday\", \"in two weeks\") from the recording date given "
+    '("next Friday", "in two weeks") from the recording date given '
     "with the transcript. Leave a field out when no date is said or it "
     "is unclear; never guess one.\n"
     "Each thing appears once: never as both a 'deadline' and an "
@@ -1101,7 +1165,7 @@ _FILING_RULES = (
     "Give every item 'at': the nearest [MM:SS] or [H:MM:SS] marker before "
     "it in the transcript, if there are markers.\n"
     "Write each 'text' as a short line that makes sense on its own in a "
-    "to-do list (\"Submit lab report 3\", \"Thermodynamics exam\")."
+    'to-do list ("Submit lab report 3", "Thermodynamics exam").'
 )
 
 
@@ -1112,13 +1176,13 @@ def _recorded_line(recorded_at: str | None) -> str:
     if not recorded_at:
         return ""
     import datetime as _dt
+
     try:
         day = _dt.datetime.strptime(recorded_at, "%A %d %B %Y, %H:%M").date()
     except ValueError:
         return f"Recorded: {recorded_at}\n"
     days = ", ".join(
-        f"{d:%a} {d:%Y-%m-%d}"
-        for d in (day + _dt.timedelta(days=i) for i in range(1, 15))
+        f"{d:%a} {d:%Y-%m-%d}" for d in (day + _dt.timedelta(days=i) for i in range(1, 15))
     )
     return f"Recorded: {recorded_at}\nThe next 14 days: {days}\n"
 
@@ -1137,8 +1201,7 @@ _EXTRACT_SECTION_PROMPT = (
     + _KIND_ITEMS
     + "Aim for 3-10 items. Only include items that are clearly supported "
     "by THIS SECTION; do not invent. If the section has no relevant "
-    "items, return {\"items\": []}.\n\n"
-    + _FILING_RULES
+    'items, return {"items": []}.\n\n' + _FILING_RULES
 )
 
 
@@ -1162,8 +1225,10 @@ def _summarise_one_chunk(
     )
     try:
         message = provider._chat(
-            _section_notes_prompt(kind, language), user_prompt,
-            timeout=_SUMMARY_TIMEOUT, max_chars=_CHUNK_SIZE,
+            _section_notes_prompt(kind, language),
+            user_prompt,
+            timeout=_SUMMARY_TIMEOUT,
+            max_chars=_CHUNK_SIZE,
         )
         raw = message.encode("utf-8")
         heading = _load_json_object(raw, "summary").get("heading")
@@ -1204,8 +1269,10 @@ def _synthesise_summaries(
         f"{formatted}"
     )
     message = provider._chat(
-        _synthesis_prompt(kind, transcript_chars, language), user_prompt,
-        timeout=_SUMMARY_TIMEOUT, max_chars=_SYNTHESIS_MAX_CHARS,
+        _synthesis_prompt(kind, transcript_chars, language),
+        user_prompt,
+        timeout=_SUMMARY_TIMEOUT,
+        max_chars=_SYNTHESIS_MAX_CHARS,
     )
     return _parse_summarise_response(message.encode("utf-8"))
 
@@ -1235,7 +1302,8 @@ def _extract_one_chunk(
         message = provider._chat(
             _EXTRACT_SECTION_PROMPT + "\n\n" + _language_rule(language),
             user_prompt,
-            timeout=_SUMMARY_TIMEOUT, max_chars=_CHUNK_SIZE,
+            timeout=_SUMMARY_TIMEOUT,
+            max_chars=_CHUNK_SIZE,
         )
         return _parse_extract_response(message.encode("utf-8"))
     except LLMError:
@@ -1271,7 +1339,6 @@ def _dedupe_items(items: list[dict]) -> list[dict]:
     return out
 
 
-
 def _parse_classify_response(raw: bytes) -> Classification:
     """Parse the raw HTTP body of a classify call.
 
@@ -1291,36 +1358,24 @@ def _parse_classify_response(raw: bytes) -> Classification:
     start = text.find("{")
     end = text.rfind("}")
     if start == -1 or end == -1 or end <= start:
-        raise LLMError(
-            f"classifier response has no JSON object: {text[:200]!r}"
-        )
-    candidate = text[start:end + 1]
+        raise LLMError(f"classifier response has no JSON object: {text[:200]!r}")
+    candidate = text[start : end + 1]
     try:
         obj = json.loads(candidate)
     except ValueError as exc:
-        raise LLMError(
-            f"classifier response is not valid JSON: {candidate[:200]!r}"
-        ) from exc
+        raise LLMError(f"classifier response is not valid JSON: {candidate[:200]!r}") from exc
     if not isinstance(obj, dict):
-        raise LLMError(
-            f"classifier response is not a JSON object: {candidate[:200]!r}"
-        )
+        raise LLMError(f"classifier response is not a JSON object: {candidate[:200]!r}")
     kind = obj.get("kind")
     confidence = obj.get("confidence")
     if kind not in VALID_KINDS:
-        raise LLMError(
-            f"classifier returned an unknown kind: {kind!r}"
-        )
+        raise LLMError(f"classifier returned an unknown kind: {kind!r}")
     try:
         confidence_f = float(confidence)  # type: ignore[arg-type]
     except (TypeError, ValueError) as exc:
-        raise LLMError(
-            f"classifier returned non-numeric confidence: {confidence!r}"
-        ) from exc
+        raise LLMError(f"classifier returned non-numeric confidence: {confidence!r}") from exc
     if not (0.0 <= confidence_f <= 1.0):
-        raise LLMError(
-            f"classifier confidence out of range [0, 1]: {confidence_f}"
-        )
+        raise LLMError(f"classifier confidence out of range [0, 1]: {confidence_f}")
     return Classification(kind=kind, confidence=confidence_f)
 
 
@@ -1336,10 +1391,8 @@ def _parse_classify_response(raw: bytes) -> Classification:
 _SUMMARY_BANDS: list[tuple[float, str, str, str]] = [
     (3_000, "1-3 sentences", "", "0-3"),
     (12_000, "2-4 sentences", "0-4 sections of 1-3 sentences each", "3-6"),
-    (48_000, "3-5 sentences",
-     "3-6 sections of about 50-100 words each", "5-10"),
-    (float("inf"), "4-6 sentences",
-     "5-10 sections of about 60-120 words each", "8-15"),
+    (48_000, "3-5 sentences", "3-6 sections of about 50-100 words each", "5-10"),
+    (float("inf"), "4-6 sentences", "5-10 sections of about 60-120 words each", "8-15"),
 ]
 
 # How each kind of recording is structured.
@@ -1362,10 +1415,7 @@ _KIND_GUIDE: dict[str, str] = {
         "This is a personal voice memo. Stay close to what was said. "
         "Use sections only if it covers several separate subjects."
     ),
-    "other": (
-        "Use sections only if the recording covers several separate "
-        "subjects."
-    ),
+    "other": ("Use sections only if the recording covers several separate subjects."),
 }
 
 #: Env: languages a summary is written in when the recording is in
@@ -1409,7 +1459,7 @@ _DETECT_LANGUAGE_PROMPT = (
     "Identify the main language spoken in this transcript. Reply with "
     "ONLY a JSON object (no prose, no markdown fences) with one key, "
     "'language': the language's English name, e.g. \"English\", "
-    "\"Russian\", \"German\"."
+    '"Russian", "German".'
 )
 # Enough of the transcript to tell its language.
 _DETECT_LANGUAGE_CHARS = 3_000
@@ -1423,27 +1473,27 @@ _SYNTHESIS_MAX_CHARS = 60_000
 
 
 def _summary_shape(
-    kind: str | None, transcript_chars: int,
+    kind: str | None,
+    transcript_chars: int,
     language: str | None = None,
 ) -> str:
     """The JSON shape, length and structure rules for a summary."""
     overview, sections, points = next(
-        (o, sec, kp) for limit, o, sec, kp in _SUMMARY_BANDS
-        if transcript_chars <= limit
+        (o, sec, kp) for limit, o, sec, kp in _SUMMARY_BANDS if transcript_chars <= limit
     )
     sections_rule = (
         f"- 'sections' is a list of {sections}, in the order they came "
         "up. Each is an object with 'heading' (a short title, under 8 "
         "words) and 'text' (plain prose, no bullet points).\n"
-        if sections else
-        "- 'sections' is an empty list: the recording is short.\n"
+        if sections
+        else "- 'sections' is an empty list: the recording is short.\n"
     )
     return (
         "Reply with ONLY a JSON object (no prose, no markdown fences) "
         "with exactly four keys: 'title', 'text', 'sections' and "
         "'key_points'.\n\n"
         "- 'title' names what the recording is about in 2-7 words, like "
-        "a note's title (\"Entropy and the second law\"). No date, no "
+        'a note\'s title ("Entropy and the second law"). No date, no '
         "quotes, no 'Lecture on' or 'Meeting about'.\n"
         f"- 'text' is an overview of the whole recording in {overview}.\n"
         + sections_rule
@@ -1454,18 +1504,19 @@ def _summary_shape(
         "These lengths are upper limits: if the recording has little "
         "content, write less. Never pad.\n\n"
         + _KIND_GUIDE.get(kind or "other", _KIND_GUIDE["other"])
-        + "\n\n" + _language_rule(language)
+        + "\n\n"
+        + _language_rule(language)
     )
 
 
 def _summarise_prompt(
-    kind: str | None, transcript_chars: int,
+    kind: str | None,
+    transcript_chars: int,
     language: str | None = None,
 ) -> str:
     return (
         "You are a personal-note summariser. Given an audio transcript, "
-        "produce a summary.\n\n"
-        + _summary_shape(kind, transcript_chars, language)
+        "produce a summary.\n\n" + _summary_shape(kind, transcript_chars, language)
     )
 
 
@@ -1482,20 +1533,14 @@ def _load_json_object(raw: bytes, what: str) -> dict:
     start = text.find("{")
     end = text.rfind("}")
     if start == -1 or end == -1 or end <= start:
-        raise LLMError(
-            f"{what} response has no JSON object: {text[:200]!r}"
-        )
-    candidate = text[start:end + 1]
+        raise LLMError(f"{what} response has no JSON object: {text[:200]!r}")
+    candidate = text[start : end + 1]
     try:
         obj = json.loads(candidate)
     except ValueError as exc:
-        raise LLMError(
-            f"{what} response is not valid JSON: {candidate[:200]!r}"
-        ) from exc
+        raise LLMError(f"{what} response is not valid JSON: {candidate[:200]!r}") from exc
     if not isinstance(obj, dict):
-        raise LLMError(
-            f"{what} response is not a JSON object: {candidate[:200]!r}"
-        )
+        raise LLMError(f"{what} response is not a JSON object: {candidate[:200]!r}")
     return obj
 
 
@@ -1509,10 +1554,12 @@ def _parse_sections(raw_sections: object) -> list[dict]:
             continue
         heading, body = sec.get("heading"), sec.get("text")
         if isinstance(body, str) and body.strip():
-            out.append({
-                "heading": heading.strip() if isinstance(heading, str) else "",
-                "text": body.strip(),
-            })
+            out.append(
+                {
+                    "heading": heading.strip() if isinstance(heading, str) else "",
+                    "text": body.strip(),
+                }
+            )
     return out
 
 
@@ -1526,17 +1573,14 @@ def _parse_summarise_response(raw: bytes) -> Summary:
     obj = _load_json_object(raw, "summary")
     text_summary = obj.get("text", "")
     if not isinstance(text_summary, str):
-        raise LLMError(
-            f"summary 'text' is not a string: {text_summary!r}"
-        )
+        raise LLMError(f"summary 'text' is not a string: {text_summary!r}")
     raw_points = obj.get("key_points", [])
     if not isinstance(raw_points, list):
-        raise LLMError(
-            f"summary 'key_points' is not a list: {raw_points!r}"
-        )
+        raise LLMError(f"summary 'key_points' is not a list: {raw_points!r}")
     key_points = [str(p) for p in raw_points]
     return Summary(
-        text=text_summary.strip(), key_points=key_points,
+        text=text_summary.strip(),
+        key_points=key_points,
         sections=_parse_sections(obj.get("sections")),
         title=_clean_title(obj.get("title")),
     )
@@ -1553,7 +1597,7 @@ def _clean_title(raw: object) -> str:
 _TITLE_PROMPT = (
     "Name this voice memo. Reply with ONLY a JSON object (no prose, no "
     "markdown fences) with one key, 'title': 2-7 words saying what the "
-    "memo is about, like a note's title (\"Ideas for the cabin trip\"). "
+    'memo is about, like a note\'s title ("Ideas for the cabin trip"). '
     "No date, no quotes."
 )
 
@@ -1577,8 +1621,7 @@ _EXTRACT_SYSTEM_PROMPT = (
     "'text' (the item's content).\n\n"
     + _KIND_ITEMS
     + "Aim for 3-10 items. Only include items that are clearly supported "
-    "by the transcript; do not invent.\n\n"
-    + _FILING_RULES
+    "by the transcript; do not invent.\n\n" + _FILING_RULES
 )
 
 
@@ -1600,35 +1643,23 @@ def _parse_extract_response(raw: bytes) -> list[dict]:
     start = text.find("{")
     end = text.rfind("}")
     if start == -1 or end == -1 or end <= start:
-        raise LLMError(
-            f"extraction response has no JSON object: {text[:200]!r}"
-        )
-    candidate = text[start:end + 1]
+        raise LLMError(f"extraction response has no JSON object: {text[:200]!r}")
+    candidate = text[start : end + 1]
     try:
         obj = json.loads(candidate)
     except ValueError as exc:
-        raise LLMError(
-            f"extraction response is not valid JSON: {candidate[:200]!r}"
-        ) from exc
+        raise LLMError(f"extraction response is not valid JSON: {candidate[:200]!r}") from exc
     if not isinstance(obj, dict):
-        raise LLMError(
-            f"extraction response is not a JSON object: {candidate[:200]!r}"
-        )
+        raise LLMError(f"extraction response is not a JSON object: {candidate[:200]!r}")
     raw_items = obj.get("items", [])
     if not isinstance(raw_items, list):
-        raise LLMError(
-            f"extraction 'items' is not a list: {raw_items!r}"
-        )
+        raise LLMError(f"extraction 'items' is not a list: {raw_items!r}")
     out: list[dict] = []
     for i, item in enumerate(raw_items):
         if not isinstance(item, dict):
-            raise LLMError(
-                f"extraction item {i} is not a dict: {item!r}"
-            )
+            raise LLMError(f"extraction item {i} is not a dict: {item!r}")
         if "type" not in item or "text" not in item:
-            raise LLMError(
-                f"extraction item {i} missing 'type' or 'text': {item!r}"
-            )
+            raise LLMError(f"extraction item {i} missing 'type' or 'text': {item!r}")
         # Coerce text to a string; keep other keys verbatim so callers
         # can extend the schema (e.g. add a 'due' field for deadlines).
         normalised = dict(item)
@@ -1659,18 +1690,12 @@ class TextProvider(LLMProvider):
         http_transport: HttpTransport | None = None,
     ) -> None:
         if not api_key:
-            raise LLMConfigError(
-                "TextProvider requires AFTERWORD_TEXT_API_KEY"
-            )
+            raise LLMConfigError("TextProvider requires AFTERWORD_TEXT_API_KEY")
         self._api_key = api_key
-        self._model = (
-            model or os.environ.get(TEXT_MODEL_ENV, "").strip() or TEXT_MODEL
-        )
+        self._model = model or os.environ.get(TEXT_MODEL_ENV, "").strip() or TEXT_MODEL
         self.name = self._model
         base = os.environ.get(TEXT_BASE_URL_ENV, "").strip().rstrip("/")
-        self._chat_url = chat_url or (
-            f"{base}/chat/completions" if base else OPENROUTER_CHAT_URL
-        )
+        self._chat_url = chat_url or (f"{base}/chat/completions" if base else OPENROUTER_CHAT_URL)
         # Output language per transcript, so summarise and extract
         # detect it once between them.
         self._languages: dict[int, str] = {}
@@ -1689,16 +1714,13 @@ class TextProvider(LLMProvider):
             max_chars=12_000,
         )
         if not isinstance(message, str):
-            raise LLMError(
-                f"Text model response message is not a string: {message!r}"
-            )
+            raise LLMError(f"Text model response message is not a string: {message!r}")
         return _parse_classify_response(message.encode("utf-8"))
 
     # The text model is not a transcription model; raise for clarity.
     def transcribe(self, audio_path: Path) -> str:
         raise LLMConfigError(
-            "TextProvider is not a transcription model; use "
-            "TranscriptionProvider for transcription"
+            "TextProvider is not a transcription model; use TranscriptionProvider for transcription"
         )
 
     def _chat(
@@ -1735,26 +1757,26 @@ class TextProvider(LLMProvider):
             "Content-Type": "application/json",
         }
         status, raw = self._http(
-            self._chat_url, data=body, headers=headers, timeout=timeout,
+            self._chat_url,
+            data=body,
+            headers=headers,
+            timeout=timeout,
         )
         if status < 200 or status >= 300:
             raise LLMHTTPError(
-                status, raw,
-                f"Text model chat call failed: HTTP {status}: "
-                f"{raw[:200]!r}",
+                status,
+                raw,
+                f"Text model chat call failed: HTTP {status}: {raw[:200]!r}",
             )
         try:
             payload_resp = json.loads(raw.decode("utf-8"))
         except (ValueError, UnicodeDecodeError) as exc:
-            raise LLMError(
-                f"Text model returned non-JSON body: {raw[:200]!r}"
-            ) from exc
+            raise LLMError(f"Text model returned non-JSON body: {raw[:200]!r}") from exc
         try:
             content = payload_resp["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
             raise LLMError(
-                f"Text model response missing choices[0].message.content: "
-                f"{raw[:200]!r}"
+                f"Text model response missing choices[0].message.content: {raw[:200]!r}"
             ) from exc
         if isinstance(content, str):
             content = _THINK_RE.sub("", content).strip()
@@ -1772,11 +1794,13 @@ class TextProvider(LLMProvider):
         if key not in self._languages:
             try:
                 reply = self._chat(
-                    _DETECT_LANGUAGE_PROMPT, transcript,
+                    _DETECT_LANGUAGE_PROMPT,
+                    transcript,
                     max_chars=_DETECT_LANGUAGE_CHARS,
                 )
                 detected = _load_json_object(
-                    str(reply).encode("utf-8"), "language",
+                    str(reply).encode("utf-8"),
+                    "language",
                 ).get("language")
             except LLMError:
                 detected = None
@@ -1794,17 +1818,19 @@ class TextProvider(LLMProvider):
         try:
             reply = self._chat(
                 _TITLE_PROMPT + "\n\n" + _language_rule(language),
-                transcript, max_chars=_CHUNK_SIZE,
+                transcript,
+                max_chars=_CHUNK_SIZE,
             )
             return _clean_title(
-                _load_json_object(str(reply).encode("utf-8"), "title")
-                .get("title"),
+                _load_json_object(str(reply).encode("utf-8"), "title").get("title"),
             )
         except LLMError:
             return ""
 
     def summarize(
-        self, transcript: str, kind: str | None = None,
+        self,
+        transcript: str,
+        kind: str | None = None,
     ) -> Summary:
         """Produce an overview, sections and key points, sized to the
         transcript and structured by ``kind`` (see
@@ -1826,29 +1852,37 @@ class TextProvider(LLMProvider):
             message = self._chat(
                 _summarise_prompt(kind, len(transcript), language),
                 f"Summarise this transcript:\n\n{transcript}",
-                timeout=_SUMMARY_TIMEOUT, max_chars=_CHUNK_SIZE,
+                timeout=_SUMMARY_TIMEOUT,
+                max_chars=_CHUNK_SIZE,
             )
             if not isinstance(message, str):
-                raise LLMError(
-                    f"Text model response message is not a string: "
-                    f"{message!r}"
-                )
+                raise LLMError(f"Text model response message is not a string: {message!r}")
             return _parse_summarise_response(message.encode("utf-8"))
         # Long path: map-reduce.
         partials = [
             _summarise_one_chunk(
-                self, chunk, section_index=i, total_sections=len(chunks),
-                kind=kind, language=language,
+                self,
+                chunk,
+                section_index=i,
+                total_sections=len(chunks),
+                kind=kind,
+                language=language,
             )
             for i, chunk in enumerate(chunks)
         ]
         return _synthesise_summaries(
-            self, partials, kind=kind, transcript_chars=len(transcript),
+            self,
+            partials,
+            kind=kind,
+            transcript_chars=len(transcript),
             language=language,
         )
 
     def extract(
-        self, transcript: str, kind: str, recorded_at: str | None = None,
+        self,
+        transcript: str,
+        kind: str,
+        recorded_at: str | None = None,
     ) -> list[dict]:
         """Pull structured items out of a transcript.
 
@@ -1870,10 +1904,7 @@ class TextProvider(LLMProvider):
         if not isinstance(kind, str):
             raise LLMError("kind must be a string")
         if kind not in VALID_KINDS:
-            raise LLMError(
-                f"extract: kind must be one of {sorted(VALID_KINDS)}, "
-                f"got {kind!r}"
-            )
+            raise LLMError(f"extract: kind must be one of {sorted(VALID_KINDS)}, got {kind!r}")
         language = self._output_language(transcript)
         chunks = _chunk_text(transcript)
         if len(chunks) == 1:
@@ -1885,22 +1916,24 @@ class TextProvider(LLMProvider):
                     + _recorded_line(recorded_at)
                     + f"\nTranscript:\n\n{transcript}"
                 ),
-                timeout=_SUMMARY_TIMEOUT, max_chars=_CHUNK_SIZE,
+                timeout=_SUMMARY_TIMEOUT,
+                max_chars=_CHUNK_SIZE,
             )
             if not isinstance(message, str):
-                raise LLMError(
-                    f"Text model response message is not a string: "
-                    f"{message!r}"
-                )
+                raise LLMError(f"Text model response message is not a string: {message!r}")
             return _parse_extract_response(message.encode("utf-8"))
         # Long path: per-chunk extraction, then dedupe.
         all_items: list[dict] = []
         for i, chunk in enumerate(chunks):
             all_items.extend(
                 _extract_one_chunk(
-                    self, chunk, kind=kind,
-                    section_index=i, total_sections=len(chunks),
-                    language=language, recorded_at=recorded_at,
+                    self,
+                    chunk,
+                    kind=kind,
+                    section_index=i,
+                    total_sections=len(chunks),
+                    language=language,
+                    recorded_at=recorded_at,
                 )
             )
         return _dedupe_items(all_items)
@@ -1935,17 +1968,9 @@ def default_providers(
     t_key = (
         transcription_key
         if transcription_key is not None
-        else (
-            os.environ.get("AFTERWORD_TRANSCRIPTION_API_KEY", "")
-        )
+        else (os.environ.get("AFTERWORD_TRANSCRIPTION_API_KEY", ""))
     )
-    txt_key = (
-        text_key
-        if text_key is not None
-        else (
-            os.environ.get("AFTERWORD_TEXT_API_KEY", "")
-        )
-    )
+    txt_key = text_key if text_key is not None else (os.environ.get("AFTERWORD_TEXT_API_KEY", ""))
     return {
         "transcript": (
             TranscriptionProvider(t_key, http_transport=http_transport)
@@ -1953,9 +1978,7 @@ def default_providers(
             else _NoOpProvider()
         ),
         "text": (
-            TextProvider(txt_key, http_transport=http_transport)
-            if txt_key
-            else _NoOpProvider()
+            TextProvider(txt_key, http_transport=http_transport) if txt_key else _NoOpProvider()
         ),
     }
 
@@ -1968,6 +1991,3 @@ MiniMaxProvider = TextProvider
 def get_provider(name: str = "transcript") -> LLMProvider:
     """Convenience accessor. Defaults to the transcript provider."""
     return default_providers().get(name) or _NoOpProvider()
-
-
-

@@ -6,6 +6,7 @@ real HTTP requests against it.
 
 Run: ``python scripts/e2e_check.py`` (add ``--live`` for real HTTP).
 """
+
 from __future__ import annotations
 
 import json
@@ -50,6 +51,7 @@ def make_wav(payload: bytes, sr: int = 22050, ch: int = 1, bps: int = 32) -> byt
 def make_aac(payload: bytes) -> bytes:
     """Canonical ADTS AAC chunk (as the device would upload)."""
     from services import transcode
+
     with tempfile.TemporaryDirectory(prefix="afterword-e2e-enc-") as d:
         src = Path(d) / "in.wav"
         src.write_bytes(make_wav(payload))
@@ -66,10 +68,21 @@ def run_checks(req) -> int:
 
     # 2. Announce
     sid = "e2etest123456789"
-    s, b, _ = req("POST", "/api/v1/sessions",
-        data=json.dumps({"id": sid, "title": "E2E Test", "expected_count": 2,
-                         "sample_rate": 22050, "channels": 1, "bits_per_sample": 32}).encode(),
-        headers={"Content-Type": "application/json"})
+    s, b, _ = req(
+        "POST",
+        "/api/v1/sessions",
+        data=json.dumps(
+            {
+                "id": sid,
+                "title": "E2E Test",
+                "expected_count": 2,
+                "sample_rate": 22050,
+                "channels": 1,
+                "bits_per_sample": 32,
+            }
+        ).encode(),
+        headers={"Content-Type": "application/json"},
+    )
     assert s == 201, (s, b)
     assert json.loads(b)["session"]["status"] == "receiving"
     print("2. Announce OK")
@@ -77,18 +90,21 @@ def run_checks(req) -> int:
     # 3. Upload chunks
     aac1 = make_aac(b"A" * 200)
     aac2 = make_aac(b"B" * 200)
-    s, b, _ = req("PUT", f"/api/v1/sessions/{sid}/chunks/1", data=aac1,
-                  headers={"Content-Type": "audio/aac"})
+    s, b, _ = req(
+        "PUT", f"/api/v1/sessions/{sid}/chunks/1", data=aac1, headers={"Content-Type": "audio/aac"}
+    )
     assert s == 200, (s, b)
-    s, b, _ = req("PUT", f"/api/v1/sessions/{sid}/chunks/2", data=aac2,
-                  headers={"Content-Type": "audio/aac"})
+    s, b, _ = req(
+        "PUT", f"/api/v1/sessions/{sid}/chunks/2", data=aac2, headers={"Content-Type": "audio/aac"}
+    )
     assert s == 200, (s, b)
     print("3. Chunks OK")
 
     # 4. Re-PUT chunk 1 (idempotency)
     aac1b = make_aac(b"X" * 200)
-    s, b, _ = req("PUT", f"/api/v1/sessions/{sid}/chunks/1", data=aac1b,
-                  headers={"Content-Type": "audio/aac"})
+    s, b, _ = req(
+        "PUT", f"/api/v1/sessions/{sid}/chunks/1", data=aac1b, headers={"Content-Type": "audio/aac"}
+    )
     assert s == 200
     print("4. Re-PUT OK")
 
@@ -125,18 +141,24 @@ def run_checks(req) -> int:
 
     # 10. Missing chunks
     sid2 = "missingtest1234"
-    req("POST", "/api/v1/sessions",
+    req(
+        "POST",
+        "/api/v1/sessions",
         data=json.dumps({"id": sid2, "expected_count": 3}).encode(),
-        headers={"Content-Type": "application/json"})
-    req("PUT", f"/api/v1/sessions/{sid2}/chunks/1", data=make_aac(b"Y" * 100),
-        headers={"Content-Type": "audio/aac"})
+        headers={"Content-Type": "application/json"},
+    )
+    req(
+        "PUT",
+        f"/api/v1/sessions/{sid2}/chunks/1",
+        data=make_aac(b"Y" * 100),
+        headers={"Content-Type": "audio/aac"},
+    )
     s, b, _ = req("POST", f"/api/v1/sessions/{sid2}/finish")
     assert s == 409 and json.loads(b)["error"] == "missing_chunks"
     print("10. Missing chunks 409 OK")
 
     # 11. Range request
-    s, b, _ = req("GET", f"/api/v1/sessions/{sid}/audio",
-                  headers={"Range": "bytes=0-99"})
+    s, b, _ = req("GET", f"/api/v1/sessions/{sid}/audio", headers={"Range": "bytes=0-99"})
     assert s == 206 and len(b) == 100
     print("11. Range request 206 OK")
 
@@ -151,8 +173,11 @@ def main() -> int:
 
     tmp = Path(tempfile.mkdtemp(prefix="afterword-e2e-"))
     cfg = config_mod.Config(
-        data_dir=tmp, host="127.0.0.1", port=0,
-        transcription_api_key="", text_api_key="",
+        data_dir=tmp,
+        host="127.0.0.1",
+        port=0,
+        transcription_api_key="",
+        text_api_key="",
         ffmpeg_path=FFMPEG,
         max_upload_bytes=10 * 1024 * 1024,
     )
@@ -161,6 +186,7 @@ def main() -> int:
         if "--live" in sys.argv:
             # Spawn the dev server in a background thread.
             from werkzeug.serving import make_server
+
             app = create_app(cfg)
             server = make_server("127.0.0.1", 8000, app, threaded=True)
             thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -169,8 +195,7 @@ def main() -> int:
             base = "http://127.0.0.1:8000"
 
             def req(method, path, data=None, headers=None):
-                r = Request(base + path, method=method, data=data,
-                            headers=headers or {})
+                r = Request(base + path, method=method, data=data, headers=headers or {})
                 try:
                     with urlopen(r) as resp:
                         return resp.status, resp.read(), dict(resp.headers)
@@ -188,8 +213,7 @@ def main() -> int:
             client = app.test_client()
 
             def req(method, path, data=None, headers=None):
-                resp = client.open(path, method=method, data=data,
-                                   headers=headers or {})
+                resp = client.open(path, method=method, data=data, headers=headers or {})
                 return resp.status_code, resp.get_data(), dict(resp.headers)
 
             return run_checks(req)

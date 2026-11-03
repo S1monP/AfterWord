@@ -4,6 +4,7 @@ Storage helpers (list_sessions_by_course, set_session_course,
 count_sessions_by_course, get_artifact) are exercised via the
 service tests and via the route tests below.
 """
+
 from __future__ import annotations
 
 import json
@@ -25,7 +26,7 @@ class CoursesServiceTests(LRTestCase):
         c = self._service().create(name="Biology EP3456")
         self.assertEqual(c.name, "Biology EP3456")
         self.assertIsNone(c.code)
-        self.assertEqual(c.color, "1")       # the first free palette colour
+        self.assertEqual(c.color, "1")  # the first free palette colour
         self.assertEqual(c.sort_order, 0)
 
     def test_new_courses_take_the_next_unused_colour(self):
@@ -89,7 +90,10 @@ class CoursesServiceTests(LRTestCase):
     def test_update_partial_fields(self):
         c = self._service().create(name="Old")
         updated = self._service().update(
-            c.id, code="CODE101", color="12", sort_order=10,
+            c.id,
+            code="CODE101",
+            color="12",
+            sort_order=10,
         )
         self.assertEqual(updated.name, "Old")
         self.assertEqual(updated.code, "CODE101")
@@ -98,10 +102,14 @@ class CoursesServiceTests(LRTestCase):
 
     def test_update_clears_optional_fields_with_none(self):
         c = self._service().create(
-            name="X", code="C", color="3",
+            name="X",
+            code="C",
+            color="3",
         )
         cleared = self._service().update(
-            c.id, code=None, color=None,
+            c.id,
+            code=None,
+            color=None,
         )
         self.assertIsNone(cleared.code)
         self.assertIsNone(cleared.color)
@@ -153,8 +161,13 @@ class CoursesServiceTests(LRTestCase):
             self._service().list(limit=0)
         with self.assertRaises(ValueError):
             self._service().list(offset=-1)
+
+
 def _seed_session(
-    self, *, status: str = "ready", kind: str = "lecture",
+    self,
+    *,
+    status: str = "ready",
+    kind: str = "lecture",
     course_id: object = None,
 ) -> str:
     sid = uuid.uuid4().hex
@@ -171,8 +184,7 @@ def _seed_session(
     if status != "receiving" or kind != "lecture" or course_id is not None:
         with store._tx() as conn:
             conn.execute(
-                "UPDATE sessions SET status = ?, kind = ?, course_id = ? "
-                "WHERE id = ?",
+                "UPDATE sessions SET status = ?, kind = ?, course_id = ? WHERE id = ?",
                 (status, kind, course_id, sid),
             )
     return sid
@@ -236,7 +248,8 @@ class CourseSessionRelationTests(LRTestCase):
         _seed_session(self, course_id=c.id)
         _seed_session(self, course_id=None)
         self.assertEqual(
-            self._store().count_sessions_by_course(c.id), 2,
+            self._store().count_sessions_by_course(c.id),
+            2,
         )
 
 
@@ -244,8 +257,12 @@ class GetArtifactTests(LRTestCase):
     def test_get_artifact_returns_none_when_empty(self):
         sid = uuid.uuid4().hex
         self.app.config["AFTERWORD_STORAGE"].upsert_session(
-            sid, title="t", expected_count=1, sample_rate=22050,
-            channels=1, bits_per_sample=32,
+            sid,
+            title="t",
+            expected_count=1,
+            sample_rate=22050,
+            channels=1,
+            bits_per_sample=32,
             started_at="2026-01-15T10:00:00Z",
         )
         self.assertIsNone(
@@ -256,22 +273,27 @@ class GetArtifactTests(LRTestCase):
         sid = uuid.uuid4().hex
         store = self.app.config["AFTERWORD_STORAGE"]
         store.upsert_session(
-            sid, title="t", expected_count=1, sample_rate=22050,
-            channels=1, bits_per_sample=32,
+            sid,
+            title="t",
+            expected_count=1,
+            sample_rate=22050,
+            channels=1,
+            bits_per_sample=32,
             started_at="2026-01-15T10:00:00Z",
         )
         with store._tx() as conn:
             conn.execute(
                 "INSERT INTO artifacts (id, session_id, kind, content, "
                 "model, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                ("a1", sid, "summary", "Hello world", "test-model",
-                 "2026-01-15T10:00:00Z"),
+                ("a1", sid, "summary", "Hello world", "test-model", "2026-01-15T10:00:00Z"),
             )
         art = store.get_artifact(sid, "summary")
         self.assertIsNotNone(art)
         self.assertEqual(art["content"], "Hello world")
         self.assertEqual(art["model"], "test-model")
         self.assertEqual(art["kind"], "summary")
+
+
 class CoursesApiTests(LRTestCase):
     def _create(self, **payload):
         return self.client.post(
@@ -346,8 +368,12 @@ class SessionCourseAssignApiTests(LRTestCase):
     def _seed(self):
         sid = uuid.uuid4().hex
         self.app.config["AFTERWORD_STORAGE"].upsert_session(
-            sid, title="t", expected_count=1, sample_rate=22050,
-            channels=1, bits_per_sample=32,
+            sid,
+            title="t",
+            expected_count=1,
+            sample_rate=22050,
+            channels=1,
+            bits_per_sample=32,
             started_at="2026-01-15T10:00:00Z",
         )
         return sid
@@ -366,7 +392,8 @@ class SessionCourseAssignApiTests(LRTestCase):
         )
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(
-            resp.get_json()["session"]["course_id"], c["id"],
+            resp.get_json()["session"]["course_id"],
+            c["id"],
         )
 
     def test_unassign_course(self):
@@ -404,12 +431,14 @@ class SessionCourseAssignApiTests(LRTestCase):
             content_type="application/json",
         )
         self.assertEqual(resp.status_code, 400)
+
+
 class LecturesUiTests(LRTestCase):
     def test_lectures_page_has_list_reader_and_course_settings(self):
         body = self.client.get("/lectures").get_data(as_text=True)
         self.assertIn('class="rpage', body)
         self.assertIn('class="lcol"', body)
-        self.assertIn('href="/courses"', body)               # the small gear
+        self.assertIn('href="/courses"', body)  # the small gear
         self.assertIn("No lectures yet", body)
 
     def test_lectures_are_grouped_by_course(self):
@@ -420,7 +449,7 @@ class LecturesUiTests(LRTestCase):
         body = self.client.get("/lectures").get_data(as_text=True)
         self.assertIn("Calc II", body)
         self.assertIn("Biology EP3456", body)
-        self.assertIn("Calc II · Lecture 1", body)     # the reader's chip
+        self.assertIn("Calc II · Lecture 1", body)  # the reader's chip
         body = self.client.get("/lectures?mode=date").get_data(as_text=True)
         self.assertIn("January 2026", body)
 
@@ -430,13 +459,13 @@ class LecturesUiTests(LRTestCase):
         sid = _seed_session(self, course_id=course.id)
         body = self.client.get(f"/lectures?session={sid}").get_data(as_text=True)
         self.assertIn(f'data-reader="{sid}"', body)
-        self.assertIn('class="rpage is-open"', body)        # full screen on the phone
+        self.assertIn('class="rpage is-open"', body)  # full screen on the phone
 
     def test_without_a_choice_the_newest_opens_on_desktop_only(self):
         sid = _seed_session(self, status="done")
         body = self.client.get("/lectures").get_data(as_text=True)
         self.assertIn(f'data-reader="{sid}"', body)
-        self.assertIn("is-selected is-auto", body)          # the phone shows the list
+        self.assertIn("is-selected is-auto", body)  # the phone shows the list
         self.assertNotIn('class="rpage is-open"', body)
 
 
@@ -480,15 +509,18 @@ class CoursesServiceIsRealTests(unittest.TestCase):
         import inspect
 
         from services.courses import CoursesService
+
         sig = inspect.signature(CoursesService.__init__)
         self.assertGreaterEqual(
-            len(sig.parameters), 2,
+            len(sig.parameters),
+            2,
             "CoursesService.__init__ should take (self, store)",
         )
 
 
 if __name__ == "__main__":
     unittest.main()
+
 
 class OtherUiTests(LRTestCase):
     def _finished(self, kind, status="done", detail=None):
@@ -517,7 +549,7 @@ class OtherUiTests(LRTestCase):
         self.assertIn("Not sorted", body)
         detail = self.client.get(f"/other?session={silent}").get_data(as_text=True)
         self.assertIn("No speech detected.", detail)
-        self.assertIn(f'data-rec-menu data-id="{silent}"', detail)   # Move to sorts it
+        self.assertIn(f'data-rec-menu data-id="{silent}"', detail)  # Move to sorts it
         failed = self.client.get(f"/other?session={broken}").get_data(as_text=True)
         self.assertIn("Processing failed", failed)
         self.assertIn(f'data-retry="{broken}"', failed)
@@ -533,8 +565,7 @@ class OtherUiTests(LRTestCase):
         self.assertEqual(sess.kind, "lecture")
         self.assertEqual(sess.status, "done")
         # The summary was written again (no-op provider in tests).
-        self.assertNotIn("old other summary",
-                         store.get_artifact(sid, "summary")["content"])
+        self.assertNotIn("old other summary", store.get_artifact(sid, "summary")["content"])
 
     def test_classify_as_memo_goes_to_notes_without_summary(self):
         store = self.app.config["AFTERWORD_STORAGE"]
@@ -562,6 +593,7 @@ class NotesVoiceMemoTests(LRTestCase):
         store.full_audio_path(memo).write_bytes(self.make_wav(b"\x00" * 256))
         store.add_artifact(memo, "transcript", text)
         from services.notes import ensure_memo_note
+
         return memo, ensure_memo_note(store, memo)
 
     def test_a_memo_is_a_note_with_audio(self):
@@ -572,12 +604,13 @@ class NotesVoiceMemoTests(LRTestCase):
         self.assertIn("<audio", body)
         self.assertIn("What was said", body)
         self.assertIn('data-seek="1000"', body)
-        self.assertIn(f'data-recording="{memo}"', body)      # Move to works on it
+        self.assertIn(f'data-recording="{memo}"', body)  # Move to works on it
 
     def test_memo_links_open_its_note(self):
         memo, note = self._memo()
         with self.app.test_request_context():
             from web.common import recording_url
+
             self.assertEqual(recording_url(memo), f"/notes?note_id={note.id}")
 
     def test_deleting_the_note_deletes_the_recording_and_back(self):
@@ -600,6 +633,7 @@ class NotesVoiceMemoTests(LRTestCase):
         store = self.app.config["AFTERWORD_STORAGE"]
         memo = _seed_session(self, status="done", kind="voice_memo")
         from services.notes import sync_memo_notes
+
         self.assertEqual(sync_memo_notes(store), 1)
         self.assertEqual(sync_memo_notes(store), 0)
         self.assertIsNotNone(store.note_for_recording(memo))
@@ -610,8 +644,7 @@ class RecordingNameTests(LRTestCase):
         store = self.app.config["AFTERWORD_STORAGE"]
         sid = _seed_session(self, status="done", kind="meeting")
         with store._tx() as conn:
-            conn.execute("UPDATE sessions SET title = 'rec_2026-01-15T1000' "
-                         "WHERE id = ?", (sid,))
+            conn.execute("UPDATE sessions SET title = 'rec_2026-01-15T1000' WHERE id = ?", (sid,))
         body = self.client.get("/meetings").get_data(as_text=True)
         self.assertNotIn("rec_2026-01-15T1000", body)
         self.assertIn('class="lrow__title">Meeting<', body)
@@ -620,24 +653,27 @@ class RecordingNameTests(LRTestCase):
     def test_rename_by_hand(self):
         store = self.app.config["AFTERWORD_STORAGE"]
         sid = _seed_session(self, status="done", kind="meeting")
-        resp = self.client.post(f"/api/v1/sessions/{sid}/title",
-                                json={"title": "  Budget review "})
+        resp = self.client.post(f"/api/v1/sessions/{sid}/title", json={"title": "  Budget review "})
         self.assertEqual(resp.status_code, 200)
         sess = store.get_session(sid)
         self.assertEqual((sess.title, sess.title_source), ("Budget review", "user"))
         detail = self.client.get(f"/meetings?session={sid}").get_data(as_text=True)
         self.assertIn("Budget review", detail)
         self.assertIn("data-rename", detail)
-        self.assertEqual(self.client.post(f"/api/v1/sessions/{sid}/title",
-                                          json={"title": " "}).status_code, 400)
-        self.assertEqual(self.client.post("/api/v1/sessions/nope/title",
-                                          json={"title": "x"}).status_code, 404)
+        self.assertEqual(
+            self.client.post(f"/api/v1/sessions/{sid}/title", json={"title": " "}).status_code, 400
+        )
+        self.assertEqual(
+            self.client.post("/api/v1/sessions/nope/title", json={"title": "x"}).status_code, 404
+        )
 
 
 class ClickableTranscriptTests(LRTestCase):
-    TRANSCRIPT = ("[00:05] Speaker 1: Welcome back.\n"
-                  "[1:02:03] Speaker 2: Any questions?\n"
-                  "a line without a marker")
+    TRANSCRIPT = (
+        "[00:05] Speaker 1: Welcome back.\n"
+        "[1:02:03] Speaker 2: Any questions?\n"
+        "a line without a marker"
+    )
 
     def test_markers_become_play_buttons(self):
         store = self.app.config["AFTERWORD_STORAGE"]
@@ -645,7 +681,7 @@ class ClickableTranscriptTests(LRTestCase):
         store.add_artifact(sid, "transcript", self.TRANSCRIPT)
         body = self.client.get(f"/meetings?session={sid}").get_data(as_text=True)
         self.assertIn('data-seek="5000"', body)
-        self.assertIn('data-t="3723"', body)                    # 1:02:03
+        self.assertIn('data-t="3723"', body)  # 1:02:03
         self.assertIn('<span class="tline__who">Speaker 2</span>', body)
         self.assertIn("a line without a marker", body)
 
@@ -665,16 +701,28 @@ class DeleteExportTests(LRTestCase):
         sid = _seed_session(self, status="done", kind="lecture")
         store.full_audio_path(sid).write_bytes(self.make_wav(b"\x00" * 256))
         store.set_session_title(sid, "Entropy and the second law", source="ai")
-        store.add_artifact(sid, "summary", json.dumps({
-            "title": "Entropy and the second law", "text": "Overview.",
-            "sections": [{"heading": "Entropy", "text": "Notes."}],
-            "key_points": ["Point one"],
-        }))
+        store.add_artifact(
+            sid,
+            "summary",
+            json.dumps(
+                {
+                    "title": "Entropy and the second law",
+                    "text": "Overview.",
+                    "sections": [{"heading": "Entropy", "text": "Notes."}],
+                    "key_points": ["Point one"],
+                }
+            ),
+        )
         store.add_artifact(sid, "transcript", "[00:05] Speaker 1: Hello.")
         from services.tasks import TasksService
+
         task = TasksService(store).create(
-            title="Submit essay", kind="deadline", due_at="2026-01-23",
-            source="extracted", source_ref=sid, source_offset_ms=5000,
+            title="Submit essay",
+            kind="deadline",
+            due_at="2026-01-23",
+            source="extracted",
+            source_ref=sid,
+            source_offset_ms=5000,
         )
         return store, sid, task
 
@@ -682,13 +730,21 @@ class DeleteExportTests(LRTestCase):
         _store, sid, _ = self._recording()
         resp = self.client.get(f"/sessions/{sid}/export.md")
         self.assertEqual(resp.status_code, 200)
-        self.assertIn("2026-01-15 Entropy and the second law.md",
-                      resp.headers["Content-Disposition"])
+        self.assertIn(
+            "2026-01-15 Entropy and the second law.md", resp.headers["Content-Disposition"]
+        )
         md = resp.get_data(as_text=True)
-        for part in ("# Entropy and the second law", "## Summary", "Overview.",
-                     "### Entropy", "## Key points", "- Point one",
-                     "- Deadline: Submit essay (due 2026-01-2",
-                     "## Transcript", "[00:05] Speaker 1: Hello."):
+        for part in (
+            "# Entropy and the second law",
+            "## Summary",
+            "Overview.",
+            "### Entropy",
+            "## Key points",
+            "- Point one",
+            "- Deadline: Submit essay (due 2026-01-2",
+            "## Transcript",
+            "[00:05] Speaker 1: Hello.",
+        ):
             self.assertIn(part, md)
         self.assertEqual(self.client.get("/sessions/nope/export.md").status_code, 404)
 
@@ -697,12 +753,13 @@ class DeleteExportTests(LRTestCase):
         body = self.client.get(f"/lectures?session={sid}").get_data(as_text=True)
         self.assertIn(f'data-rec-menu data-id="{sid}"', body)
         self.assertIn('data-audio="1"', body)
-        self.assertIn('data-seek="5000"', body)                 # "Added to your lists"
+        self.assertIn('data-seek="5000"', body)  # "Added to your lists"
         self.assertIn("Deadline · Submit essay", body)
 
     def test_delete_keeps_filed_items_unlinked(self):
         store, sid, task = self._recording()
         import search
+
         self.assertEqual(len(search.search(store, "entropy")["recording"]), 1)
         folder = store.session_dir(sid)
         self.assertTrue(folder.exists())
@@ -711,8 +768,10 @@ class DeleteExportTests(LRTestCase):
         self.assertIsNone(store.get_session(sid))
         self.assertFalse(folder.exists())
         import search
+
         self.assertEqual(search.search(store, "entropy")["recording"], [])
         from services.tasks import TasksService
+
         kept = TasksService(store).get(task.id)
         self.assertEqual(kept.title, "Submit essay")
         self.assertIsNone(kept.source_ref)
@@ -720,6 +779,7 @@ class DeleteExportTests(LRTestCase):
 
     def test_delete_refused_while_processing(self):
         from web.pipeline import _PIPELINES_IN_FLIGHT
+
         _, sid, _ = self._recording()
         _PIPELINES_IN_FLIGHT.add(sid)
         try:

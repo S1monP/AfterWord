@@ -1,5 +1,5 @@
-"""Background AI pipeline: FIFO worker, in-flight guard, boot sweep.
-"""
+"""Background AI pipeline: FIFO worker, in-flight guard, boot sweep."""
+
 from __future__ import annotations
 
 import logging
@@ -24,16 +24,18 @@ log = logging.getLogger(__name__)
 # can be reset to 'ready' and re-run — the recovery path for that
 # situation. Every transition to 'ready' here is legal per
 # storage.ALLOWED_STATUS_TRANSITIONS.
-_RETRYABLE_STATUSES = frozenset({
-    storage.STATUS_READY,
-    storage.STATUS_TRANSCRIBING,
-    storage.STATUS_TRANSCRIBED,
-    storage.STATUS_CLASSIFYING,
-    storage.STATUS_SUMMARISING,
-    storage.STATUS_EXTRACTING,
-    storage.STATUS_DONE,
-    storage.STATUS_FAILED,
-})
+_RETRYABLE_STATUSES = frozenset(
+    {
+        storage.STATUS_READY,
+        storage.STATUS_TRANSCRIBING,
+        storage.STATUS_TRANSCRIBED,
+        storage.STATUS_CLASSIFYING,
+        storage.STATUS_SUMMARISING,
+        storage.STATUS_EXTRACTING,
+        storage.STATUS_DONE,
+        storage.STATUS_FAILED,
+    }
+)
 
 # Statuses a server restart can strand mid-pipeline. The boot sweep
 # resets these to 'ready' and requeues them. 'failed' is deliberately
@@ -42,14 +44,16 @@ _RETRYABLE_STATUSES = frozenset({
 # endpoint. 'ready' sessions are swept too (a crash can strike in the
 # gap between stitch and pipeline start), but only when no transcript
 # artifact exists yet (i.e. the pipeline never got to persist one).
-_STRANDED_STATUSES = frozenset({
-    storage.STATUS_READY,
-    storage.STATUS_TRANSCRIBING,
-    storage.STATUS_TRANSCRIBED,
-    storage.STATUS_CLASSIFYING,
-    storage.STATUS_SUMMARISING,
-    storage.STATUS_EXTRACTING,
-})
+_STRANDED_STATUSES = frozenset(
+    {
+        storage.STATUS_READY,
+        storage.STATUS_TRANSCRIBING,
+        storage.STATUS_TRANSCRIBED,
+        storage.STATUS_CLASSIFYING,
+        storage.STATUS_SUMMARISING,
+        storage.STATUS_EXTRACTING,
+    }
+)
 
 
 def _enqueue_pipeline(app: Flask, session_id: str) -> bool:
@@ -71,7 +75,11 @@ def _enqueue_pipeline(app: Flask, session_id: str) -> bool:
 
 
 def set_kind_by_hand(
-    app: Flask, session_id: str, kind, *, confidence=None,
+    app: Flask,
+    session_id: str,
+    kind,
+    *,
+    confidence=None,
 ) -> storage.Session:
     """Set a session's kind by hand (``confidence`` defaults to 1.0).
 
@@ -106,7 +114,8 @@ def set_kind_by_hand(
         else:
             providers = app.config["AFTERWORD_LLM_PROVIDERS"]
             processing.run_post_finish_pipeline(
-                store, session_id,
+                store,
+                session_id,
                 transcript_provider=providers.get("transcript"),
                 classifier=providers.get("text"),
                 llm_provider=providers.get("text"),
@@ -133,7 +142,8 @@ def _start_pipeline_worker(app: Flask) -> threading.Thread:
                 store = app.config["AFTERWORD_STORAGE"]
                 providers = app.config["AFTERWORD_LLM_PROVIDERS"]
                 processing.run_post_finish_pipeline(
-                    store, session_id,
+                    store,
+                    session_id,
                     transcript_provider=providers.get("transcript"),
                     classifier=providers.get("text"),
                     llm_provider=providers.get("text"),
@@ -147,7 +157,9 @@ def _start_pipeline_worker(app: Flask) -> threading.Thread:
                 q.task_done()
 
     t = threading.Thread(
-        target=_worker, name="afterword-pipeline-worker", daemon=True,
+        target=_worker,
+        name="afterword-pipeline-worker",
+        daemon=True,
     )
     t.start()
     return t
@@ -186,7 +198,9 @@ def sweep_stranded_sessions(app: Flask) -> list[str]:
         try:
             if sess.status != storage.STATUS_READY:
                 store.set_status(
-                    sess.id, storage.STATUS_READY, status_detail=None,
+                    sess.id,
+                    storage.STATUS_READY,
+                    status_detail=None,
                 )
         except ValueError:
             continue  # unresolvable transition; leave for manual retry

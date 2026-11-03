@@ -1,6 +1,7 @@
 """Recordings API: device upload protocol, session list/detail/audio,
 pipeline retry, classification and web audio upload.
 """
+
 from __future__ import annotations
 
 import logging
@@ -44,10 +45,12 @@ def api_create_session() -> Any:
     payload = request.get_json(silent=True) or {}
     session_id = payload.get("id") or storage.new_session_id()
     if not storage.is_valid_session_id(session_id):
-        return jsonify({
-            "error": "invalid_session_id",
-            "detail": "id must be 4-64 chars of [A-Za-z0-9_-]",
-        }), 400
+        return jsonify(
+            {
+                "error": "invalid_session_id",
+                "detail": "id must be 4-64 chars of [A-Za-z0-9_-]",
+            }
+        ), 400
     try:
         expected_count = int(payload.get("expected_count", 0))
         sample_rate = int(payload.get("sample_rate", 22050))
@@ -60,10 +63,12 @@ def api_create_session() -> Any:
     try:
         started_at = timeutil.to_utc_iso(str(started_at))
     except ValueError:
-        return jsonify({
-            "error": "invalid_payload",
-            "detail": "started_at must be ISO-8601",
-        }), 400
+        return jsonify(
+            {
+                "error": "invalid_payload",
+                "detail": "started_at must be ISO-8601",
+            }
+        ), 400
     title = payload.get("title")
 
     try:
@@ -79,10 +84,12 @@ def api_create_session() -> Any:
     except ValueError as exc:
         return jsonify({"error": "invalid_payload", "detail": str(exc)}), 400
 
-    return jsonify({
-        "created": created,
-        "session": sess.to_api_dict(),
-    }), (201 if created else 200)
+    return jsonify(
+        {
+            "created": created,
+            "session": sess.to_api_dict(),
+        }
+    ), (201 if created else 200)
 
 
 @bp.get("/api/v1/sessions")
@@ -112,12 +119,14 @@ def api_put_chunk(session_id: str, chunk_index: int) -> Any:
         size = store.write_chunk(session_id, chunk_index, body)
     except (ValueError, RuntimeError) as exc:
         return jsonify({"error": "rejected", "detail": str(exc)}), 409
-    return jsonify({
-        "session_id": session_id,
-        "chunk_index": chunk_index,
-        "byte_size": size,
-        "received_at": storage.now_iso(),
-    })
+    return jsonify(
+        {
+            "session_id": session_id,
+            "chunk_index": chunk_index,
+            "byte_size": size,
+            "received_at": storage.now_iso(),
+        }
+    )
 
 
 # --- API: finish ----------------------------------------------------
@@ -142,29 +151,32 @@ def api_finish_session(session_id: str) -> Any:
     sess = store.get_session(session_id)
     if sess is None:
         return jsonify({"error": "not_found"}), 404
-    if (
-        sess.status in _RETRYABLE_STATUSES
-        and store.open_full_audio(session_id) is not None
-    ):
+    if sess.status in _RETRYABLE_STATUSES and store.open_full_audio(session_id) is not None:
         fresh = store.get_session(session_id)
-        return jsonify({
-            "ok": True,
-            "reason": "already_ready",
-            "session": fresh.to_api_dict() if fresh else None,
-        })
+        return jsonify(
+            {
+                "ok": True,
+                "reason": "already_ready",
+                "session": fresh.to_api_dict() if fresh else None,
+            }
+        )
     result = store.finish_session(session_id)
     if not result.ok:
         if result.reason == "missing_chunks":
             present = sorted(store.list_received_chunks(session_id))
-            return jsonify({
-                "error": "missing_chunks",
-                "missing": result.missing,
-                "present": present,
-            }), 409
-        return jsonify({
-            "error": result.reason,
-            "detail": sess.status_detail,
-        }), 500
+            return jsonify(
+                {
+                    "error": "missing_chunks",
+                    "missing": result.missing,
+                    "present": present,
+                }
+            ), 409
+        return jsonify(
+            {
+                "error": result.reason,
+                "detail": sess.status_detail,
+            }
+        ), 500
     if current_app.config.get("AFTERWORD_PIPELINE_BACKGROUND", True):
         _enqueue_pipeline(current_app._get_current_object(), session_id)
     else:
@@ -175,11 +187,13 @@ def api_finish_session(session_id: str) -> Any:
         except Exception:  # pragma: no cover
             log.exception("post-finish pipeline failed for %s", session_id)
     sess = store.get_session(session_id)
-    return jsonify({
-        "ok": True,
-        "reason": result.reason,
-        "session": sess.to_api_dict() if sess else None,
-    })
+    return jsonify(
+        {
+            "ok": True,
+            "reason": result.reason,
+            "session": sess.to_api_dict() if sess else None,
+        }
+    )
 
 
 # --- API: re-run transcription pipeline (manual retry) -------------
@@ -213,29 +227,33 @@ def api_transcribe_session(session_id: str) -> Any:
     if sess is None:
         return jsonify({"error": "not_found"}), 404
     if sess.status not in _RETRYABLE_STATUSES:
-        return jsonify({
-            "ok": False,
-            "reason": "not_ready",
-            "status": sess.status,
-            "detail": (
-                "session is still receiving/stitching audio; "
-                "retry is only possible after finish"
-            ),
-            "session": sess.to_api_dict(),
-        }), 409
+        return jsonify(
+            {
+                "ok": False,
+                "reason": "not_ready",
+                "status": sess.status,
+                "detail": (
+                    "session is still receiving/stitching audio; "
+                    "retry is only possible after finish"
+                ),
+                "session": sess.to_api_dict(),
+            }
+        ), 409
     # Prevent a background upload run and this retry from both
     # driving the same session concurrently.
     with _PIPELINE_LOCK:
         if session_id in _PIPELINES_IN_FLIGHT:
-            return jsonify({
-                "ok": False,
-                "reason": "pipeline_running",
-                "detail": (
-                    "an AI pipeline is already running for this "
-                    "session; reload the page in a few seconds"
-                ),
-                "session": sess.to_api_dict(),
-            }), 409
+            return jsonify(
+                {
+                    "ok": False,
+                    "reason": "pipeline_running",
+                    "detail": (
+                        "an AI pipeline is already running for this "
+                        "session; reload the page in a few seconds"
+                    ),
+                    "session": sess.to_api_dict(),
+                }
+            ), 409
         _PIPELINES_IN_FLIGHT.add(session_id)
     try:
         # Allow the retry to clobber an existing transcript /
@@ -246,23 +264,25 @@ def api_transcribe_session(session_id: str) -> Any:
         if sess.status != storage.STATUS_READY:
             try:
                 store.set_status(
-                    session_id, storage.STATUS_READY,
+                    session_id,
+                    storage.STATUS_READY,
                     status_detail=None,
                 )
             except ValueError as exc:
-                return jsonify({
-                    "ok": False,
-                    "reason": "illegal_transition",
-                    "detail": str(exc),
-                    "session": (
-                        store.get_session(session_id).to_api_dict()
-                    ),
-                }), 409
+                return jsonify(
+                    {
+                        "ok": False,
+                        "reason": "illegal_transition",
+                        "detail": str(exc),
+                        "session": (store.get_session(session_id).to_api_dict()),
+                    }
+                ), 409
         # Run the pipeline synchronously. Uses the env-var-driven
         # providers unless the test harness replaced them via
         # ``app.config['AFTERWORD_LLM_PROVIDERS']``.
         result = processing.run_post_finish_pipeline(
-            store, session_id,
+            store,
+            session_id,
             transcript_provider=current_app_transcript_provider(),
             classifier=current_app_text_provider(),
             llm_provider=current_app_text_provider(),
@@ -275,18 +295,22 @@ def api_transcribe_session(session_id: str) -> Any:
     # still 'receiving'). Surface that as a 409 so the UI can
     # explain.
     if result is None:
-        return jsonify({
-            "ok": False,
-            "reason": "not_ready",
-            "status": sess.status if sess else None,
+        return jsonify(
+            {
+                "ok": False,
+                "reason": "not_ready",
+                "status": sess.status if sess else None,
+                "session": sess.to_api_dict() if sess else None,
+            }
+        ), 409
+    return jsonify(
+        {
+            "ok": bool(result.get("ok")),
+            "reason": result.get("reason"),
+            "detail": result.get("detail"),
             "session": sess.to_api_dict() if sess else None,
-        }), 409
-    return jsonify({
-        "ok": bool(result.get("ok")),
-        "reason": result.get("reason"),
-        "detail": result.get("detail"),
-        "session": sess.to_api_dict() if sess else None,
-    })
+        }
+    )
 
 
 # --- API: audio serving ---------------------------------------------
@@ -298,11 +322,13 @@ def api_get_audio(session_id: str) -> Any:
         abort(404)
     full = store.open_full_audio(session_id)
     if full is None:
-        return jsonify({
-            "error": "not_ready",
-            "detail": "session has no full.aac yet",
-            "status": sess.status,
-        }), 409
+        return jsonify(
+            {
+                "error": "not_ready",
+                "detail": "session has no full.aac yet",
+                "status": sess.status,
+            }
+        ), 409
     return send_file(
         str(full),
         mimetype="audio/aac",
@@ -319,11 +345,12 @@ def api_delete_session(session_id: str) -> Any:
     ``409`` while the AI pipeline is working on it."""
     with _PIPELINE_LOCK:
         if session_id in _PIPELINES_IN_FLIGHT:
-            return jsonify({
-                "error": "pipeline_running",
-                "detail": "the recording is being processed; try again "
-                          "in a minute",
-            }), 409
+            return jsonify(
+                {
+                    "error": "pipeline_running",
+                    "detail": "the recording is being processed; try again in a minute",
+                }
+            ), 409
         deleted = current_app_storage().delete_session(session_id)
     if not deleted:
         return jsonify({"error": "not_found"}), 404
@@ -346,22 +373,27 @@ def api_set_kind(session_id: str) -> Any:
         return jsonify({"error": "not_found"}), 404
     payload = request.get_json(silent=True) or {}
     if "kind" not in payload:
-        return jsonify({
-            "error": "invalid_payload",
-            "detail": "field 'kind' is required (string or null)",
-        }), 400
+        return jsonify(
+            {
+                "error": "invalid_payload",
+                "detail": "field 'kind' is required (string or null)",
+            }
+        ), 400
     kind = payload["kind"]
     if kind is not None and kind not in storage.Storage.RECORDING_KINDS:
-        return jsonify({
-            "error": "invalid_kind",
-            "detail": (
-                f"kind must be one of "
-                f"{sorted(storage.Storage.RECORDING_KINDS)} or null"
-            ),
-        }), 400
+        return jsonify(
+            {
+                "error": "invalid_kind",
+                "detail": (
+                    f"kind must be one of {sorted(storage.Storage.RECORDING_KINDS)} or null"
+                ),
+            }
+        ), 400
     try:
         sess = set_kind_by_hand(
-            current_app._get_current_object(), session_id, kind,
+            current_app._get_current_object(),
+            session_id,
+            kind,
             confidence=payload.get("confidence"),
         )
     except ValueError as exc:
@@ -396,20 +428,26 @@ def api_classify_session(session_id: str) -> Any:
         classifier=current_app_text_provider(),
     )
     if outcome is None:
-        return jsonify({
-            "kind": None,
-            "confidence": None,
-            "reason": services.classification.LLM_NOT_IMPLEMENTED,
-        })
+        return jsonify(
+            {
+                "kind": None,
+                "confidence": None,
+                "reason": services.classification.LLM_NOT_IMPLEMENTED,
+            }
+        )
     kind, confidence = outcome
     sess = current_app_storage().set_kind(
-        session_id, kind, confidence=confidence,
+        session_id,
+        kind,
+        confidence=confidence,
     )
-    return jsonify({
-        "kind": sess.kind,
-        "confidence": sess.kind_confidence,
-        "reason": "classified",
-    })
+    return jsonify(
+        {
+            "kind": sess.kind,
+            "confidence": sess.kind_confidence,
+            "reason": "classified",
+        }
+    )
 
 
 @bp.post("/api/v1/sessions/<session_id>/title")
@@ -422,7 +460,9 @@ def api_set_title(session_id: str) -> Any:
     payload = request.get_json(silent=True) or {}
     try:
         sess = store.set_session_title(
-            session_id, str(payload.get("title") or ""), source="user",
+            session_id,
+            str(payload.get("title") or ""),
+            source="user",
         )
     except ValueError as exc:
         return jsonify({"error": "invalid_payload", "detail": str(exc)}), 400
@@ -440,17 +480,22 @@ def api_assign_course(session_id: str) -> Any:
         return jsonify({"error": "not_found"}), 404
     payload = request.get_json(silent=True) or {}
     if "course_id" not in payload:
-        return jsonify({
-            "error": "invalid_payload",
-            "detail": "field 'course_id' is required (string or null)",
-        }), 400
+        return jsonify(
+            {
+                "error": "invalid_payload",
+                "detail": "field 'course_id' is required (string or null)",
+            }
+        ), 400
     course_id = payload["course_id"]
     try:
         sess = store.set_session_course(session_id, course_id)
     except ValueError as exc:
-        return jsonify({
-            "error": "invalid_payload", "detail": str(exc),
-        }), 400
+        return jsonify(
+            {
+                "error": "invalid_payload",
+                "detail": str(exc),
+            }
+        ), 400
     return jsonify({"session": sess.to_api_dict()})
 
 
@@ -469,35 +514,39 @@ def api_upload_audio() -> Any:
     store = current_app_storage()
 
     if "file" not in request.files:
-        return jsonify({
-            "error": "missing_file",
-            "detail": "multipart field 'file' is required",
-        }), 400
+        return jsonify(
+            {
+                "error": "missing_file",
+                "detail": "multipart field 'file' is required",
+            }
+        ), 400
 
     upload = request.files["file"]
     raw = upload.read()
     if not raw:
         return jsonify({"error": "empty_file"}), 400
     if len(raw) > cfg.max_upload_bytes:
-        return jsonify({
-            "error": "file_too_large",
-            "detail": (
-                f"file is {len(raw)} bytes; max is {cfg.max_upload_bytes}"
-            ),
-        }), 413
+        return jsonify(
+            {
+                "error": "file_too_large",
+                "detail": (f"file is {len(raw)} bytes; max is {cfg.max_upload_bytes}"),
+            }
+        ), 413
 
     # Title: empty/whitespace -> default; explicit bad -> 400.
     title_input = request.form.get("title")
     if title_input is not None and title_input.strip() != "":
         title_clean = _normalise_title(title_input)
         if title_clean is None:
-            return jsonify({
-                "error": "invalid_title",
-                "detail": (
-                    "title must be 1..200 chars of printable text "
-                    "(letters, digits, spaces, basic punctuation)"
-                ),
-            }), 400
+            return jsonify(
+                {
+                    "error": "invalid_title",
+                    "detail": (
+                        "title must be 1..200 chars of printable text "
+                        "(letters, digits, spaces, basic punctuation)"
+                    ),
+                }
+            ), 400
         title = title_clean
     else:
         title = None  # substituted with default after we know mtime
@@ -524,28 +573,34 @@ def api_upload_audio() -> Any:
             aac_path = inbox_path
         else:
             if not transcode.ffmpeg_available(cfg.ffmpeg_path):
-                return jsonify({
-                    "error": "ffmpeg_missing",
-                    "detail": (
-                        f"this file is {fmt.kind} and needs to be "
-                        f"transcoded, but ffmpeg was not found at "
-                        f"{cfg.ffmpeg_path!r}. Install ffmpeg or set "
-                        "AFTERWORD_FFMPEG_PATH."
-                    ),
-                }), 503
+                return jsonify(
+                    {
+                        "error": "ffmpeg_missing",
+                        "detail": (
+                            f"this file is {fmt.kind} and needs to be "
+                            f"transcoded, but ffmpeg was not found at "
+                            f"{cfg.ffmpeg_path!r}. Install ffmpeg or set "
+                            "AFTERWORD_FFMPEG_PATH."
+                        ),
+                    }
+                ), 503
             work_dir = cfg.inbox_dir / f"work-{inbox_token}"
             work_dir.mkdir(parents=True, exist_ok=True)
             aac_path = work_dir / "out.aac"
             transcode.transcode_to_aac(
-                inbox_path, aac_path, ffmpeg_path=cfg.ffmpeg_path,
+                inbox_path,
+                aac_path,
+                ffmpeg_path=cfg.ffmpeg_path,
             )
 
         aac_bytes = aac_path.read_bytes()
         if transcode.sniff_format(aac_path).kind != "aac":
-            return jsonify({
-                "error": "transcode_failed",
-                "detail": "output is not valid AAC",
-            }), 500
+            return jsonify(
+                {
+                    "error": "transcode_failed",
+                    "detail": "output is not valid AAC",
+                }
+            ), 500
 
         sess = store.ingest_single_audio(
             session_id=inbox_token,
@@ -557,14 +612,19 @@ def api_upload_audio() -> Any:
             # A name typed on the upload page is kept, like a rename.
             sess = store.set_session_title(sess.id, title, source="user")
     except transcode.TranscodeError as exc:
-        return jsonify({
-            "error": exc.reason,
-            "detail": exc.detail,
-        }), 503
+        return jsonify(
+            {
+                "error": exc.reason,
+                "detail": exc.detail,
+            }
+        ), 503
     except Exception as exc:
-        return jsonify({
-            "error": "ingest_failed", "detail": str(exc),
-        }), 500
+        return jsonify(
+            {
+                "error": "ingest_failed",
+                "detail": str(exc),
+            }
+        ), 500
     finally:
         try:
             if inbox_path.exists():
@@ -583,7 +643,8 @@ def api_upload_audio() -> Any:
     transcript_provider = current_app_transcript_provider()
     text_provider = current_app_text_provider()
     run_in_background = current_app.config.get(
-        "AFTERWORD_PIPELINE_BACKGROUND", True,
+        "AFTERWORD_PIPELINE_BACKGROUND",
+        True,
     )
     if run_in_background:
         _enqueue_pipeline(current_app._get_current_object(), sess.id)
@@ -592,7 +653,8 @@ def api_upload_audio() -> Any:
         # so the response reflects the final status.
         try:
             processing.run_post_finish_pipeline(
-                store, sess.id,
+                store,
+                sess.id,
                 transcript_provider=transcript_provider,
                 classifier=text_provider,
                 llm_provider=text_provider,
@@ -601,9 +663,11 @@ def api_upload_audio() -> Any:
             log.exception("post-upload pipeline failed for %s", sess.id)
     sess = store.get_session(sess.id) or sess
 
-    return jsonify({
-        "created": True,
-        "session": sess.to_api_dict(),
-        # Where it opens (sorted later; Other until then).
-        "redirect_url": recording_url(sess),
-    }), 201
+    return jsonify(
+        {
+            "created": True,
+            "session": sess.to_api_dict(),
+            # Where it opens (sorted later; Other until then).
+            "redirect_url": recording_url(sess),
+        }
+    ), 201

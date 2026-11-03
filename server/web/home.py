@@ -4,6 +4,7 @@ Everything is worked out here, in local time, so the template only lays
 it out: the week and today's schedule with each event's status, the next
 event, the recent recordings and notes, deadlines and to-dos.
 """
+
 from __future__ import annotations
 
 import datetime as _dt
@@ -28,13 +29,19 @@ from web.common import (
 )
 
 # Statuses of a recording the AI is still working on.
-PROCESSING = frozenset({
-    storage.STATUS_STITCHING, storage.STATUS_READY, storage.STATUS_TRANSCRIBING,
-    storage.STATUS_TRANSCRIBED, storage.STATUS_CLASSIFYING,
-    storage.STATUS_SUMMARISING, storage.STATUS_EXTRACTING,
-})
+PROCESSING = frozenset(
+    {
+        storage.STATUS_STITCHING,
+        storage.STATUS_READY,
+        storage.STATUS_TRANSCRIBING,
+        storage.STATUS_TRANSCRIBED,
+        storage.STATUS_CLASSIFYING,
+        storage.STATUS_SUMMARISING,
+        storage.STATUS_EXTRACTING,
+    }
+)
 RECENT_LIMIT = 12
-DAY_START, DAY_END = 8, 19          # the Today timeline, widened to fit events
+DAY_START, DAY_END = 8, 19  # the Today timeline, widened to fit events
 
 
 def _clock(ms: int | None) -> str:
@@ -83,6 +90,7 @@ class _Ctx:
 
 # --- schedule -----------------------------------------------------------
 
+
 def _event_status(ctx: _Ctx, ev) -> tuple[str, str, str | None]:
     """(label, status class, recording url) for an event, now."""
     sess = ctx.store.get_session(ev.matched_session_id) if ev.matched_session_id else None
@@ -94,7 +102,11 @@ def _event_status(ctx: _Ctx, ev) -> tuple[str, str, str | None]:
             return "Processing failed", "st-bad", url
         return "Summarising", "st-busy", url
     start = timeutil.to_local(ev.starts_at)
-    end = timeutil.to_local(ev.ends_at) if ev.ends_at else (start + _dt.timedelta(hours=1) if start else None)
+    end = (
+        timeutil.to_local(ev.ends_at)
+        if ev.ends_at
+        else (start + _dt.timedelta(hours=1) if start else None)
+    )
     if start is None:
         return "", "st-later", None
     if start <= ctx.now < end:
@@ -114,14 +126,21 @@ def _event_view(ctx: _Ctx, ev) -> dict[str, Any]:
     start_min = start.hour * 60 + start.minute
     end_min = (end.hour * 60 + end.minute) if end and end.date() == start.date() else start_min + 60
     return {
-        "id": ev.id, "title": ev.title, "location": ev.location or "",
+        "id": ev.id,
+        "title": ev.title,
+        "location": ev.location or "",
         "description": (ev.description or "").strip().split("\n")[0],
-        "date": start.date(), "start": f"{start:%H:%M}",
+        "date": start.date(),
+        "start": f"{start:%H:%M}",
         "end": f"{end:%H:%M}" if end else "",
-        "start_min": start_min, "end_min": max(end_min, start_min + 15),
-        "cc": ctx.cc(ev.course_id), "status": label, "sc": sc,
+        "start_min": start_min,
+        "end_min": max(end_min, start_min + 15),
+        "cc": ctx.cc(ev.course_id),
+        "status": label,
+        "sc": sc,
         "url": rec or f"/calendar?day={start.date().isoformat()}",
-        "recording": rec, "kind": ev.kind,
+        "recording": rec,
+        "kind": ev.kind,
         "is_past": (end or start + _dt.timedelta(hours=1)) <= ctx.now,
     }
 
@@ -144,15 +163,22 @@ def _schedule(ctx: _Ctx, week_offset: int) -> dict[str, Any]:
     for i in range(7):
         day = monday + _dt.timedelta(days=i)
         items = [v for v in week_events if v["date"] == day]
-        days.append({
-            "dow": f"{day:%a}", "num": day.day, "is_today": day == ctx.today,
-            "events": items,
-            # Where the now line goes in today's list.
-            "now_at": sum(1 for v in items if v["start_min"] <= now_min) if day == ctx.today else None,
-        })
+        days.append(
+            {
+                "dow": f"{day:%a}",
+                "num": day.day,
+                "is_today": day == ctx.today,
+                "events": items,
+                # Where the now line goes in today's list.
+                "now_at": sum(1 for v in items if v["start_min"] <= now_min)
+                if day == ctx.today
+                else None,
+            }
+        )
     sunday = monday + _dt.timedelta(days=6)
     today_events = (
-        [v for v in week_events if v["date"] == ctx.today] if week_offset == 0
+        [v for v in week_events if v["date"] == ctx.today]
+        if week_offset == 0
         else _events_between(ctx, ctx.today, 1)
     )
     start_h = min([DAY_START] + [v["start_min"] // 60 for v in today_events])
@@ -167,14 +193,18 @@ def _schedule(ctx: _Ctx, week_offset: int) -> dict[str, Any]:
         "days": days,
         "today": today_events,
         "hours": list(range(start_h, end_h + 1)),
-        "day_start": start_h, "day_end": end_h,
-        "now_pct": (now_min - start_h * 60) / span * 100 if start_h * 60 <= now_min <= end_h * 60 else None,
+        "day_start": start_h,
+        "day_end": end_h,
+        "now_pct": (now_min - start_h * 60) / span * 100
+        if start_h * 60 <= now_min <= end_h * 60
+        else None,
     }
 
 
 def _next_up(ctx: _Ctx) -> dict[str, Any] | None:
     events, _ = current_app_events_service().list(
-        starts_after=timeutil.fmt(ctx.now), limit=1,
+        starts_after=timeutil.fmt(ctx.now),
+        limit=1,
     )
     if not events:
         return None
@@ -224,18 +254,26 @@ def _gist(ctx: _Ctx, sess) -> str:
 def _recording_item(ctx: _Ctx, sess) -> dict[str, Any]:
     started = timeutil.to_local(sess.started_at)
     seconds = _estimate_duration_seconds(sess)
-    when = " · ".join(filter(None, [
-        f"{_day_label(started.date(), ctx.today)} {started:%H:%M}" if started else "",
-        _short_duration(seconds) if seconds >= 1 else "",
-    ]))
+    when = " · ".join(
+        filter(
+            None,
+            [
+                f"{_day_label(started.date(), ctx.today)} {started:%H:%M}" if started else "",
+                _short_duration(seconds) if seconds >= 1 else "",
+            ],
+        )
+    )
     processing = sess.status in PROCESSING
     failed = sess.status == storage.STATUS_FAILED
     filed_tasks, _ = ctx.store.filed_from(sess.id)
-    filed = [{
-        "at": _clock(t.source_offset_ms),
-        "label": ("Deadline · " if t.kind == "deadline" else "To-do · ") + t.title,
-        "url": recording_url(sess, t=t.source_offset_ms or 0),
-    } for t in filed_tasks[:3]]
+    filed = [
+        {
+            "at": _clock(t.source_offset_ms),
+            "label": ("Deadline · " if t.kind == "deadline" else "To-do · ") + t.title,
+            "url": recording_url(sess, t=t.source_offset_ms or 0),
+        }
+        for t in filed_tasks[:3]
+    ]
     kind = sess.kind if sess.kind in _KIND_CHIP else None
     course = ctx.course_name(sess.course_id) if kind == "lecture" else ""
     return {
@@ -244,7 +282,9 @@ def _recording_item(ctx: _Ctx, sess) -> dict[str, Any]:
         "chip": course or _KIND_CHIP.get(kind or "", "New recording"),
         "cc": ctx.cc(sess.course_id),
         "when": when,
-        "status": "Summarising" if processing and kind else ("Processing" if processing else ("Failed" if failed else "")),
+        "status": "Summarising"
+        if processing and kind
+        else ("Processing" if processing else ("Failed" if failed else "")),
         "sc": "st-busy" if processing else ("st-bad" if failed else "st-ok"),
         "title": rec_title(sess),
         "gist": _gist(ctx, sess),
@@ -257,19 +297,33 @@ def _recording_item(ctx: _Ctx, sess) -> dict[str, Any]:
 def _note_item(ctx: _Ctx, note) -> dict[str, Any]:
     edited = timeutil.to_local(note.updated_at)
     # The first line of text, not a heading.
-    first = next((line.strip().lstrip("-*[] x").strip()
-                  for line in (note.body_md or "").splitlines()
-                  if line.strip() and not line.lstrip().startswith("#")), "")
+    first = next(
+        (
+            line.strip().lstrip("-*[] x").strip()
+            for line in (note.body_md or "").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ),
+        "",
+    )
     when = ""
-    sess = ctx.store.get_session(note.source_ref) if note.source == "voice_memo" and note.source_ref else None
+    sess = (
+        ctx.store.get_session(note.source_ref)
+        if note.source == "voice_memo" and note.source_ref
+        else None
+    )
     if sess is not None:
         # A voice memo: when it was recorded, and how long.
         started = timeutil.to_local(sess.started_at)
         seconds = _estimate_duration_seconds(sess)
-        when = " · ".join(filter(None, [
-            f"{_day_label(started.date(), ctx.today)} {started:%H:%M}" if started else "",
-            _short_duration(seconds) if seconds >= 1 else "",
-        ]))
+        when = " · ".join(
+            filter(
+                None,
+                [
+                    f"{_day_label(started.date(), ctx.today)} {started:%H:%M}" if started else "",
+                    _short_duration(seconds) if seconds >= 1 else "",
+                ],
+            )
+        )
     elif edited:
         day = _day_label(edited.date(), ctx.today)
         if day in ("Today", "Yesterday"):
@@ -277,10 +331,16 @@ def _note_item(ctx: _Ctx, note) -> dict[str, Any]:
         when = f"Edited {day} {edited:%H:%M}"
     course = ctx.courses.get(note.course_id or "")
     return {
-        "kind": "note", "icon": "note", "chip": course.name if course else ("Voice memo" if sess else "Note"),
-        "cc": ctx.cc(note.course_id), "when": when,
-        "status": "", "sc": "", "title": note.title or "Untitled note",
-        "gist": _first_sentence(first, 140), "filed": [],
+        "kind": "note",
+        "icon": "note",
+        "chip": course.name if course else ("Voice memo" if sess else "Note"),
+        "cc": ctx.cc(note.course_id),
+        "when": when,
+        "status": "",
+        "sc": "",
+        "title": note.title or "Untitled note",
+        "gist": _first_sentence(first, 140),
+        "filed": [],
         "url": f"/notes?note_id={note.id}",
         "sort": (sess.started_at if sess else note.updated_at) or "",
     }
@@ -288,7 +348,8 @@ def _note_item(ctx: _Ctx, note) -> dict[str, Any]:
 
 def _recent(ctx: _Ctx) -> list[dict[str, Any]]:
     sessions = [
-        s for s in ctx.store.list_sessions()
+        s
+        for s in ctx.store.list_sessions()
         if s.status != storage.STATUS_RECEIVING
         # Voice memos show as their notes.
         and (s.kind in ("lecture", "meeting") or (s.kind is None and s.status in PROCESSING))
@@ -299,6 +360,7 @@ def _recent(ctx: _Ctx) -> list[dict[str, Any]]:
 
 
 # --- deadlines and to-dos ---------------------------------------------------
+
 
 def _said_in(ctx: _Ctx, task) -> dict[str, str] | None:
     if not task.source_ref:
@@ -327,14 +389,22 @@ def _deadlines(ctx: _Ctx) -> tuple[list[dict[str, Any]], int]:
         if due is None:
             continue
         days = (due.date() - ctx.today).days
-        views.append({
-            "id": t.id, "title": t.title, "days": days,
-            "days_label": "late" if days < 0 else ("today" if days == 0 else ("day" if days == 1 else "days")),
-            "days_num": abs(days) if days else "",
-            "due": _due_label(due, ctx.today),
-            "course": ctx.course_name(t.course_id), "cc": ctx.cc(t.course_id),
-            "said_in": _said_in(ctx, t), "sort": t.due_at,
-        })
+        views.append(
+            {
+                "id": t.id,
+                "title": t.title,
+                "days": days,
+                "days_label": "late"
+                if days < 0
+                else ("today" if days == 0 else ("day" if days == 1 else "days")),
+                "days_num": abs(days) if days else "",
+                "due": _due_label(due, ctx.today),
+                "course": ctx.course_name(t.course_id),
+                "cc": ctx.cc(t.course_id),
+                "said_in": _said_in(ctx, t),
+                "sort": t.due_at,
+            }
+        )
     views.sort(key=lambda v: v["sort"])
     return views, total
 
@@ -346,19 +416,30 @@ def _todos(ctx: _Ctx) -> tuple[list[dict[str, Any]], int]:
     svc = current_app_tasks_service()
     open_tasks, open_total = svc.list(kind="task", status="open", limit=100)
     done, _ = svc.list(kind="task", status="done", limit=20)
-    done_today = [t for t in done if t.completed_at and (timeutil.to_local(t.completed_at) or ctx.now).date() == ctx.today]
+    done_today = [
+        t
+        for t in done
+        if t.completed_at and (timeutil.to_local(t.completed_at) or ctx.now).date() == ctx.today
+    ]
 
     def view(t) -> dict[str, Any]:
         due = timeutil.to_local(t.due_at)
-        late = due is not None and t.status == "open" and (
-            due.date() < ctx.today if (due.hour, due.minute) == (0, 0) else due < ctx.now
+        late = (
+            due is not None
+            and t.status == "open"
+            and (due.date() < ctx.today if (due.hour, due.minute) == (0, 0) else due < ctx.now)
         )
         prio = "high" if t.priority in ("high", "urgent") else (t.priority or "medium")
         return {
-            "id": t.id, "title": t.title, "done": t.status == "done",
-            "prio": prio, "prio_label": prio.capitalize(),
+            "id": t.id,
+            "title": t.title,
+            "done": t.status == "done",
+            "prio": prio,
+            "prio_label": prio.capitalize(),
             "due": (("Late · " if late else "") + _due_label(due, ctx.today)) if due else "",
-            "due_cls": "is-late" if late else ("is-today" if due and due.date() == ctx.today else ""),
+            "due_cls": "is-late"
+            if late
+            else ("is-today" if due and due.date() == ctx.today else ""),
             "said_in": _said_in(ctx, t),
             "sort": (0 if late else 1, _PRIO.get(t.priority, 1), t.due_at or "9999"),
         }
@@ -378,7 +459,9 @@ def home_context(week_offset: int = 0) -> dict[str, Any]:
         "schedule": _schedule(ctx, week_offset),
         "next_up": _next_up(ctx),
         "recent": _recent(ctx),
-        "deadlines": deadlines, "deadline_total": deadline_total,
-        "todos": todos, "open_todos": open_todos,
+        "deadlines": deadlines,
+        "deadline_total": deadline_total,
+        "todos": todos,
+        "open_todos": open_todos,
         "processing": processing,
     }

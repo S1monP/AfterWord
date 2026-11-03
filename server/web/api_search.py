@@ -1,5 +1,6 @@
 """Search for the dashboard's search box (static/js/search.js): the
 matches, grouped, with where each one opens."""
+
 from __future__ import annotations
 
 import re
@@ -51,12 +52,14 @@ def api_search() -> Any:
             if item is not None:
                 items.append(item)
         if items:
-            groups.append({
-                "type": item_type,
-                "label": _GROUP_LABELS[item_type],
-                "total": len(hits),
-                "items": items,
-            })
+            groups.append(
+                {
+                    "type": item_type,
+                    "label": _GROUP_LABELS[item_type],
+                    "total": len(hits),
+                    "items": items,
+                }
+            )
     return jsonify({"query": raw, "groups": groups})
 
 
@@ -109,6 +112,7 @@ def _recording(store, hit, query, raw) -> dict | None:
     sess = store.get_session(hit.item_id)
     if sess is None:
         return None
+
     def url(at_ms: int | None = None) -> str:
         args: dict[str, Any] = {"hl": raw}
         if at_ms is not None:
@@ -117,10 +121,15 @@ def _recording(store, hit, query, raw) -> dict | None:
 
     best_at = hit.best["at_ms"] if hit.best else None
     course = _course(store, sess.course_id)
-    meta = " · ".join(filter(None, [
-        _KIND_LABEL.get(sess.kind or "", "Recording"),
-        course.name if course else "",
-    ]))
+    meta = " · ".join(
+        filter(
+            None,
+            [
+                _KIND_LABEL.get(sess.kind or "", "Recording"),
+                course.name if course else "",
+            ],
+        )
+    )
     when = _when(sess.started_at)
     moments = hit.moments if len(hit.moments) > 1 else []
     return {
@@ -129,8 +138,7 @@ def _recording(store, hit, query, raw) -> dict | None:
         "snippet": _snippet(hit, query),
         "at": _clock(best_at) if best_at is not None else None,
         "url": url(best_at),
-        "moments": [{"label": _clock(ms), "url": url(ms)}
-                    for ms in moments[:_MOMENTS]],
+        "moments": [{"label": _clock(ms), "url": url(ms)} for ms in moments[:_MOMENTS]],
         "more": max(0, len(moments) - _MOMENTS),
         "icon": _KIND_ICON.get(sess.kind or "", "other"),
         "cc": course_cls(course.color if course else None),
@@ -142,11 +150,16 @@ def _note(store, hit, query, raw) -> dict | None:
     if note is None:
         return None
     course = _course(store, note.course_id)
-    meta = " · ".join(filter(None, [
-        "Voice memo" if note.source == "voice_memo" else "Note",
-        course.name if course else "",
-        "edited " + _when(note.updated_at, "%d %b %Y"),
-    ]))
+    meta = " · ".join(
+        filter(
+            None,
+            [
+                "Voice memo" if note.source == "voice_memo" else "Note",
+                course.name if course else "",
+                "edited " + _when(note.updated_at, "%d %b %Y"),
+            ],
+        )
+    )
     return {
         "title": search.highlight(note.title, query),
         "meta": meta,
@@ -163,12 +176,17 @@ def _task(store, hit, query, raw) -> dict | None:
     if task is None:
         return None
     course = _course(store, task.course_id)
-    meta = " · ".join(filter(None, [
-        "Deadline" if task.kind == "deadline" else "To-do",
-        course.name if course else "",
-        "due " + _due(task.due_at) if task.due_at else "",
-        task.status if task.status != "open" else "",
-    ]))
+    meta = " · ".join(
+        filter(
+            None,
+            [
+                "Deadline" if task.kind == "deadline" else "To-do",
+                course.name if course else "",
+                "due " + _due(task.due_at) if task.due_at else "",
+                task.status if task.status != "open" else "",
+            ],
+        )
+    )
     return {
         "title": search.highlight(task.title, query),
         "meta": meta,
@@ -185,9 +203,17 @@ def _event(store, hit, query, raw) -> dict | None:
         return None
     course = _course(store, event.course_id)
     start = timeutil.to_local(event.starts_at)
-    meta = " · ".join(filter(None, [
-        "Event", course.name if course else "", _when(event.starts_at), event.location or "",
-    ]))
+    meta = " · ".join(
+        filter(
+            None,
+            [
+                "Event",
+                course.name if course else "",
+                _when(event.starts_at),
+                event.location or "",
+            ],
+        )
+    )
     day = start.date().isoformat() if start else None
     return {
         "title": search.highlight(event.title, query),

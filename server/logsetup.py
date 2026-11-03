@@ -5,6 +5,7 @@ Modules log through ``logging.getLogger(__name__)``; only the entry
 points (``serve.py``, ``app.py``, the demo server) call :func:`setup`.
 Tests never do, so they stay quiet apart from warnings.
 """
+
 from __future__ import annotations
 
 import logging
@@ -46,7 +47,10 @@ def setup(log_file: str | None = None, level: str | None = None) -> Path | None:
             path = _SERVER_DIR / path
         path.parent.mkdir(parents=True, exist_ok=True)
         handler: logging.Handler = logging.handlers.RotatingFileHandler(
-            path, maxBytes=MAX_BYTES, backupCount=BACKUPS, encoding="utf-8",
+            path,
+            maxBytes=MAX_BYTES,
+            backupCount=BACKUPS,
+            encoding="utf-8",
         )
     else:
         handler = logging.StreamHandler(sys.stderr)
@@ -72,6 +76,7 @@ def _log_uncaught_exceptions() -> None:
     """Crashes outside a request (main thread or a background thread)
     are logged too, so they reach the log file when there is no
     console window."""
+
     def main_hook(exc_type, exc, tb):
         if issubclass(exc_type, KeyboardInterrupt):
             sys.__excepthook__(exc_type, exc, tb)
@@ -82,8 +87,11 @@ def _log_uncaught_exceptions() -> None:
         if args.exc_type is SystemExit:
             return
         name = args.thread.name if args.thread else "?"
-        _log.error("uncaught exception in thread %s", name,
-                   exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
+        _log.error(
+            "uncaught exception in thread %s",
+            name,
+            exc_info=(args.exc_type, args.exc_value, args.exc_traceback),
+        )
 
     sys.excepthook = main_hook
     threading.excepthook = thread_hook

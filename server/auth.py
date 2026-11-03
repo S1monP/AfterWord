@@ -14,6 +14,7 @@ Both are off unless configured, so local development needs no setup.
 
 The cookie is SameSite=Lax, so other sites cannot post forms with it.
 """
+
 from __future__ import annotations
 
 import datetime as _dt
@@ -39,9 +40,13 @@ from flask import (
 log = logging.getLogger(__name__)
 
 #: Endpoints the recorder calls. Token-checked; never behind the login.
-DEVICE_ENDPOINTS = frozenset({
-    "sessions_api.api_create_session", "sessions_api.api_put_chunk", "sessions_api.api_finish_session",
-})
+DEVICE_ENDPOINTS = frozenset(
+    {
+        "sessions_api.api_create_session",
+        "sessions_api.api_put_chunk",
+        "sessions_api.api_finish_session",
+    }
+)
 #: Reachable without logging in.
 OPEN_ENDPOINTS = frozenset({"auth.login", "static"})
 
@@ -64,9 +69,11 @@ def init_app(app: Flask) -> None:
     app.before_request(_guard)
     app.context_processor(lambda: {"auth_enabled": bool(cfg.web_password)})
     if cfg.web_password and not cfg.device_token:
-        log.warning("AFTERWORD_WEB_PASSWORD is set but AFTERWORD_DEVICE_TOKEN "
-                    "is not; device uploads are open to anyone who can reach "
-                    "the server.")
+        log.warning(
+            "AFTERWORD_WEB_PASSWORD is set but AFTERWORD_DEVICE_TOKEN "
+            "is not; device uploads are open to anyone who can reach "
+            "the server."
+        )
 
 
 def _persistent_secret(data_dir: Path) -> str:
@@ -102,8 +109,7 @@ def _guard() -> Any | None:
     endpoint = request.endpoint
     if endpoint in DEVICE_ENDPOINTS:
         if cfg.device_token and not _device_token_ok(cfg.device_token):
-            return jsonify({"error": "unauthorized",
-                            "detail": "device token required"}), 401
+            return jsonify({"error": "unauthorized", "detail": "device token required"}), 401
         return None
     if not cfg.web_password or endpoint in OPEN_ENDPOINTS:
         return None
@@ -117,8 +123,7 @@ def _guard() -> Any | None:
 
 def _safe_next(target: str | None) -> str:
     """Only same-site paths, so ?next= cannot send the user elsewhere."""
-    if target and target.startswith("/") and not target.startswith("//") \
-            and "\\" not in target:
+    if target and target.startswith("/") and not target.startswith("//") and "\\" not in target:
         return target
     return "/"
 
@@ -136,8 +141,7 @@ def login() -> Any:
             session.permanent = True
             return redirect(next_url)
         time.sleep(LOGIN_FAIL_DELAY_S)
-        return render_template("login.html", error="Wrong password.",
-                               next_url=next_url), 401
+        return render_template("login.html", error="Wrong password.", next_url=next_url), 401
     return render_template("login.html", error=None, next_url=next_url)
 
 

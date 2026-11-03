@@ -10,6 +10,7 @@ Production:   python serve.py    (waitress; see serve.py)
 Configuration is via env vars / .env (see :mod:`config`). Routes live in
 the :mod:`web` package as blueprints.
 """
+
 from __future__ import annotations
 
 import logging
@@ -72,13 +73,12 @@ def create_app(config: config_mod.Config | None = None) -> Flask:
     )
     # Calendar subscriptions (synced hourly by start_scheduler below).
     from services import calendar_feeds
+
     app.config["AFTERWORD_SUBSCRIPTIONS_SERVICE"] = calendar_feeds.SubscriptionsService(
         app.config["AFTERWORD_STORAGE"]
     )
-    app.config["AFTERWORD_CLASSIFICATION_SERVICE"] = (
-        services.classification.ClassificationService(
-            app.config["AFTERWORD_STORAGE"]
-        )
+    app.config["AFTERWORD_CLASSIFICATION_SERVICE"] = services.classification.ClassificationService(
+        app.config["AFTERWORD_STORAGE"]
     )
     app.config["AFTERWORD_COURSES_SERVICE"] = services.courses.CoursesService(
         app.config["AFTERWORD_STORAGE"]
@@ -101,11 +101,11 @@ def create_app(config: config_mod.Config | None = None) -> Flask:
     _x = app.config["AFTERWORD_LLM_PROVIDERS"]["text"]
     log.info("LLM providers: transcript=%s, text=%s", _t.name, _x.name)
     if _t.name == "noop":
-        log.warning("AFTERWORD_TRANSCRIPTION_API_KEY is not set; recordings "
-                    "will not be transcribed")
+        log.warning(
+            "AFTERWORD_TRANSCRIPTION_API_KEY is not set; recordings will not be transcribed"
+        )
     if _x.name == "noop":
-        log.warning("AFTERWORD_TEXT_API_KEY is not set; recordings will not "
-                    "be summarised")
+        log.warning("AFTERWORD_TEXT_API_KEY is not set; recordings will not be summarised")
     auth.init_app(app)
     # Refuse oversized bodies before reading them (the upload handlers
     # used to buffer the whole body, then check). The margin covers
@@ -114,10 +114,12 @@ def create_app(config: config_mod.Config | None = None) -> Flask:
 
     @app.errorhandler(413)
     def _too_large(_exc: Exception) -> Any:
-        return jsonify({
-            "error": "file_too_large",
-            "detail": f"request is over {app.config['MAX_CONTENT_LENGTH']} bytes",
-        }), 413
+        return jsonify(
+            {
+                "error": "file_too_large",
+                "detail": f"request is over {app.config['MAX_CONTENT_LENGTH']} bytes",
+            }
+        ), 413
 
     if not transcode.ffmpeg_available(cfg.ffmpeg_path):
         log.warning(
@@ -155,6 +157,7 @@ def create_app(config: config_mod.Config | None = None) -> Flask:
         from services.tasks import is_due_today as _is_due_today
         from services.tasks import is_overdue as _is_overdue
         from web.api_settings import ui_settings
+
         try:
             nav = nav_context()
         except Exception:  # pragma: no cover  (a page still renders)
@@ -187,4 +190,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

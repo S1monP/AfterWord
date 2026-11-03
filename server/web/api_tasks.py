@@ -1,5 +1,5 @@
-"""Tasks and deadlines API.
-"""
+"""Tasks and deadlines API."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -28,8 +28,7 @@ def api_list_tasks() -> Any:
     except ValueError:
         return jsonify({"error": "invalid_limit_or_offset"}), 400
     if limit < 1 or limit > 200:
-        return jsonify({"error": "invalid_limit",
-                        "detail": "limit must be 1..200"}), 400
+        return jsonify({"error": "invalid_limit", "detail": "limit must be 1..200"}), 400
     if offset < 0:
         return jsonify({"error": "invalid_offset"}), 400
     kind = request.args.get("kind") or None
@@ -37,21 +36,25 @@ def api_list_tasks() -> Any:
     priority = request.args.get("priority") or None
     try:
         tasks, total = current_app_tasks_service().list(
-            kind=kind, status=status, priority=priority,
-            limit=limit, offset=offset,
+            kind=kind,
+            status=status,
+            priority=priority,
+            limit=limit,
+            offset=offset,
         )
     except ValueError as exc:
-        return jsonify({"error": "invalid_payload",
-                        "detail": str(exc)}), 400
-    return jsonify({
-        "tasks": [_task_to_dict(t) for t in tasks],
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-        "kind": kind,
-        "status": status,
-        "priority": priority,
-    })
+        return jsonify({"error": "invalid_payload", "detail": str(exc)}), 400
+    return jsonify(
+        {
+            "tasks": [_task_to_dict(t) for t in tasks],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "kind": kind,
+            "status": status,
+            "priority": priority,
+        }
+    )
 
 
 @bp.post("/api/v1/tasks")
@@ -79,8 +82,7 @@ def api_create_task() -> Any:
             pinned=bool(payload.get("pinned", False)),
         )
     except ValueError as exc:
-        return jsonify({"error": "invalid_payload",
-                        "detail": str(exc)}), 400
+        return jsonify({"error": "invalid_payload", "detail": str(exc)}), 400
     return jsonify({"task": _task_to_dict(task)}), 201
 
 
@@ -105,14 +107,12 @@ def api_update_task(task_id: str) -> Any:
     """
     payload = request.get_json(silent=True) or {}
     kwargs: dict[str, Any] = {}
-    for field in ("title", "body_md", "description", "priority",
-                  "kind"):
+    for field in ("title", "body_md", "description", "priority", "kind"):
         if field in payload:
             kwargs[field] = payload[field]
     # Sentinel-friendly fields: pass through, the service handles
     # ``None`` as "clear".
-    for field in ("due_at", "source_offset_ms", "course_id",
-                  "pinned"):
+    for field in ("due_at", "source_offset_ms", "course_id", "pinned"):
         if field in payload:
             kwargs[field] = payload[field]
     try:
@@ -120,8 +120,7 @@ def api_update_task(task_id: str) -> Any:
     except KeyError:
         return jsonify({"error": "not_found"}), 404
     except ValueError as exc:
-        return jsonify({"error": "invalid_payload",
-                        "detail": str(exc)}), 400
+        return jsonify({"error": "invalid_payload", "detail": str(exc)}), 400
     return jsonify({"task": _task_to_dict(task)})
 
 
@@ -131,15 +130,13 @@ def api_set_task_status(task_id: str) -> Any:
     payload = request.get_json(silent=True) or {}
     status = payload.get("status")
     if status is None:
-        return jsonify({"error": "invalid_payload",
-                        "detail": "field 'status' is required"}), 400
+        return jsonify({"error": "invalid_payload", "detail": "field 'status' is required"}), 400
     try:
         task = current_app_tasks_service().set_status(task_id, status)
     except KeyError:
         return jsonify({"error": "not_found"}), 404
     except ValueError as exc:
-        return jsonify({"error": "invalid_payload",
-                        "detail": str(exc)}), 400
+        return jsonify({"error": "invalid_payload", "detail": str(exc)}), 400
     return jsonify({"task": _task_to_dict(task)})
 
 

@@ -29,6 +29,7 @@ A background-thread version can come later if the latency hurts.
 The providers are injectable for tests; see
 :func:`run_post_finish_pipeline` for the contract.
 """
+
 from __future__ import annotations
 
 import json
@@ -88,11 +89,14 @@ def _set_status(
     """
     try:
         storage.set_status(
-            session_id, status, status_detail=status_detail,
+            session_id,
+            status,
+            status_detail=status_detail,
         )
     except ValueError as exc:
         raise _PipelineError(
-            f"illegal status transition: {exc}", reason="bad_transition",
+            f"illegal status transition: {exc}",
+            reason="bad_transition",
         ) from exc
 
 
@@ -109,12 +113,12 @@ def _resolve_session(storage: Storage, session_id: str) -> dict:
     sess = storage.get_session(session_id)
     if sess is None:
         raise _PipelineError(
-            f"session {session_id!r} not found", reason="not_found",
+            f"session {session_id!r} not found",
+            reason="not_found",
         )
     if sess.status != STATUS_READY:
         raise _PipelineError(
-            f"session {session_id!r} is in status {sess.status!r}, "
-            f"not 'ready'",
+            f"session {session_id!r} is in status {sess.status!r}, not 'ready'",
             reason=REASON_NOT_READY,
         )
     full_path = storage.open_full_audio(session_id)
@@ -190,17 +194,17 @@ def run_post_finish_pipeline(
             return None
         # Anything else is unexpected; mark failed.
         return _mark_failed(
-            storage, session_id, exc.reason, str(exc),
+            storage,
+            session_id,
+            exc.reason,
+            str(exc),
         )
 
     # 2. Resolve providers. Tests pass fakes; production uses the
     # env-var-driven factory.
-    if (
-        transcript_provider is None
-        or classifier is None
-        or llm_provider is None
-    ):
+    if transcript_provider is None or classifier is None or llm_provider is None:
         from services.llm import default_providers
+
         providers = default_providers()
         if transcript_provider is None:
             transcript_provider = providers.get("transcript")
@@ -241,7 +245,10 @@ def run_post_finish_pipeline(
         _set_status(storage, session_id, STATUS_TRANSCRIBING)
     except _PipelineError as exc:
         return _mark_failed(
-            storage, session_id, "bad_transition", str(exc),
+            storage,
+            session_id,
+            "bad_transition",
+            str(exc),
         )
     if resume_transcript is not None:
         transcript = resume_transcript
@@ -250,12 +257,16 @@ def run_post_finish_pipeline(
             transcript = transcript_provider.transcribe(full_path)
         except LLMError as exc:
             return _mark_failed(
-                storage, session_id, REASON_TRANSCRIBE_FAILED,
+                storage,
+                session_id,
+                REASON_TRANSCRIBE_FAILED,
                 f"transcribe: {exc}",
             )
         except Exception as exc:  # pragma: no cover  (defensive)
             return _mark_failed(
-                storage, session_id, REASON_TRANSCRIBE_FAILED,
+                storage,
+                session_id,
+                REASON_TRANSCRIBE_FAILED,
                 f"transcribe: {exc!r}",
             )
     if not isinstance(transcript, str) or not transcript.strip():
@@ -263,34 +274,55 @@ def run_post_finish_pipeline(
         # it ends done, without a kind, so it shows on the Other page.
         try:
             storage.delete_artifacts(
-                session_id, "transcript", "summary", "extraction",
+                session_id,
+                "transcript",
+                "summary",
+                "extraction",
             )
             _set_status(
-                storage, session_id, STATUS_DONE,
+                storage,
+                session_id,
+                STATUS_DONE,
                 status_detail=NO_SPEECH_DETAIL,
             )
         except _PipelineError as exc:
             return _mark_failed(
-                storage, session_id, "bad_transition", str(exc),
+                storage,
+                session_id,
+                "bad_transition",
+                str(exc),
             )
-        return {"ok": True, "kind": None, "confidence": None,
-                "no_speech": True, "transcript_chars": 0,
-                "summary_chars": 0, "extracted_items": 0}
+        return {
+            "ok": True,
+            "kind": None,
+            "confidence": None,
+            "no_speech": True,
+            "transcript_chars": 0,
+            "summary_chars": 0,
+            "extracted_items": 0,
+        }
     # 4. Persist the transcript as an artifact and bump status.
     #    (Skipped on resume — the artifact is already there.)
     if resume_transcript is None:
         try:
             storage.add_artifact(
-                session_id, "transcript", transcript,
+                session_id,
+                "transcript",
+                transcript,
                 model=getattr(transcript_provider, "name", None),
             )
         except _PipelineError as exc:
             return _mark_failed(
-                storage, session_id, "bad_transition", str(exc),
+                storage,
+                session_id,
+                "bad_transition",
+                str(exc),
             )
         except Exception as exc:  # pragma: no cover
             return _mark_failed(
-                storage, session_id, REASON_TRANSCRIBE_FAILED,
+                storage,
+                session_id,
+                REASON_TRANSCRIBE_FAILED,
                 f"persist transcript: {exc!r}",
             )
     # 4b. Bump status either way (transcribing → transcribed is legal).
@@ -298,7 +330,10 @@ def run_post_finish_pipeline(
         _set_status(storage, session_id, STATUS_TRANSCRIBED)
     except _PipelineError as exc:
         return _mark_failed(
-            storage, session_id, "bad_transition", str(exc),
+            storage,
+            session_id,
+            "bad_transition",
+            str(exc),
         )
 
     # 5. Classify — unless the kind is already known. The calendar
@@ -310,9 +345,7 @@ def run_post_finish_pipeline(
     kind: str | None = None
     confidence: float | None = None
     sess_now = storage.get_session(session_id)
-    kind_already_set = (
-        sess_now is not None and sess_now.kind is not None
-    )
+    kind_already_set = sess_now is not None and sess_now.kind is not None
     if not kind_already_set:
         # A no-op classifier (no API key configured) is allowed to
         # fail without taking the session to 'failed' — we just
@@ -321,18 +354,25 @@ def run_post_finish_pipeline(
             _set_status(storage, session_id, STATUS_CLASSIFYING)
         except _PipelineError as exc:
             return _mark_failed(
-                storage, session_id, "bad_transition", str(exc),
+                storage,
+                session_id,
+                "bad_transition",
+                str(exc),
             )
         try:
             result = classifier.classify(transcript)
         except LLMError as exc:
             return _mark_failed(
-                storage, session_id, REASON_CLASSIFY_FAILED,
+                storage,
+                session_id,
+                REASON_CLASSIFY_FAILED,
                 f"classify: {exc}",
             )
         except Exception as exc:  # pragma: no cover
             return _mark_failed(
-                storage, session_id, REASON_CLASSIFY_FAILED,
+                storage,
+                session_id,
+                REASON_CLASSIFY_FAILED,
                 f"classify: {exc!r}",
             )
 
@@ -342,15 +382,22 @@ def run_post_finish_pipeline(
         try:
             kind, confidence = result.kind, result.confidence
             storage.set_kind(
-                session_id, kind, confidence=confidence,
+                session_id,
+                kind,
+                confidence=confidence,
             )
         except _PipelineError as exc:
             return _mark_failed(
-                storage, session_id, "bad_transition", str(exc),
+                storage,
+                session_id,
+                "bad_transition",
+                str(exc),
             )
         except Exception as exc:  # pragma: no cover
             return _mark_failed(
-                storage, session_id, REASON_CLASSIFY_FAILED,
+                storage,
+                session_id,
+                REASON_CLASSIFY_FAILED,
                 f"persist kind: {exc!r}",
             )
     else:
@@ -370,17 +417,26 @@ def run_post_finish_pipeline(
             _set_status(storage, session_id, STATUS_DONE)
         except _PipelineError as exc:
             return _mark_failed(
-                storage, session_id, "bad_transition", str(exc),
+                storage,
+                session_id,
+                "bad_transition",
+                str(exc),
             )
         # The memo's text lives in a note on the Notes page.
         try:
             from services.notes import ensure_memo_note
+
             ensure_memo_note(storage, session_id)
         except Exception:  # pragma: no cover  (defensive)
             traceback.print_exc()
-        return {"ok": True, "kind": kind, "confidence": confidence,
-                "transcript_chars": len(transcript),
-                "summary_chars": 0, "extracted_items": 0}
+        return {
+            "ok": True,
+            "kind": kind,
+            "confidence": confidence,
+            "transcript_chars": len(transcript),
+            "summary_chars": 0,
+            "extracted_items": 0,
+        }
 
     # 7. Summarise. A no-op summariser (no API key configured)
     # returns an empty Summary, so this step always succeeds in
@@ -393,7 +449,8 @@ def run_post_finish_pipeline(
         except Exception:  # pragma: no cover  (defensive)
             existing = None
         if isinstance(existing, dict) and isinstance(
-            existing.get("content"), str,
+            existing.get("content"),
+            str,
         ):
             try:
                 prior = json.loads(existing["content"])
@@ -409,7 +466,10 @@ def run_post_finish_pipeline(
         _set_status(storage, session_id, STATUS_SUMMARISING)
     except _PipelineError as exc:
         return _mark_failed(
-            storage, session_id, "bad_transition", str(exc),
+            storage,
+            session_id,
+            "bad_transition",
+            str(exc),
         )
     if kind in NO_SUMMARY_KINDS:
         try:
@@ -427,26 +487,37 @@ def run_post_finish_pipeline(
             summary_payload = _summary_payload(summary)
         except LLMError as exc:
             return _mark_failed(
-                storage, session_id, REASON_SUMMARISE_FAILED,
+                storage,
+                session_id,
+                REASON_SUMMARISE_FAILED,
                 f"summarise: {exc}",
             )
         except Exception as exc:  # pragma: no cover
             return _mark_failed(
-                storage, session_id, REASON_SUMMARISE_FAILED,
+                storage,
+                session_id,
+                REASON_SUMMARISE_FAILED,
                 f"summarise: {exc!r}",
             )
         try:
             storage.add_artifact(
-                session_id, "summary", summary_payload,
+                session_id,
+                "summary",
+                summary_payload,
                 model=getattr(llm_provider, "name", None),
             )
         except _PipelineError as exc:
             return _mark_failed(
-                storage, session_id, "bad_transition", str(exc),
+                storage,
+                session_id,
+                "bad_transition",
+                str(exc),
             )
         except Exception as exc:  # pragma: no cover
             return _mark_failed(
-                storage, session_id, REASON_SUMMARISE_FAILED,
+                storage,
+                session_id,
+                REASON_SUMMARISE_FAILED,
                 f"persist summary: {exc!r}",
             )
     _apply_title(storage, session_id, summary.title)
@@ -457,26 +528,35 @@ def run_post_finish_pipeline(
         _set_status(storage, session_id, STATUS_EXTRACTING)
     except _PipelineError as exc:
         return _mark_failed(
-            storage, session_id, "bad_transition", str(exc),
+            storage,
+            session_id,
+            "bad_transition",
+            str(exc),
         )
     try:
         items = llm_provider.extract(
-            transcript, kind,
+            transcript,
+            kind,
             recorded_at=_recorded_at(storage.get_session(session_id)),
         )
     except LLMError as exc:
         return _mark_failed(
-            storage, session_id, REASON_EXTRACT_FAILED,
+            storage,
+            session_id,
+            REASON_EXTRACT_FAILED,
             f"extract: {exc}",
         )
     except Exception as exc:  # pragma: no cover
         return _mark_failed(
-            storage, session_id, REASON_EXTRACT_FAILED,
+            storage,
+            session_id,
+            REASON_EXTRACT_FAILED,
             f"extract: {exc!r}",
         )
     try:
         storage.add_artifact(
-            session_id, "extraction",
+            session_id,
+            "extraction",
             json.dumps({"items": list(items)}),
             model=getattr(llm_provider, "name", None),
         )
@@ -484,11 +564,16 @@ def run_post_finish_pipeline(
         _set_status(storage, session_id, STATUS_DONE)
     except _PipelineError as exc:
         return _mark_failed(
-            storage, session_id, "bad_transition", str(exc),
+            storage,
+            session_id,
+            "bad_transition",
+            str(exc),
         )
     except Exception as exc:  # pragma: no cover
         return _mark_failed(
-            storage, session_id, REASON_EXTRACT_FAILED,
+            storage,
+            session_id,
+            REASON_EXTRACT_FAILED,
             f"persist extraction: {exc!r}",
         )
 
@@ -518,12 +603,14 @@ def _summary_payload(summary: Summary) -> str:
     to know the dataclass shape. ``text`` is the overview,
     ``sections`` a list of ``{"heading", "text"}``, ``key_points``
     a list of strings."""
-    return json.dumps({
-        "title": summary.title,
-        "text": summary.text,
-        "sections": list(summary.sections),
-        "key_points": list(summary.key_points),
-    })
+    return json.dumps(
+        {
+            "title": summary.title,
+            "text": summary.text,
+            "sections": list(summary.sections),
+            "key_points": list(summary.key_points),
+        }
+    )
 
 
 def _recorded_at(sess) -> str | None:
@@ -534,7 +621,10 @@ def _recorded_at(sess) -> str | None:
 
 
 def _file_items(
-    storage: Storage, session_id: str, kind: str | None, items: list,
+    storage: Storage,
+    session_id: str,
+    kind: str | None,
+    items: list,
 ) -> int:
     """Copy deadlines / to-dos / events into the user's lists (only for
     :data:`filing.FILING_KINDS`; other kinds just drop what an earlier
@@ -542,7 +632,8 @@ def _file_items(
     pipeline."""
     try:
         counts = filing.refile(
-            storage, session_id,
+            storage,
+            session_id,
             list(items) if kind in filing.FILING_KINDS else [],
         )
     except Exception:  # pragma: no cover  (defensive)
@@ -564,7 +655,8 @@ def _apply_title(storage: Storage, session_id: str, topic: str) -> None:
         title = f"{base}: {topic}" if base and topic else (base or topic)
         if title:
             storage.set_session_title(
-                session_id, title[:200],
+                session_id,
+                title[:200],
                 source="calendar" if base else "ai",
             )
     except Exception:  # pragma: no cover  (defensive)
@@ -603,7 +695,8 @@ def _time_match_session(storage: Storage, session_id: str) -> bool:
         if title_is_placeholder(sess):
             try:
                 storage.set_session_title(
-                    session_id, _calendar_base(event, storage),
+                    session_id,
+                    _calendar_base(event, storage),
                     source="calendar",
                 )
             except (KeyError, ValueError):
@@ -639,12 +732,12 @@ def _mark_failed(
     """
     try:
         storage.update_status(
-            session_id, STATUS_FAILED, status_detail=detail,
+            session_id,
+            STATUS_FAILED,
+            status_detail=detail,
         )
     except Exception:  # pragma: no cover
         # If even the failed-state write fails, log it but don't
         # re-raise — the pipeline must always return.
         traceback.print_exc()
     return {"ok": False, "reason": reason, "detail": detail}
-
-

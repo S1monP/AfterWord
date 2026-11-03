@@ -1,5 +1,5 @@
-"""Web UI pages (HTML).
-"""
+"""Web UI pages (HTML)."""
+
 from __future__ import annotations
 
 import io
@@ -34,6 +34,7 @@ def ui_dashboard() -> Any:
     """Home.
     ``?week=`` moves the week schedule by that many weeks."""
     from web.home import home_context
+
     try:
         week = max(-52, min(52, int(request.args.get("week", "0"))))
     except ValueError:
@@ -44,6 +45,7 @@ def ui_dashboard() -> Any:
 def _reading_page(page: str, mode: str = "date") -> Any:
     """Lectures, Meetings and Other: a list and a reader (web/recordings.py)."""
     from web.recordings import page_context
+
     ctx = page_context(page, request.args.get("session", "").strip(), mode)
     return render_template("reading.html", **ctx)
 
@@ -75,13 +77,16 @@ def ui_export_session(session_id: str) -> Any:
     """Download a recording's name, summary, items and transcript as
     one Markdown file."""
     from web.export import session_markdown
+
     try:
         name, text = session_markdown(current_app_storage(), session_id)
     except KeyError:
         abort(404)
     return send_file(
-        io.BytesIO(text.encode("utf-8")), as_attachment=True,
-        download_name=name, mimetype="text/markdown",
+        io.BytesIO(text.encode("utf-8")),
+        as_attachment=True,
+        download_name=name,
+        mimetype="text/markdown",
     )
 
 
@@ -91,6 +96,7 @@ def ui_notes() -> Any:
     (web/notes_page.py). ``?note_id=`` opens a note, ``?new=1`` a blank
     one; without either, desktop opens the newest."""
     from web.notes_page import page_context
+
     ctx = page_context(request.args.get("note_id", "").strip(), bool(request.args.get("new")))
     if ctx.get("missing"):
         abort(404)
@@ -106,8 +112,12 @@ def ui_export_note(note_id: str) -> Any:
     title = note.title or "Note"
     text = f"# {title}\n\n{note.body_md}".rstrip() + "\n"
     safe = "".join(c for c in title if c not in '\\/:*?"<>|').strip() or "Note"
-    return send_file(io.BytesIO(text.encode("utf-8")), as_attachment=True,
-                     download_name=f"{safe}.md", mimetype="text/markdown")
+    return send_file(
+        io.BytesIO(text.encode("utf-8")),
+        as_attachment=True,
+        download_name=f"{safe}.md",
+        mimetype="text/markdown",
+    )
 
 
 @bp.get("/todos")
@@ -116,11 +126,13 @@ def ui_todos() -> Any:
     a To-dos | Deadlines switch on the phone. Adding, ticking and the
     actions menu use the tasks API."""
     from web.todos_page import page_context
+
     return render_template("todos.html", **page_context())
 
 
 def _iso_date(raw: str | None):
     import datetime as _dt
+
     try:
         return _dt.date.fromisoformat((raw or "").strip()[:10])
     except ValueError:
@@ -134,6 +146,7 @@ def ui_calendar() -> Any:
     default), ``?day=`` the chosen day: the day panel on desktop, the
     full-screen day on the phone."""
     from web.calendar_page import calendar_context
+
     view = request.args.get("view", "month")
     if view not in ("month", "week"):
         view = "month"
@@ -148,6 +161,7 @@ def ui_subscriptions() -> Any:
     one-off .ics imports."""
     from services.calendar_feeds import display_url
     from web.common import current_app_subscriptions_service
+
     svc = current_app_subscriptions_service()
     today = timeutil.local_today()
 
@@ -157,13 +171,23 @@ def ui_subscriptions() -> Any:
             return ""
         return f"today {t:%H:%M}" if t.date() == today else f"{t:%a} {t.day} {t:%b} {t:%H:%M}"
 
-    subs = [{
-        "sub": s, "url": display_url(s.url), "synced": when(s.last_synced_at),
-        "tried": when(s.last_attempt_at), "missing": svc.missing_courses(s.id),
-    } for s in svc.list()]
+    subs = [
+        {
+            "sub": s,
+            "url": display_url(s.url),
+            "synced": when(s.last_synced_at),
+            "tried": when(s.last_attempt_at),
+            "missing": svc.missing_courses(s.id),
+        }
+        for s in svc.list()
+    ]
     courses = current_app_courses_service().list()[0]
-    return render_template("subscriptions.html", subs=subs, courses=courses,
-                           course_options=[{"id": c.id, "name": c.name} for c in courses])
+    return render_template(
+        "subscriptions.html",
+        subs=subs,
+        courses=courses,
+        course_options=[{"id": c.id, "name": c.name} for c in courses],
+    )
 
 
 def _back_to_day(starts_at: str | None) -> Any:
@@ -180,14 +204,25 @@ def _event_form(mode: str, event: Any, starts: str, ends: str, error: str = "") 
     "YYYY-MM-DDTHH:MM" for the datetime-local inputs; Back and Cancel go
     to the event's day."""
     day = _iso_date(starts)
-    back = url_for("pages.ui_calendar", date=day.isoformat(), day=day.isoformat()) if day else url_for("pages.ui_calendar")
+    back = (
+        url_for("pages.ui_calendar", date=day.isoformat(), day=day.isoformat())
+        if day
+        else url_for("pages.ui_calendar")
+    )
     feed = None
     if event is not None and event.subscription_id:
         from web.common import current_app_subscriptions_service
+
         feed = current_app_subscriptions_service().get(event.subscription_id)
     page = render_template(
-        "event_form.html", mode=mode, event=event, error=error, feed=feed,
-        starts_at_default=starts, ends_at_default=ends, back_url=back,
+        "event_form.html",
+        mode=mode,
+        event=event,
+        error=error,
+        feed=feed,
+        starts_at_default=starts,
+        ends_at_default=ends,
+        back_url=back,
         courses=current_app_courses_service().list()[0],
     )
     return (page, 400) if error else page
@@ -216,12 +251,15 @@ def ui_event_new() -> Any:
     """New event form. ``?date=YYYY-MM-DD`` (today by default) prefills
     the start: the next whole hour today, otherwise 09:00."""
     import datetime as _dt
+
     d = _iso_date(request.args.get("date")) or timeutil.local_today()
     now = timeutil.local_now()
     hour = min(now.hour + 1, 23) if d == now.date() else 9
     start = _dt.datetime.combine(d, _dt.time(hour))
     end = start + _dt.timedelta(hours=1)
-    return _event_form("new", None, f"{start:%Y-%m-%dT%H:%M}", f"{end:%Y-%m-%dT%H:%M}" if end.date() == d else "")
+    return _event_form(
+        "new", None, f"{start:%Y-%m-%dT%H:%M}", f"{end:%Y-%m-%dT%H:%M}" if end.date() == d else ""
+    )
 
 
 @bp.get("/events/<event_id>/edit")
@@ -242,7 +280,9 @@ def create_event_action() -> Any:
     repeat_until = (request.form.get("repeat_until") or "").strip() or None
     try:
         if repeat_until:
-            ev, _ = current_app_events_service().create_recurring(**payload, repeat_until=repeat_until)
+            ev, _ = current_app_events_service().create_recurring(
+                **payload, repeat_until=repeat_until
+            )
         else:
             ev = current_app_events_service().create(**payload)
     except ValueError as exc:
@@ -263,8 +303,13 @@ def update_event_action(event_id: str) -> Any:
         abort(404)
     except ValueError as exc:
         ev = current_app_events_service().get(event_id)
-        return _event_form("edit", ev, payload.get("starts_at") or _local_input(ev.starts_at),
-                           payload.get("ends_at") or _local_input(ev.ends_at), str(exc))
+        return _event_form(
+            "edit",
+            ev,
+            payload.get("starts_at") or _local_input(ev.starts_at),
+            payload.get("ends_at") or _local_input(ev.ends_at),
+            str(exc),
+        )
     return _back_to_day(ev.starts_at)
 
 

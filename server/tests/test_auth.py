@@ -1,5 +1,6 @@
 """Access control (auth.py): device token, web login, secret key, and the
 request size limit."""
+
 from __future__ import annotations
 
 import dataclasses
@@ -29,7 +30,8 @@ class _AuthCase(LRTestCase):
         return self.client.post(
             "/api/v1/sessions",
             data=json.dumps({"id": "auth_session_1", "expected_count": 1}),
-            content_type="application/json", headers=headers or {},
+            content_type="application/json",
+            headers=headers or {},
         )
 
 
@@ -45,11 +47,13 @@ class DeviceTokenTests(_AuthCase):
     def test_right_token_works_for_all_device_endpoints(self):
         h = {"Authorization": f"Bearer {TOKEN}"}
         self.assertEqual(self.announce(h).status_code, 201)
-        put = self.client.put("/api/v1/sessions/auth_session_1/chunks/1",
-                              data=b"\xff\xf1" + b"\x00" * 64, headers=h)
+        put = self.client.put(
+            "/api/v1/sessions/auth_session_1/chunks/1", data=b"\xff\xf1" + b"\x00" * 64, headers=h
+        )
         self.assertNotEqual(put.status_code, 401)
-        self.assertEqual(self.client.post(
-            "/api/v1/sessions/auth_session_1/chunks/1").status_code, 405)
+        self.assertEqual(
+            self.client.post("/api/v1/sessions/auth_session_1/chunks/1").status_code, 405
+        )
         fin = self.client.post("/api/v1/sessions/auth_session_1/finish")
         self.assertEqual(fin.status_code, 401)
 
@@ -87,8 +91,7 @@ class WebLoginTests(_AuthCase):
         self.assertEqual(self.client.get("/").status_code, 302)
 
     def test_login_then_logout(self):
-        resp = self.client.post("/login", data={"password": PASSWORD,
-                                                "next": "/calendar"})
+        resp = self.client.post("/login", data={"password": PASSWORD, "next": "/calendar"})
         self.assertEqual(resp.status_code, 302)
         self.assertTrue(resp.headers["Location"].endswith("/calendar"))
         page = self.client.get("/")
@@ -100,8 +103,7 @@ class WebLoginTests(_AuthCase):
 
     def test_next_cannot_leave_the_site(self):
         for target in ("//evil.example/", "https://evil.example/", "/\\evil"):
-            resp = self.client.post("/login", data={"password": PASSWORD,
-                                                    "next": target})
+            resp = self.client.post("/login", data={"password": PASSWORD, "next": target})
             self.assertEqual(resp.headers["Location"], "/", target)
 
     def test_device_endpoints_skip_the_login_but_need_the_token(self):
@@ -130,7 +132,8 @@ class SizeLimitTests(_AuthCase):
         # already refuses it at the socket, see serve.py).
         self.assertEqual(self.announce().status_code, 201)
         limit = self.app.config["MAX_CONTENT_LENGTH"]
-        resp = self.client.put("/api/v1/sessions/auth_session_1/chunks/1",
-                               data=b"\x00" * (limit + 1))
+        resp = self.client.put(
+            "/api/v1/sessions/auth_session_1/chunks/1", data=b"\x00" * (limit + 1)
+        )
         self.assertEqual(resp.status_code, 413)
         self.assertEqual(resp.get_json()["error"], "file_too_large")

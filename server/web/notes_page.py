@@ -5,6 +5,7 @@ recording attached (source 'voice_memo', source_ref = the recording).
 One list, and one live editor; a note with audio also has a player and
 "What was said", the original transcript.
 """
+
 from __future__ import annotations
 
 import datetime as _dt
@@ -66,12 +67,15 @@ class NotesList:
         seconds = _estimate_duration_seconds(sess) if sess else 0
         course = self.course_by_id.get(note.course_id or "")
         return {
-            "id": note.id, "title": note.title or UNTITLED,
+            "id": note.id,
+            "title": note.title or UNTITLED,
             "first": _first_line(note.body_md) or "No text yet",
             "when": _day(timeutil.to_local(note.updated_at), self.today),
-            "course": course.name if course else "", "course_id": course.id if course else "",
+            "course": course.name if course else "",
+            "course_id": course.id if course else "",
             "cc": course_cls(course.color if course else None),
-            "has_audio": sess is not None and bool(sess.full_audio_size and sess.full_audio_size > 8),
+            "has_audio": sess is not None
+            and bool(sess.full_audio_size and sess.full_audio_size > 8),
             "length": _clock(seconds) if seconds >= 1 else "",
             "recording_id": sess.id if sess else "",
         }
@@ -87,10 +91,20 @@ def editor(listing: NotesList, note) -> dict[str, Any]:
     made = timeutil.to_local(note.created_at)
     row = listing.row(note)
     return {
-        "note": note, "row": row,
-        "saved": f"Saved · {saved:%H:%M}" if saved and saved.date() == listing.today else (f"Saved · {saved.day} {saved:%b}" if saved else ""),
-        "made": ((f"Recorded {made:%a} {made.day} {made:%b %Y}, {made:%H:%M}") if sess else (f"Written {made:%a} {made.day} {made:%b %Y}")) if made else "",
-        "recording": sess, "lines": lines,
+        "note": note,
+        "row": row,
+        "saved": f"Saved · {saved:%H:%M}"
+        if saved and saved.date() == listing.today
+        else (f"Saved · {saved.day} {saved:%b}" if saved else ""),
+        "made": (
+            (f"Recorded {made:%a} {made.day} {made:%b %Y}, {made:%H:%M}")
+            if sess
+            else (f"Written {made:%a} {made.day} {made:%b %Y}")
+        )
+        if made
+        else "",
+        "recording": sess,
+        "lines": lines,
     }
 
 
@@ -103,7 +117,7 @@ def page_context(note_id: str, new: bool) -> dict[str, Any]:
         if selected is None:
             return {"missing": True}
     elif listing.notes and not new:
-        selected = listing.notes[0]          # newest; the phone shows the list
+        selected = listing.notes[0]  # newest; the phone shows the list
         auto = True
     return {
         "missing": False,

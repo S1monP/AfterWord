@@ -6,6 +6,7 @@ its own tones, for light and dark (``--cc1`` .. ``--cc12`` in
 or status colours. A course stores the *number* of its colour ("3"),
 never a hex value, so its colour follows scheme and theme changes.
 """
+
 from __future__ import annotations
 
 import re
@@ -16,9 +17,18 @@ SLOTS = 12
 # Each slot in the default scheme (Violet, refined; dark). Used only to
 # map an old hex colour onto the nearest slot.
 REFERENCE = {
-    1: "#6aa7ff", 2: "#f08a6c", 3: "#3cc7b0", 4: "#e676a8",
-    5: "#5abfd8", 6: "#a8d161", 7: "#b15ed4", 8: "#d8bf5a",
-    9: "#66cc85", 10: "#d161bb", 11: "#be9b74", 12: "#8395af",
+    1: "#6aa7ff",
+    2: "#f08a6c",
+    3: "#3cc7b0",
+    4: "#e676a8",
+    5: "#5abfd8",
+    6: "#a8d161",
+    7: "#b15ed4",
+    8: "#d8bf5a",
+    9: "#66cc85",
+    10: "#d161bb",
+    11: "#be9b74",
+    12: "#8395af",
 }
 
 _HEX_RE = re.compile(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")

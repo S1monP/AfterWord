@@ -3,6 +3,7 @@
 These fixtures create a fresh data directory and a Flask app for each
 test, so tests are isolated and can run in any order.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -68,6 +69,7 @@ class LRTestCase(unittest.TestCase):
                 break
             except OSError:
                 import time
+
                 time.sleep(0.05)
 
     # --- helpers ---------------------------------------------------------
@@ -81,8 +83,11 @@ class LRTestCase(unittest.TestCase):
         Requires ffmpeg (skipWithoutFFmpeg the calling test).
         """
         from services import transcode as tx
+
         wav = storage.make_wav_bytes(
-            22050, 1, 32,
+            22050,
+            1,
+            32,
             bytes(int(seconds * 22050 * 4)),
         )
         src = self._tmpdir / "gen.wav"

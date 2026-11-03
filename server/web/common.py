@@ -1,6 +1,7 @@
 """Helpers shared by the web modules: app-object accessors, template
 filters, display helpers and upload title helpers.
 """
+
 from __future__ import annotations
 
 import json
@@ -50,9 +51,7 @@ def current_app_subscriptions_service():
     return current_app.config["AFTERWORD_SUBSCRIPTIONS_SERVICE"]
 
 
-def current_app_classification_service() -> (
-    services.classification.ClassificationService
-):
+def current_app_classification_service() -> services.classification.ClassificationService:
     """Pull the ClassificationService off the active Flask app."""
     return current_app.config["AFTERWORD_CLASSIFICATION_SERVICE"]
 
@@ -85,6 +84,7 @@ def current_app_text_provider() -> services.llm.LLMProvider:
 # Jinja filters
 # ---------------------------------------------------------------------------
 
+
 def _parse_summary_artifact(artifact: dict | None) -> dict | None:
     """Split a summary artifact into display fields.
 
@@ -103,21 +103,19 @@ def _parse_summary_artifact(artifact: dict | None) -> dict | None:
     except (TypeError, ValueError):
         return artifact
     if not isinstance(payload, dict) or not isinstance(
-        payload.get("text"), str,
+        payload.get("text"),
+        str,
     ):
         return artifact
     out = dict(artifact)
     out["content"] = payload["text"]
     raw_points = payload.get("key_points")
     out["key_points"] = (
-        [str(p) for p in raw_points if str(p).strip()]
-        if isinstance(raw_points, list)
-        else []
+        [str(p) for p in raw_points if str(p).strip()] if isinstance(raw_points, list) else []
     )
     raw_sections = payload.get("sections")
     out["sections"] = [
-        {"heading": str(sec.get("heading") or ""),
-         "text": str(sec.get("text"))}
+        {"heading": str(sec.get("heading") or ""), "text": str(sec.get("text"))}
         for sec in (raw_sections if isinstance(raw_sections, list) else [])
         if isinstance(sec, dict) and str(sec.get("text") or "").strip()
     ]
@@ -224,7 +222,8 @@ def is_other(sess: storage.Session) -> bool:
 
 
 def recording_url(
-    sess: storage.Session | str | None, **args: Any,
+    sess: storage.Session | str | None,
+    **args: Any,
 ) -> str | None:
     """Where a recording opens: its page, with it selected. ``sess``
     may be a session or its id; ``args`` go on the URL (``t`` in ms,
@@ -238,7 +237,8 @@ def recording_url(
         if note is not None:
             return url_for("pages.ui_notes", note_id=note.id, **args)
     endpoint, param = KIND_PAGES.get(
-        sess.kind or "", ("pages.ui_other", "session"),
+        sess.kind or "",
+        ("pages.ui_other", "session"),
     )
     return url_for(endpoint, **{param: sess.id}, **args)
 
@@ -274,9 +274,7 @@ def nav_context() -> dict[str, Any]:
         "notes": note_total,
         "other": counts["other"],
         "todos": open_todos,
-        "courses": [
-            {"course": c, "lectures": by_course.get(c.id, 0)} for c in courses
-        ],
+        "courses": [{"course": c, "lectures": by_course.get(c.id, 0)} for c in courses],
     }
 
 
@@ -293,6 +291,7 @@ def course_color(slot: str | int | None) -> str:
     """CSS colour for a course-palette slot: the active scheme's tone
     (``--cc<n>``, tokens.css), falling back to the default tone."""
     from services import palette
+
     try:
         n = int(slot or 0)
     except (TypeError, ValueError):
@@ -305,9 +304,7 @@ def course_color(slot: str | int | None) -> str:
 def rec_title(sess: storage.Session) -> str:
     """A recording's name: the stored title, except the device's folder
     name, which shows as the kind ("Meeting") until the AI names it."""
-    if sess.title and not (
-        sess.title_source is None and storage.title_is_placeholder(sess)
-    ):
+    if sess.title and not (sess.title_source is None and storage.title_is_placeholder(sess)):
         return sess.title
     return _KIND_LABEL.get(sess.kind or "", "Recording")
 
@@ -329,6 +326,7 @@ def _short_duration(seconds: float) -> str:
         return f"{s} s"
     h, m = divmod(round(s / 60), 60)
     return f"{h} h {m} min" if h else f"{m} min"
+
 
 _STATUS_LABEL = {
     storage.STATUS_RECEIVING: "Receiving",

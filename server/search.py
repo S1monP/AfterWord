@@ -14,6 +14,7 @@ The index lives in ``search_rows`` / ``search_fts`` (storage.py) and is
 brought up to date before every search: items whose stamp changed are
 rebuilt, deleted ones dropped (:func:`sync`).
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -45,12 +46,14 @@ _STEMMERS = threading.local()
 
 # Dropped from a query that has other words: they are in nearly every
 # line, and a search matches words within one piece.
-_STOP_WORDS = frozenset("""
+_STOP_WORDS = frozenset(
+    """
     a an and are as at be by for from in is it of on or that the this to
     was with
     а в во да для до же за и из к как ли на не но о об от по с со то у
     что это
-""".split())
+""".split()
+)
 
 
 def _norm(word: str) -> str:
@@ -83,8 +86,7 @@ def _row(field_: str, at_ms: int | None, text: str) -> Row | None:
     words = [_norm(w) for w in _WORD.findall(text)]
     if not words:
         return None
-    return (field_, at_ms, text, " ".join(words),
-            " ".join(_stem(w) for w in words))
+    return (field_, at_ms, text, " ".join(words), " ".join(_stem(w) for w in words))
 
 
 _PARAGRAPH_BREAK = re.compile(r"\n\s*\n")
@@ -134,9 +136,7 @@ def _recording_rows(store: storage.Storage, session_id: str) -> list | None:
         return []
     rows = []
     # The device's folder name is not a name (web.common.rec_title).
-    if sess.title and not (
-        sess.title_source is None and storage.title_is_placeholder(sess)
-    ):
+    if sess.title and not (sess.title_source is None and storage.title_is_placeholder(sess)):
         rows.append(_row("title", None, sess.title))
     for text in _summary_texts(store.get_artifact(session_id, "summary")):
         rows.append(_row("summary", None, text))
@@ -170,8 +170,7 @@ def _event_rows(store: storage.Storage, event_id: str) -> list | None:
     event = store.get_event(event_id)
     if event is None:
         return None
-    return [_row("title", None, event.title),
-            _row("body", None, event.location or "")] + [
+    return [_row("title", None, event.title), _row("body", None, event.location or "")] + [
         _row("body", None, line) for line in _markdown_lines(event.description)
     ]
 
@@ -192,8 +191,10 @@ def sync(store: storage.Storage) -> int:
     Cheap when nothing changed (it compares stamps); the first search
     after a recording is processed indexes its transcript."""
     with _SYNC_LOCK:
-        current = {key: hashlib.blake2b(stamp.encode(), digest_size=16).hexdigest()
-                   for key, stamp in store.search_source_stamps().items()}
+        current = {
+            key: hashlib.blake2b(stamp.encode(), digest_size=16).hexdigest()
+            for key, stamp in store.search_source_stamps().items()
+        }
         indexed = store.search_indexed_stamps()
         changed = 0
         for key in indexed.keys() - current.keys():
@@ -221,9 +222,9 @@ _STEM_PREFIX_MIN = 5
 
 @dataclass(frozen=True)
 class Term:
-    word: str      # normalised
+    word: str  # normalised
     stem: str
-    prefix: bool   # the word being typed: longer words match too
+    prefix: bool  # the word being typed: longer words match too
 
     @property
     def stem_prefix(self) -> bool:
@@ -259,8 +260,7 @@ def parse_query(text: str) -> Query:
     words = [_norm(w) for w in _WORD.findall(text or "")]
     if not words or (len(words) == 1 and len(words[0]) < 2):
         return Query(())
-    terms = [Term(w, _stem(w), i == len(words) - 1)
-             for i, w in enumerate(words)]
+    terms = [Term(w, _stem(w), i == len(words) - 1) for i, w in enumerate(words)]
     kept = [t for t in terms if t.word not in _STOP_WORDS]
     return Query(tuple(kept or terms))
 
@@ -269,8 +269,8 @@ def parse_query(text: str) -> Query:
 class Hit:
     item_type: str
     item_id: str
-    score: float                  # best piece's, lower is better
-    count: int = 0                # matching pieces
+    score: float  # best piece's, lower is better
+    count: int = 0  # matching pieces
     title_match: bool = False
     # The piece to show: for a recording the first line that mentions
     # it, else the best matching piece other than the title.
@@ -309,8 +309,7 @@ def search(store: storage.Storage, query: str | Query) -> dict[str, list[Hit]]:
         if row["field"] == "title":
             hit.title_match = True
         elif hit.best is None or (  # rows come best first
-            at_ms is not None
-            and (hit.best["at_ms"] is None or at_ms < hit.best["at_ms"])
+            at_ms is not None and (hit.best["at_ms"] is None or at_ms < hit.best["at_ms"])
         ):
             hit.best = row
         if at_ms is not None:
@@ -339,7 +338,7 @@ def highlight(text: str, query: str | Query) -> Segments:
         stem = _stem(word)
         if any(t.matches(word, stem) for t in query.terms):
             if m.start() > pos:
-                out.append((text[pos:m.start()], False))
+                out.append((text[pos : m.start()], False))
             out.append((m.group(), True))
             pos = m.end()
     if pos < len(text or ""):
@@ -365,6 +364,5 @@ def snippet(text: str, query: str | Query, width: int = 160) -> Segments:
         if end < len(text):
             space = text.rfind(" ", start, end)
             end = space if space > first else end
-        text = ("…" if start else "") + text[start:end].strip() + (
-            "…" if end < len(text) else "")
+        text = ("…" if start else "") + text[start:end].strip() + ("…" if end < len(text) else "")
     return highlight(text, query)

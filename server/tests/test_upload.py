@@ -3,6 +3,7 @@
 Designed to run regardless of whether ffmpeg is installed on the host.
 Tests that require ffmpeg are skipped if it isn't available.
 """
+
 from __future__ import annotations
 
 import io
@@ -15,10 +16,12 @@ from pathlib import Path
 from tests.conftest import LRTestCase, skip_without_ffmpeg
 
 
-def _make_wav_bytes(payload: bytes = b"\x00\x00\x00\x00" * 200,
-                    sample_rate: int = 22050,
-                    channels: int = 1,
-                    bits_per_sample: int = 32) -> bytes:
+def _make_wav_bytes(
+    payload: bytes = b"\x00\x00\x00\x00" * 200,
+    sample_rate: int = 22050,
+    channels: int = 1,
+    bits_per_sample: int = 32,
+) -> bytes:
     """Build a minimal PCM WAV in memory, matching the device format."""
     byte_rate = sample_rate * channels * (bits_per_sample // 8)
     block_align = channels * (bits_per_sample // 8)
@@ -46,7 +49,6 @@ def _io_bytes(data: bytes) -> io.BytesIO:
 
 
 class UploadPageTests(LRTestCase):
-
     def test_upload_page_renders(self) -> None:
         r = self.client.get("/upload")
         self.assertEqual(r.status_code, 200)
@@ -60,6 +62,7 @@ class UploadPageTests(LRTestCase):
         # configured with (conftest points at a dummy path), not
         # the host PATH.
         from services import transcode
+
         cfg = self.app.config["AFTERWORD_CONFIG"]
         r = self.client.get("/upload")
         body = r.get_data()
@@ -94,6 +97,7 @@ class WavUploadTests(LRTestCase):
         pre-pipeline status while the pipeline runs in a background
         thread, then the session reaches 'done'."""
         import time
+
         self.app.config["AFTERWORD_PIPELINE_BACKGROUND"] = True
         wav = _make_wav_bytes()
         r = self.client.post(
@@ -123,7 +127,8 @@ class WavUploadTests(LRTestCase):
         audio = self.client.get(body["session"]["full_audio_url"])
         self.assertEqual(audio.status_code, 200)
         self.assertEqual(
-            audio.mimetype, "audio/aac",
+            audio.mimetype,
+            "audio/aac",
             audio.get_data(as_text=False)[:16],
         )
         audio.close()
@@ -144,8 +149,7 @@ class WavUploadTests(LRTestCase):
         wav = _make_wav_bytes()
         r = self.client.post(
             "/api/v1/uploads/audio",
-            data={"file": (_io_bytes(wav), "lecture.wav"),
-                  "title": "CS101 Lec 3"},
+            data={"file": (_io_bytes(wav), "lecture.wav"), "title": "CS101 Lec 3"},
             content_type="multipart/form-data",
         )
         self.assertEqual(r.status_code, 201)
@@ -186,6 +190,7 @@ class WavUploadTests(LRTestCase):
         original = cfg.max_upload_bytes
         # Config is frozen; build a new dataclass with the smaller cap.
         from dataclasses import replace
+
         new_cfg = replace(cfg, max_upload_bytes=100)
         self.app.config["AFTERWORD_CONFIG"] = new_cfg
         try:
@@ -209,9 +214,11 @@ class NonCanonicalUploadTests(LRTestCase):
 
     def test_upload_without_ffmpeg_returns_503(self) -> None:
         from dataclasses import replace
+
         cfg = self.app.config["AFTERWORD_CONFIG"]
         self.app.config["AFTERWORD_CONFIG"] = replace(
-            cfg, ffmpeg_path="ffmpeg-nonexistent-test-binary",
+            cfg,
+            ffmpeg_path="ffmpeg-nonexistent-test-binary",
         )
         try:
             fake_mp3 = b"ID3\x04\x00\x00\x00\x00\x00\x00" + b"\xff" * 256
@@ -229,6 +236,7 @@ class NonCanonicalUploadTests(LRTestCase):
     def test_non_aac_with_ffmpeg_succeeds(self) -> None:
         import subprocess
         from dataclasses import replace
+
         real_ffmpeg = shutil.which("ffmpeg")
         if not real_ffmpeg:
             self.skipTest("ffmpeg not installed on this host")
@@ -242,9 +250,20 @@ class NonCanonicalUploadTests(LRTestCase):
             src.write_bytes(_make_wav_bytes(b"\x00\x00\x00\x00" * 500))
             mp3 = self._tmpdir / "src.mp3"
             subprocess.run(
-                ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-                 "-i", str(src), "-c:a", "libmp3lame", "-b:a", "64k",
-                 str(mp3)],
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-i",
+                    str(src),
+                    "-c:a",
+                    "libmp3lame",
+                    "-b:a",
+                    "64k",
+                    str(mp3),
+                ],
                 check=True,
             )
             mp3_bytes = mp3.read_bytes()
@@ -267,6 +286,7 @@ class TranscodeUnitTests(unittest.TestCase):
 
     def test_sniff_wav(self) -> None:
         from services.transcode import sniff_format
+
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
             f.write(_make_wav_bytes())
             path = Path(f.name)
@@ -284,14 +304,18 @@ class TranscodeUnitTests(unittest.TestCase):
     @skip_without_ffmpeg
     def test_sniff_aac(self) -> None:
         from services.transcode import is_canonical_aac, sniff_format
+
         wav = _make_wav_bytes()
         with tempfile.TemporaryDirectory() as d:
             src = Path(d) / "sniff.wav"
             src.write_bytes(wav)
             dst = Path(d) / "sniff.aac"
             from services import transcode
+
             transcode.transcode_to_aac(
-                src, dst, ffmpeg_path=shutil.which("ffmpeg") or "ffmpeg",
+                src,
+                dst,
+                ffmpeg_path=shutil.which("ffmpeg") or "ffmpeg",
             )
             fmt = sniff_format(dst)
             self.assertEqual(fmt.kind, "aac")
@@ -302,6 +326,7 @@ class TranscodeUnitTests(unittest.TestCase):
 
     def test_sniff_mp4(self) -> None:
         from services.transcode import sniff_format
+
         with tempfile.NamedTemporaryFile(suffix=".m4a", delete=False) as f:
             f.write(b"\x00\x00\x00\x20ftypM4A ")
             path = Path(f.name)
@@ -312,6 +337,7 @@ class TranscodeUnitTests(unittest.TestCase):
 
     def test_sniff_unknown(self) -> None:
         from services.transcode import sniff_format
+
         with tempfile.NamedTemporaryFile(suffix=".xyz", delete=False) as f:
             f.write(b"some random bytes here 12345")
             path = Path(f.name)
@@ -322,6 +348,7 @@ class TranscodeUnitTests(unittest.TestCase):
 
     def test_default_title_format(self) -> None:
         from app import _default_title_from_iso
+
         # Titles use local time like the device's folder names:
         # 14:30 UTC on 3 Oct is 15:30 BST; a naive time is already local.
         self.assertEqual(
@@ -335,6 +362,7 @@ class TranscodeUnitTests(unittest.TestCase):
 
     def test_title_normalisation(self) -> None:
         from app import _normalise_title
+
         self.assertEqual(_normalise_title("  CS101  "), "CS101")
         self.assertIsNone(_normalise_title(""))
         self.assertIsNone(_normalise_title("a" * 201))

@@ -11,6 +11,7 @@ We use ffmpeg via subprocess rather than a Python binding for two
 reasons: it supports every format under the sun without extra deps, and
 the error surface is small and predictable.
 """
+
 from __future__ import annotations
 
 import logging
@@ -57,7 +58,8 @@ class TranscodeError(Exception):
 @dataclass
 class AudioFormat:
     """Result of sniffing the first few bytes of a file."""
-    kind: str            # 'aac' | 'wav' | 'mp3' | 'mp4' | 'ogg' | 'flac' | 'webm' | 'unknown'
+
+    kind: str  # 'aac' | 'wav' | 'mp3' | 'mp4' | 'ogg' | 'flac' | 'webm' | 'unknown'
     sample_rate: int = 0
     channels: int = 0
     bits_per_sample: int = 0
@@ -66,6 +68,7 @@ class AudioFormat:
 # ---------------------------------------------------------------------------
 # Format sniff
 # ---------------------------------------------------------------------------
+
 
 def sniff_format(path: Path) -> AudioFormat:
     """Read a few bytes from ``path`` and report the audio format.
@@ -86,9 +89,7 @@ def sniff_format(path: Path) -> AudioFormat:
     # ADTS AAC: syncword 0xFFFx (12-bit sync + MPEG-4 layer bits).
     # Must be checked BEFORE the generic MPEG-audio fallback below,
     # which would otherwise misclassify the same bytes as MP3.
-    if (
-        len(head) >= 2 and head[0] == 0xFF and (head[1] & 0xF6) == 0xF0
-    ):
+    if len(head) >= 2 and head[0] == 0xFF and (head[1] & 0xF6) == 0xF0:
         return AudioFormat(kind="aac")
 
     if head[0:4] == b"RIFF" and len(head) >= 12 and head[8:12] == b"WAVE":
@@ -98,20 +99,14 @@ def sniff_format(path: Path) -> AudioFormat:
         # chunks between RIFF and data (which ffmpeg 9.x produces).
         pos = 12
         while pos + 8 <= len(head):
-            chunk_id = head[pos:pos + 4]
+            chunk_id = head[pos : pos + 4]
             if chunk_id == b"fmt ":
                 size = struct.unpack_from("<I", head, pos + 4)[0]
                 if size >= 16 and pos + 8 + 16 <= len(head):
                     try:
-                        fmt.channels = struct.unpack_from(
-                            "<H", head, pos + 8 + 2
-                        )[0]
-                        fmt.sample_rate = struct.unpack_from(
-                            "<I", head, pos + 8 + 4
-                        )[0]
-                        fmt.bits_per_sample = struct.unpack_from(
-                            "<H", head, pos + 8 + 14
-                        )[0]
+                        fmt.channels = struct.unpack_from("<H", head, pos + 8 + 2)[0]
+                        fmt.sample_rate = struct.unpack_from("<I", head, pos + 8 + 4)[0]
+                        fmt.bits_per_sample = struct.unpack_from("<H", head, pos + 8 + 14)[0]
                     except struct.error:
                         pass
                 break
@@ -143,6 +138,7 @@ def sniff_format(path: Path) -> AudioFormat:
 # ffmpeg helpers
 # ---------------------------------------------------------------------------
 
+
 def ffmpeg_available(ffmpeg_path: str = "ffmpeg") -> bool:
     """True if the ffmpeg binary can be found and run."""
     return shutil.which(ffmpeg_path) is not None or os.path.isfile(ffmpeg_path)
@@ -155,7 +151,10 @@ def ffmpeg_version(ffmpeg_path: str = "ffmpeg") -> str | None:
     try:
         out = subprocess.run(
             [ffmpeg_path, "-version"],
-            capture_output=True, text=True, timeout=5, check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
         )
         if out.returncode == 0:
             return out.stdout.splitlines()[0]
@@ -206,13 +205,22 @@ def probe_duration(
     if not ffprobe_available(ffmpeg_path):
         return None
     cmd = [
-        probe, "-v", "error", "-show_entries", "format=duration",
-        "-of", "default=noprint_wrappers=1:nokey=1", str(path),
+        probe,
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        str(path),
     ]
     try:
         proc = subprocess.run(
-            cmd, capture_output=True, text=True,
-            timeout=timeout_sec, check=False,
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout_sec,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -246,14 +254,27 @@ def decode_duration(
     if not ffmpeg_available(ffmpeg_path):
         return None
     cmd = [
-        ffmpeg_path, "-hide_banner", "-loglevel", "error",
-        "-progress", "pipe:1",
-        "-i", str(path), "-map", "0:a:0", "-f", "null", "-",
+        ffmpeg_path,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-progress",
+        "pipe:1",
+        "-i",
+        str(path),
+        "-map",
+        "0:a:0",
+        "-f",
+        "null",
+        "-",
     ]
     try:
         proc = subprocess.run(
-            cmd, capture_output=True, text=True,
-            timeout=timeout_sec, check=False,
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout_sec,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -274,6 +295,7 @@ def decode_duration(
 # Transcode
 # ---------------------------------------------------------------------------
 
+
 def _encode(
     src: Path,
     dst: Path,
@@ -287,8 +309,7 @@ def _encode(
     the result sniffs as ``expect_kind``. Returns the output size;
     raises :class:`TranscodeError` with a stable ``reason`` code."""
     if not src.exists() or src.stat().st_size == 0:
-        raise TranscodeError(TranscodeError.REASON_BAD_INPUT,
-                             "empty or missing file")
+        raise TranscodeError(TranscodeError.REASON_BAD_INPUT, "empty or missing file")
 
     if not ffmpeg_available(ffmpeg_path):
         raise TranscodeError(
@@ -306,16 +327,23 @@ def _encode(
 
     cmd = [
         ffmpeg_path,
-        "-y", "-hide_banner", "-loglevel", "error",
-        "-i", str(src),
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(src),
         *codec_args,
         str(dst),
     ]
 
     try:
         proc = subprocess.run(
-            cmd, capture_output=True, text=True,
-            timeout=timeout_sec, check=False,
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout_sec,
+            check=False,
         )
     except subprocess.TimeoutExpired as exc:
         raise TranscodeError(
@@ -324,7 +352,8 @@ def _encode(
         ) from exc
     except OSError as exc:
         raise TranscodeError(
-            TranscodeError.REASON_FFMPEG_MISSING, str(exc),
+            TranscodeError.REASON_FFMPEG_MISSING,
+            str(exc),
         ) from exc
 
     if proc.returncode != 0:
@@ -365,10 +394,23 @@ def transcode_to_aac(
     code.
     """
     return _encode(
-        src, dst,
-        ["-ar", str(sample_rate), "-ac", str(channels),
-         "-c:a", "aac", "-b:a", bitrate, "-f", "adts"],
-        "aac", ffmpeg_path=ffmpeg_path, timeout_sec=timeout_sec,
+        src,
+        dst,
+        [
+            "-ar",
+            str(sample_rate),
+            "-ac",
+            str(channels),
+            "-c:a",
+            "aac",
+            "-b:a",
+            bitrate,
+            "-f",
+            "adts",
+        ],
+        "aac",
+        ffmpeg_path=ffmpeg_path,
+        timeout_sec=timeout_sec,
     )
 
 
@@ -387,10 +429,23 @@ def transcode_for_stt(
     25-minute piece near 6 MB, well under the 25 MB inline cap.
     """
     return _encode(
-        src, dst,
-        ["-ar", str(STT_SAMPLE_RATE), "-ac", "1",
-         "-c:a", "libmp3lame", "-b:a", STT_BITRATE, "-f", "mp3"],
-        "mp3", ffmpeg_path=ffmpeg_path, timeout_sec=timeout_sec,
+        src,
+        dst,
+        [
+            "-ar",
+            str(STT_SAMPLE_RATE),
+            "-ac",
+            "1",
+            "-c:a",
+            "libmp3lame",
+            "-b:a",
+            STT_BITRATE,
+            "-f",
+            "mp3",
+        ],
+        "mp3",
+        ffmpeg_path=ffmpeg_path,
+        timeout_sec=timeout_sec,
     )
 
 

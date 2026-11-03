@@ -1,5 +1,6 @@
 """A recording as one Markdown file: name, date, summary, key points,
 the items it filed, and the transcript."""
+
 from __future__ import annotations
 
 import json

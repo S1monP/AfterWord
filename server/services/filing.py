@@ -19,6 +19,7 @@ not pile up copies and nothing the user edited or ticked off is lost.
 Items that repeat something already in the lists, or that are dated
 before the recording, are skipped.
 """
+
 from __future__ import annotations
 
 import datetime as _dt
@@ -48,9 +49,7 @@ class _Link:
     def __init__(self, sess, offset_ms: int | None) -> None:
         self.session_id = sess.id
         self.offset_ms = offset_ms
-        named = sess.title and not (
-            sess.title_source is None and title_is_placeholder(sess)
-        )
+        named = sess.title and not (sess.title_source is None and title_is_placeholder(sess))
         name = f"the recording “{sess.title}”" if named else "a recording"
         at = f" at {_clock(offset_ms)}" if offset_ms is not None else ""
         self.description = f"From {name}{at}."
@@ -84,9 +83,14 @@ def refile(storage: Storage, session_id: str, items: list[dict]) -> dict:
     return counts
 
 
-def _file_one(item: dict, sess, recorded_day: _dt.date,
-              tasks: TasksService, events: EventsService,
-              link: _Link | None) -> str | None:
+def _file_one(
+    item: dict,
+    sess,
+    recorded_day: _dt.date,
+    tasks: TasksService,
+    events: EventsService,
+    link: _Link | None,
+) -> str | None:
     kind = item.get("type")
     text = " ".join(str(item.get("text", "")).split())[:_MAX_TITLE]
     if kind not in ("deadline", "action_item", "event") or not text:
@@ -95,33 +99,35 @@ def _file_one(item: dict, sess, recorded_day: _dt.date,
         start = _local(item.get("start"))
         if start is None:
             return None
-        if not start[1]:                  # a date without a time
-            return _add_task(tasks, sess, "deadline", text, start[0],
-                             recorded_day, link)
-        return _add_event(events, sess, text, item, start[0],
-                          recorded_day, link)
+        if not start[1]:  # a date without a time
+            return _add_task(tasks, sess, "deadline", text, start[0], recorded_day, link)
+        return _add_event(events, sess, text, item, start[0], recorded_day, link)
     due = _local(item.get("due"))
     if kind == "deadline" and due is not None:
-        return _add_task(tasks, sess, "deadline", text, due[0],
-                         recorded_day, link)
-    return _add_task(tasks, sess, "task", text, due[0] if due else None,
-                     recorded_day, link)
+        return _add_task(tasks, sess, "deadline", text, due[0], recorded_day, link)
+    return _add_task(tasks, sess, "task", text, due[0] if due else None, recorded_day, link)
 
 
-def _add_task(tasks: TasksService, sess, kind: str, text: str,
-              due: _dt.datetime | None, recorded_day: _dt.date,
-              link: _Link | None) -> str | None:
+def _add_task(
+    tasks: TasksService,
+    sess,
+    kind: str,
+    text: str,
+    due: _dt.datetime | None,
+    recorded_day: _dt.date,
+    link: _Link | None,
+) -> str | None:
     if due is not None and due.date() < recorded_day:
         return None
     day = due.date() if due else None
     # Compared with both lists: the same thing may come back once as a
     # deadline and once as a to-do.
     open_items, _ = tasks.list(status="open", limit=1000)
-    if any(_same_day(t.due_at, day) and _similar(t.title, text)
-           for t in open_items):
+    if any(_same_day(t.due_at, day) and _similar(t.title, text) for t in open_items):
         return None
     tasks.create(
-        title=text, kind=kind,
+        title=text,
+        kind=kind,
         due_at=due.strftime("%Y-%m-%dT%H:%M") if due else None,
         description=link.description if link else None,
         source=SOURCE,
@@ -132,9 +138,15 @@ def _add_task(tasks: TasksService, sess, kind: str, text: str,
     return kind
 
 
-def _add_event(events: EventsService, sess, text: str, item: dict,
-               start: _dt.datetime, recorded_day: _dt.date,
-               link: _Link | None) -> str | None:
+def _add_event(
+    events: EventsService,
+    sess,
+    text: str,
+    item: dict,
+    start: _dt.datetime,
+    recorded_day: _dt.date,
+    link: _Link | None,
+) -> str | None:
     if start.date() < recorded_day:
         return None
     end = _local(item.get("end"))
@@ -151,13 +163,16 @@ def _add_event(events: EventsService, sess, text: str, item: dict,
         event_kind = "other"
     location = item.get("location")
     events.create(
-        title=text, kind=event_kind,
+        title=text,
+        kind=event_kind,
         location=" ".join(location.split())[:200]
-        if isinstance(location, str) and location.strip() else None,
+        if isinstance(location, str) and location.strip()
+        else None,
         starts_at=start.strftime("%Y-%m-%dT%H:%M"),
         ends_at=end_dt.strftime("%Y-%m-%dT%H:%M"),
         description=link.description if link else None,
-        source=SOURCE, source_ref=link.session_id if link else None,
+        source=SOURCE,
+        source_ref=link.session_id if link else None,
         course_id=sess.course_id if event_kind == "lecture" else None,
     )
     return "event"
@@ -211,8 +226,7 @@ _WORD = re.compile(r"\w+")
 
 
 def _words(text: str) -> set[str]:
-    return {w for w in _WORD.findall(text.lower().replace("ё", "е"))
-            if len(w) > 2}
+    return {w for w in _WORD.findall(text.lower().replace("ё", "е")) if len(w) > 2}
 
 
 def _similar(a: str, b: str) -> bool:

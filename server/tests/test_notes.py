@@ -1,4 +1,5 @@
-﻿"""Tests for the Notes service and API. Covers service-level validation/rendering/CRUD, API-level HTTP surface, and frontend HTML rendering. All tests use the temp-dir storage helper from conftest.LRTestCase."""
+"""Tests for the Notes service and API. Covers service-level validation/rendering/CRUD, API-level HTTP surface, and frontend HTML rendering. All tests use the temp-dir storage helper from conftest.LRTestCase."""
+
 from __future__ import annotations
 
 import json
@@ -115,9 +116,13 @@ class NotesServiceTests(LRTestCase):
         n3 = svc.create(title="Third", body_md="3")
         # Force distinct updated_at values so order is deterministic.
         store = self.app.config["AFTERWORD_STORAGE"]
-        for n, ts in [(n3, '2026-10-06T10:00:02Z'), (n2, '2026-10-06T10:00:01Z'), (n1, '2026-10-06T10:00:00Z')]:
+        for n, ts in [
+            (n3, "2026-10-06T10:00:02Z"),
+            (n2, "2026-10-06T10:00:01Z"),
+            (n1, "2026-10-06T10:00:00Z"),
+        ]:
             with store._tx() as conn:
-                conn.execute('UPDATE notes SET updated_at = ? WHERE id = ?', (ts, n.id))
+                conn.execute("UPDATE notes SET updated_at = ? WHERE id = ?", (ts, n.id))
         notes, total = svc.list()
         self.assertEqual(total, 3)
         self.assertEqual([n.id for n in notes], [n3.id, n2.id, n1.id])
@@ -159,12 +164,14 @@ class NotesServiceTests(LRTestCase):
 
     def test_render_html_escapes_script_tags(self):
         from services.notes import render_html
+
         out = render_html("Hello <script>alert(1)</script> world")
         self.assertNotIn("<script>", out)
         self.assertIn("&lt;script&gt;", out)
 
     def test_render_html_supports_standard_markdown(self):
         from services.notes import render_html
+
         cases = [
             ("# Title", "<h1>"),
             ("## Sub", "<h2>"),
@@ -299,6 +306,7 @@ class NotesAPITests(LRTestCase):
         resp = self.client.delete(f"/api/v1/notes/{note_id}")
         self.assertEqual(resp.status_code, 404)
 
+
 # ---------------------------------------------------------------------------
 # Web UI tests
 # ---------------------------------------------------------------------------
@@ -330,7 +338,7 @@ class NotesWebUITests(LRTestCase):
     def test_notes_list_has_search_and_rows(self):
         self._create(title="Apples", body_md="fruit")
         body = self.client.get("/notes").get_data(as_text=True)
-        self.assertIn("data-list-filter", body)               # filters as you type
+        self.assertIn("data-list-filter", body)  # filters as you type
         self.assertIn('data-find="apples fruit', body)
 
     def test_notes_new_renders_editor(self):
@@ -338,13 +346,13 @@ class NotesWebUITests(LRTestCase):
         self.assertIn('class="rpage npage is-open"', body)
         self.assertIn("data-body", body)
         self.assertIn('placeholder="Title"', body)
-        self.assertIn('data-id=""', body)                     # made on first typing
+        self.assertIn('data-id=""', body)  # made on first typing
 
     def test_note_detail_renders_editor_prefilled(self):
         note_id = self._create(title="Hello", body_md="**world**").get_json()["note"]["id"]
         body = self.client.get(f"/notes?note_id={note_id}").get_data(as_text=True)
-        self.assertIn('data-note-title>Hello</textarea>', body)
-        self.assertIn("**world**", body)                      # Markdown for the live editor
+        self.assertIn("data-note-title>Hello</textarea>", body)
+        self.assertIn("**world**", body)  # Markdown for the live editor
         self.assertIn(f'data-id="{note_id}"', body)
 
     def test_note_detail_404(self):
@@ -355,12 +363,20 @@ class NotesWebUITests(LRTestCase):
         note_id = self._create(title="Waves / 1", body_md="- [x] read").get_json()["note"]["id"]
         resp = self.client.patch(f"/api/v1/notes/{note_id}", json={"course_id": course.id})
         self.assertEqual(resp.get_json()["note"]["course_id"], course.id)
-        self.assertEqual(self.client.patch(f"/api/v1/notes/{note_id}", json={"course_id": "nope"}).status_code, 400)
+        self.assertEqual(
+            self.client.patch(f"/api/v1/notes/{note_id}", json={"course_id": "nope"}).status_code,
+            400,
+        )
         self.assertIn("Physics", self.client.get("/notes").get_data(as_text=True))
         resp = self.client.get(f"/notes/{note_id}/export.md")
         self.assertIn("Waves  1.md", resp.headers["Content-Disposition"])
         self.assertEqual(resp.get_data(as_text=True), "# Waves / 1\n\n- [x] read\n")
-        self.assertEqual(self.client.patch(f"/api/v1/notes/{note_id}", json={"course_id": None}).get_json()["note"]["course_id"], None)
+        self.assertEqual(
+            self.client.patch(f"/api/v1/notes/{note_id}", json={"course_id": None}).get_json()[
+                "note"
+            ]["course_id"],
+            None,
+        )
 
 
 if __name__ == "__main__":

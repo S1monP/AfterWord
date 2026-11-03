@@ -5,6 +5,7 @@ to, so the loader must tolerate encodings (UTF-8, UTF-8 BOM,
 UTF-16/Notepad "Unicode"), quotes, spacing around ``=``, comments,
 and must never override real environment variables.
 """
+
 from __future__ import annotations
 
 import os
@@ -94,8 +95,7 @@ class ResolveDirTests(unittest.TestCase):
     """AFTERWORD_DATA_DIR: relative paths belong to the server folder."""
 
     def test_relative_path_is_taken_from_base_not_cwd(self) -> None:
-        with tempfile.TemporaryDirectory() as base, \
-                tempfile.TemporaryDirectory() as elsewhere:
+        with tempfile.TemporaryDirectory() as base, tempfile.TemporaryDirectory() as elsewhere:
             old = os.getcwd()
             os.chdir(elsewhere)
             try:
@@ -138,23 +138,26 @@ class LegacyNamesTests(unittest.TestCase):
         self.assertNotIn("AFTERWORD_OPENROUTER_API_KEY", env)
 
     def test_specific_keys_beat_the_openrouter_key(self) -> None:
-        env = self.apply({
-            "LR_OPENROUTER_API_KEY": "shared",
-            "LR_TEXT_API_KEY": "text",
-            "LR_MINIMAX_API_KEY": "minimax",
-        })
+        env = self.apply(
+            {
+                "LR_OPENROUTER_API_KEY": "shared",
+                "LR_TEXT_API_KEY": "text",
+                "LR_MINIMAX_API_KEY": "minimax",
+            }
+        )
         self.assertEqual(env["AFTERWORD_TEXT_API_KEY"], "text")
         self.assertEqual(env["AFTERWORD_TRANSCRIPTION_API_KEY"], "shared")
 
     def test_minimax_key_beats_the_openrouter_key_for_text(self) -> None:
-        env = self.apply({"LR_OPENROUTER_API_KEY": "shared",
-                          "LR_MINIMAX_API_KEY": "minimax"})
+        env = self.apply({"LR_OPENROUTER_API_KEY": "shared", "LR_MINIMAX_API_KEY": "minimax"})
         self.assertEqual(env["AFTERWORD_TEXT_API_KEY"], "minimax")
 
     def test_load_reads_old_names(self) -> None:
         # No .env files: only the patched environment counts.
-        with mock.patch.object(config_mod, "_load_dotenv", lambda path: None), \
-                mock.patch.dict(os.environ, {"LR_PORT": "9123"}):
+        with (
+            mock.patch.object(config_mod, "_load_dotenv", lambda path: None),
+            mock.patch.dict(os.environ, {"LR_PORT": "9123"}),
+        ):
             os.environ.pop("AFTERWORD_PORT", None)
             self.assertEqual(config_mod.load().port, 9123)
 
@@ -164,8 +167,14 @@ class ExposureTests(unittest.TestCase):
 
     def cfg(self, host: str, **kw) -> config_mod.Config:
         return config_mod.Config(
-            data_dir=Path("."), host=host, port=8000, transcription_api_key="",
-            text_api_key="", ffmpeg_path="ffmpeg", max_upload_bytes=1, **kw,
+            data_dir=Path("."),
+            host=host,
+            port=8000,
+            transcription_api_key="",
+            text_api_key="",
+            ffmpeg_path="ffmpeg",
+            max_upload_bytes=1,
+            **kw,
         )
 
     def test_loopback_needs_no_password(self) -> None:
@@ -178,16 +187,16 @@ class ExposureTests(unittest.TestCase):
             self.assertIn("AFTERWORD_WEB_PASSWORD", problem, host)
 
     def test_network_with_password_is_allowed(self) -> None:
-        self.assertEqual(
-            config_mod.exposure_problem(self.cfg("0.0.0.0", web_password="pw")), "")
+        self.assertEqual(config_mod.exposure_problem(self.cfg("0.0.0.0", web_password="pw")), "")
 
     def test_allow_open_is_an_explicit_opt_out(self) -> None:
-        self.assertEqual(
-            config_mod.exposure_problem(self.cfg("0.0.0.0", allow_open=True)), "")
+        self.assertEqual(config_mod.exposure_problem(self.cfg("0.0.0.0", allow_open=True)), "")
 
     def test_default_host_is_this_machine(self) -> None:
-        with mock.patch.object(config_mod, "_load_dotenv", lambda path: None), \
-                mock.patch.dict(os.environ, {}, clear=True):
+        with (
+            mock.patch.object(config_mod, "_load_dotenv", lambda path: None),
+            mock.patch.dict(os.environ, {}, clear=True),
+        ):
             cfg = config_mod.load()
         self.assertEqual(cfg.host, "127.0.0.1")
         self.assertFalse(cfg.allow_open)

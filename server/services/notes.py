@@ -14,6 +14,7 @@ The service is constructed with a :class:`storage.Storage` instance
 so it can be tested without a Flask app. Routes get the service via
 ``app.current_app_notes_service``.
 """
+
 from __future__ import annotations
 
 import re
@@ -69,9 +70,7 @@ def _validate_source(source: object) -> str:
     if not isinstance(source, str):
         raise ValueError("source must be a string")
     if source not in VALID_SOURCES:
-        raise ValueError(
-            f"source must be one of {VALID_SOURCES}; got {source!r}"
-        )
+        raise ValueError(f"source must be one of {VALID_SOURCES}; got {source!r}")
     return source
 
 
@@ -96,9 +95,33 @@ def _validate_source_ref(source_ref: object) -> str | None:
 _md_renderer = _md.Markdown()
 
 _ALLOWED_TAGS: list[str] = [
-    "a", "abbr", "acronym", "b", "blockquote", "br", "code", "em",
-    "h1", "h2", "h3", "h4", "h5", "h6", "hr", "i", "img", "li",
-    "ol", "p", "pre", "s", "strong", "sub", "sup", "u", "ul",
+    "a",
+    "abbr",
+    "acronym",
+    "b",
+    "blockquote",
+    "br",
+    "code",
+    "em",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "hr",
+    "i",
+    "img",
+    "li",
+    "ol",
+    "p",
+    "pre",
+    "s",
+    "strong",
+    "sub",
+    "sup",
+    "u",
+    "ul",
 ]
 _ALLOWED_ATTRS: dict[str, list[str]] = {
     "a": ["href", "title", "rel"],
@@ -236,6 +259,7 @@ def memo_text(transcript: str) -> str:
     """A voice memo's transcript as the start of its note: the spoken
     lines without timestamps or speaker labels, one paragraph each."""
     from services.llm import parse_transcript_lines
+
     lines = [line["text"].strip() for line in parse_transcript_lines(transcript or "")]
     return "\n\n".join(line for line in lines if line)
 
@@ -254,7 +278,8 @@ def ensure_memo_note(store: storage.Storage, session_id: str) -> Note | None:
     return NotesService(store).create(
         title=(named or "Voice memo")[:MAX_TITLE_LEN],
         body_md=memo_text(transcript.get("content") or "")[:MAX_BODY_MD_LEN],
-        source="voice_memo", source_ref=session_id,
+        source="voice_memo",
+        source_ref=session_id,
         course_id=sess.course_id if sess.course_id and store.get_course(sess.course_id) else None,
         created_at=sess.started_at,
     )
@@ -264,8 +289,11 @@ def sync_memo_notes(store: storage.Storage) -> int:
     """Give every finished voice memo that has none its note (on start)."""
     made = 0
     for sess in store.list_sessions():
-        if sess.kind == "voice_memo" and sess.status == storage.STATUS_DONE \
-                and store.note_for_recording(sess.id) is None:
+        if (
+            sess.kind == "voice_memo"
+            and sess.status == storage.STATUS_DONE
+            and store.note_for_recording(sess.id) is None
+        ):
             if ensure_memo_note(store, sess.id) is not None:
                 made += 1
     return made

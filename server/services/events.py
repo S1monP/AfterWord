@@ -17,6 +17,7 @@ The service is constructed with a :class:`storage.Storage` instance
 so it can be tested without a Flask app. Routes get the service via
 ``app.current_app_events_service``.
 """
+
 from __future__ import annotations
 
 import datetime as _dt
@@ -67,6 +68,7 @@ _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 # The :class:`datetime` module's ``fromisoformat`` is permissive enough
 # in Python 3.11+ to accept all of these without a third-party parser.
 
+
 def _normalise_iso(value: object, *, field: str) -> str:
     """Validate and normalise a user-supplied timestamp string.
 
@@ -79,8 +81,7 @@ def _normalise_iso(value: object, *, field: str) -> str:
         return timeutil.to_utc_iso(value)
     except ValueError as exc:
         raise ValueError(
-            f"{field} must be ISO-8601 (e.g. '2027-03-15' or "
-            f"'2027-03-15T14:30:00Z'); got {value!r}"
+            f"{field} must be ISO-8601 (e.g. '2027-03-15' or '2027-03-15T14:30:00Z'); got {value!r}"
         ) from exc
 
 
@@ -92,9 +93,7 @@ def _parse_iso(ts: str) -> _dt.datetime:
 
 def _fmt_iso(dt: _dt.datetime) -> str:
     """Format an aware datetime as the storage-normalised ISO string."""
-    return dt.astimezone(_dt.UTC).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
+    return dt.astimezone(_dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _validate_repeat_until(value: object) -> str | None:
@@ -110,13 +109,12 @@ def _validate_repeat_until(value: object) -> str | None:
     try:
         d = _dt.date.fromisoformat(value)
     except ValueError as exc:
-        raise ValueError(
-            "repeat_until must be an ISO date (YYYY-MM-DD)"
-        ) from exc
+        raise ValueError("repeat_until must be an ISO date (YYYY-MM-DD)") from exc
     return d.isoformat()
 
 
 # --- Validators -------------------------------------------------------------
+
 
 def _validate_title(title: object) -> str:
     if not isinstance(title, str):
@@ -145,14 +143,15 @@ def _validate_source(source: object) -> str:
     if not isinstance(source, str):
         raise ValueError("source must be a string")
     if source not in SOURCES:
-        raise ValueError(
-            f"source must be one of {sorted(SOURCES)}; got {source!r}"
-        )
+        raise ValueError(f"source must be one of {sorted(SOURCES)}; got {source!r}")
     return source
 
 
 def _validate_optional_text(
-    value: object, *, field: str, max_len: int,
+    value: object,
+    *,
+    field: str,
+    max_len: int,
 ) -> str | None:
     if value is None or value == "":
         return None
@@ -167,7 +166,9 @@ def _validate_optional_text(
 
 def _validate_source_ref(source_ref: object) -> str | None:
     return _validate_optional_text(
-        source_ref, field="source_ref", max_len=MAX_SOURCE_REF_LEN,
+        source_ref,
+        field="source_ref",
+        max_len=MAX_SOURCE_REF_LEN,
     )
 
 
@@ -189,7 +190,9 @@ def _validate_starts_at(value: object) -> str:
 
 
 def _validate_ends_at(
-    value: object, *, starts_at: str,
+    value: object,
+    *,
+    starts_at: str,
 ) -> str | None:
     if value is None or value == "":
         return None
@@ -200,6 +203,7 @@ def _validate_ends_at(
 
 
 # --- Match confidence math --------------------------------------------------
+
 
 def suggest_match_confidence(
     session_started_at: str,
@@ -250,15 +254,14 @@ def suggest_match_confidence(
     else:
         if right_span <= 0:
             # Event start == event end: only an instant at event start.
-            return 1.0 if session_dt == start_dt else (
-                0.5 if session_dt > window_start else None
-            )
+            return 1.0 if session_dt == start_dt else (0.5 if session_dt > window_start else None)
         pos = (end_dt - session_dt).total_seconds() / right_span
         pos = max(0.0, min(1.0, pos))
         return 0.5 + 0.5 * pos
 
 
 # --- Service ----------------------------------------------------------------
+
 
 class EventsService:
     """Coordinates validation, normalisation, and storage for events."""
@@ -285,10 +288,14 @@ class EventsService:
         starts_at_norm = _validate_starts_at(starts_at)
         ends_at_norm = _validate_ends_at(ends_at, starts_at=starts_at_norm)
         description = _validate_optional_text(
-            description, field="description", max_len=MAX_DESCRIPTION_LEN,
+            description,
+            field="description",
+            max_len=MAX_DESCRIPTION_LEN,
         )
         location = _validate_optional_text(
-            location, field="location", max_len=MAX_LOCATION_LEN,
+            location,
+            field="location",
+            max_len=MAX_LOCATION_LEN,
         )
         source_ref = _validate_source_ref(source_ref)
         course_id = _validate_course_id(course_id, self._store)
@@ -321,30 +328,29 @@ class EventsService:
         if "starts_at" in fields:
             cleaned["starts_at"] = _validate_starts_at(fields["starts_at"])
         if "ends_at" in fields:
-            effective_starts = (
-                cleaned.get("starts_at")
-                or self._store.get_event(event_id).starts_at
-            )
+            effective_starts = cleaned.get("starts_at") or self._store.get_event(event_id).starts_at
             cleaned["ends_at"] = _validate_ends_at(
-                fields["ends_at"], starts_at=effective_starts,
+                fields["ends_at"],
+                starts_at=effective_starts,
             )
         if "description" in fields:
             cleaned["description"] = _validate_optional_text(
                 fields["description"],
-                field="description", max_len=MAX_DESCRIPTION_LEN,
+                field="description",
+                max_len=MAX_DESCRIPTION_LEN,
             )
         if "location" in fields:
             cleaned["location"] = _validate_optional_text(
                 fields["location"],
-                field="location", max_len=MAX_LOCATION_LEN,
+                field="location",
+                max_len=MAX_LOCATION_LEN,
             )
         if "source_ref" in fields:
-            cleaned["source_ref"] = _validate_source_ref(
-                fields["source_ref"]
-            )
+            cleaned["source_ref"] = _validate_source_ref(fields["source_ref"])
         if "course_id" in fields:
             cleaned["course_id"] = _validate_course_id(
-                fields["course_id"], self._store,
+                fields["course_id"],
+                self._store,
             )
         if not cleaned:
             existing = self._store.get_event(event_id)
@@ -384,11 +390,7 @@ class EventsService:
         """
         until_norm = _validate_repeat_until(repeat_until)
         starts_norm = _validate_starts_at(starts_at)
-        ends_norm = (
-            _validate_ends_at(ends_at, starts_at=starts_norm)
-            if ends_at
-            else None
-        )
+        ends_norm = _validate_ends_at(ends_at, starts_at=starts_norm) if ends_at else None
         course_id = _validate_course_id(course_id, self._store)
         starts_dt = _parse_iso(starts_norm)
         if until_norm is None:
@@ -397,10 +399,7 @@ class EventsService:
             until_date = _dt.date.fromisoformat(until_norm)
             start_day = starts_dt.astimezone(timeutil.local_tz()).date()
             if until_date < start_day:
-                raise ValueError(
-                    "repeat_until must be on or after the event's "
-                    "start date"
-                )
+                raise ValueError("repeat_until must be on or after the event's start date")
             weeks = (until_date - start_day).days // 7 + 1
             if weeks > MAX_REPEAT_OCCURRENCES:
                 raise ValueError(
@@ -421,11 +420,7 @@ class EventsService:
                 title=title,
                 kind=kind,
                 starts_at=_fmt_iso(start_local + step),
-                ends_at=(
-                    _fmt_iso(end_local + step)
-                    if end_local
-                    else None
-                ),
+                ends_at=(_fmt_iso(end_local + step) if end_local else None),
                 description=description,
                 location=location,
                 source=source,
@@ -445,6 +440,7 @@ class EventsService:
         event = self._store.get_event(event_id)
         if event is not None and event.subscription_id:
             from services.calendar_feeds import SubscriptionsService
+
             SubscriptionsService(self._store).hide(event)
         return self._store.delete_event(event_id)
 
@@ -468,7 +464,8 @@ class EventsService:
             starts_after = _normalise_iso(starts_after, field="starts_after")
         if starts_before is not None:
             starts_before = _normalise_iso(
-                starts_before, field="starts_before",
+                starts_before,
+                field="starts_before",
             )
         if not isinstance(limit, int) or limit < 1:
             raise ValueError("limit must be a positive int")
@@ -496,19 +493,19 @@ class EventsService:
         if sess is None:
             return None
         session_start_dt = _parse_iso(sess.started_at)
-        window_lo = (
-            session_start_dt - _dt.timedelta(hours=12)
-        ).strftime("%Y-%m-%dT%H:%M:%SZ")
-        window_hi = (
-            session_start_dt + _dt.timedelta(hours=12)
-        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        window_lo = (session_start_dt - _dt.timedelta(hours=12)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        window_hi = (session_start_dt + _dt.timedelta(hours=12)).strftime("%Y-%m-%dT%H:%M:%SZ")
         candidates, _ = self._store.list_events(
-            starts_after=window_lo, starts_before=window_hi, limit=500,
+            starts_after=window_lo,
+            starts_before=window_hi,
+            limit=500,
         )
         best: tuple[float, Event] | None = None
         for ev in candidates:
             conf = suggest_match_confidence(
-                sess.started_at, ev.starts_at, ev.ends_at,
+                sess.started_at,
+                ev.starts_at,
+                ev.ends_at,
             )
             if conf is None:
                 continue
@@ -517,7 +514,10 @@ class EventsService:
         return best[1] if best else None
 
     def match_session(
-        self, event_id: str, session_id: str, confidence: float,
+        self,
+        event_id: str,
+        session_id: str,
+        confidence: float,
     ) -> Event:
         """Mark ``event_id`` as the match for ``session_id`` with the
         given confidence. Any other event that was pointing at the
@@ -553,6 +553,7 @@ class EventsService:
         (services/calendar_feeds.py). A file that isn't a calendar
         imports nothing."""
         from services.calendar_feeds import FeedError, SubscriptionsService
+
         if not isinstance(ics_bytes, (bytes, bytearray)):
             raise ValueError("ics_bytes must be bytes")
         if not ics_bytes:

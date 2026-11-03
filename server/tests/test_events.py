@@ -7,6 +7,7 @@ in a separate file (``tests/test_calendar.py``) added in Commit 2.
 
 All tests use the temp-dir storage helper from conftest.LRTestCase.
 """
+
 from __future__ import annotations
 
 import json
@@ -64,7 +65,8 @@ class EventsServiceTests(LRTestCase):
 
     def test_create_persists_defaults(self):
         ev = self._service().create(
-            title="Lecture", kind="lecture",
+            title="Lecture",
+            kind="lecture",
             starts_at="2027-03-15T10:00:00Z",
         )
         self.assertEqual(ev.title, "Lecture")
@@ -104,7 +106,8 @@ class EventsServiceTests(LRTestCase):
 
     def test_create_normalises_naive_datetime(self):
         ev = self._create(
-            starts_at="2027-03-15T14:30", ends_at=None,
+            starts_at="2027-03-15T14:30",
+            ends_at=None,
         )
         self.assertEqual(ev.starts_at, "2027-03-15T14:30:00Z")
 
@@ -197,6 +200,8 @@ class EventsServiceTests(LRTestCase):
             self._service().list(starts_after="not-a-date")
         with self.assertRaises(ValueError):
             self._service().list(limit=0)
+
+
 class SuggestMatchConfidenceTests(unittest.TestCase):
     """The pure function ``suggest_match_confidence`` — no DB needed."""
 
@@ -272,6 +277,8 @@ class SuggestMatchConfidenceTests(unittest.TestCase):
         self.assertIsNone(
             suggest_match_confidence("garbage", "2026-01-15T10:00:00Z", None),
         )
+
+
 class MatchSessionTests(LRTestCase):
     def _service(self):
         return self.app.config["AFTERWORD_EVENTS_SERVICE"]
@@ -306,11 +313,13 @@ class MatchSessionTests(LRTestCase):
 
     def test_match_session_clears_other_matches(self):
         ev_a = self._service().create(
-            title="A", kind="lecture",
+            title="A",
+            kind="lecture",
             starts_at="2026-01-15T10:00:00Z",
         )
         ev_b = self._service().create(
-            title="B", kind="lecture",
+            title="B",
+            kind="lecture",
             starts_at="2026-01-15T10:00:00Z",
         )
         sid = self._seed_session()
@@ -324,7 +333,8 @@ class MatchSessionTests(LRTestCase):
 
     def test_match_session_validates_confidence(self):
         ev = self._service().create(
-            title="A", kind="lecture",
+            title="A",
+            kind="lecture",
             starts_at="2026-01-15T10:00:00Z",
         )
         sid = self._seed_session()
@@ -342,7 +352,8 @@ class MatchSessionTests(LRTestCase):
 
     def test_match_session_missing_session_raises_keyerror(self):
         ev = self._service().create(
-            title="A", kind="lecture",
+            title="A",
+            kind="lecture",
             starts_at="2026-01-15T10:00:00Z",
         )
         with self.assertRaises(KeyError):
@@ -374,6 +385,8 @@ class MatchSessionTests(LRTestCase):
         )
         sid = self._seed_session()  # 2026-01-15
         self.assertIsNone(self._service().suggest_match(sid))
+
+
 class ImportIcsTests(LRTestCase):
     def _service(self):
         return self.app.config["AFTERWORD_EVENTS_SERVICE"]
@@ -418,6 +431,8 @@ class ImportIcsTests(LRTestCase):
         # The 4th VEVENT in _SAMPLE_ICS has no SUMMARY.
         count = self._service().import_ics(_SAMPLE_ICS)
         self.assertEqual(count, 3)
+
+
 class RecurringEventTests(LRTestCase):
     """Weekly recurrence: ticking the box materialises one event per
     occurrence, so the calendar, the dashboard, and the pipeline
@@ -431,12 +446,15 @@ class RecurringEventTests(LRTestCase):
         )
 
     def test_recurring_makes_weekly_occurrences(self):
-        resp = self._create({
-            "title": "Linear Algebra", "kind": "lecture",
-            "starts_at": "2026-09-01T10:00:00Z",
-            "ends_at": "2026-09-01T11:00:00Z",
-            "repeat_until": "2026-09-15",
-        })
+        resp = self._create(
+            {
+                "title": "Linear Algebra",
+                "kind": "lecture",
+                "starts_at": "2026-09-01T10:00:00Z",
+                "ends_at": "2026-09-01T11:00:00Z",
+                "repeat_until": "2026-09-15",
+            }
+        )
         self.assertEqual(resp.status_code, 201)
         body = resp.get_json()
         self.assertEqual(body["created_count"], 3)
@@ -459,31 +477,40 @@ class RecurringEventTests(LRTestCase):
         self.assertEqual(events[0].id, first_id)
 
     def test_no_repeat_creates_single_event(self):
-        resp = self._create({
-            "title": "One-off", "kind": "meeting",
-            "starts_at": "2026-09-02T10:00:00Z",
-        })
+        resp = self._create(
+            {
+                "title": "One-off",
+                "kind": "meeting",
+                "starts_at": "2026-09-02T10:00:00Z",
+            }
+        )
         self.assertEqual(resp.status_code, 201)
         self.assertEqual(resp.get_json()["created_count"], 1)
         _, total = self.app.config["AFTERWORD_EVENTS_SERVICE"].list(limit=500)
         self.assertEqual(total, 1)
 
     def test_repeat_until_before_start_rejected(self):
-        resp = self._create({
-            "title": "Backwards", "kind": "lecture",
-            "starts_at": "2026-09-01T10:00:00Z",
-            "repeat_until": "2026-08-25",
-        })
+        resp = self._create(
+            {
+                "title": "Backwards",
+                "kind": "lecture",
+                "starts_at": "2026-09-01T10:00:00Z",
+                "repeat_until": "2026-08-25",
+            }
+        )
         self.assertEqual(resp.status_code, 400)
         self.assertIn("start date", resp.get_json()["detail"])
 
     def test_repeat_cap_enforced(self):
         # A year of weekly events = 53 occurrences > the 52 cap.
-        resp = self._create({
-            "title": "Forever", "kind": "lecture",
-            "starts_at": "2026-09-01T10:00:00Z",
-            "repeat_until": "2027-09-01",
-        })
+        resp = self._create(
+            {
+                "title": "Forever",
+                "kind": "lecture",
+                "starts_at": "2026-09-01T10:00:00Z",
+                "repeat_until": "2027-09-01",
+            }
+        )
         self.assertEqual(resp.status_code, 400)
         self.assertIn("maximum", resp.get_json()["detail"])
 
@@ -491,10 +518,18 @@ class RecurringEventTests(LRTestCase):
 def _make_event(starts_at: str, eid: str):
     """Build a minimal Event for tests."""
     return Event(
-        id=eid, title=eid, description=None, kind="lecture",
-        starts_at=starts_at, ends_at=None, location=None,
-        source="manual", source_ref=None, course_id=None,
-        matched_session_id=None, match_confidence=None,
+        id=eid,
+        title=eid,
+        description=None,
+        kind="lecture",
+        starts_at=starts_at,
+        ends_at=None,
+        location=None,
+        source="manual",
+        source_ref=None,
+        course_id=None,
+        matched_session_id=None,
+        match_confidence=None,
         created_at="2026-01-01T00:00:00Z",
         updated_at="2026-01-01T00:00:00Z",
     )

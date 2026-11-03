@@ -23,6 +23,7 @@ On the home network (a test drive before the VPS):
 
 Run one process: the AI pipeline worker lives inside it.
 """
+
 from __future__ import annotations
 
 import logging
@@ -56,28 +57,30 @@ def main() -> None:
         sys.exit(2)
     app = create_app(cfg)
     if not cfg.web_password and not config_mod.is_loopback(cfg.host):
-        log.warning("AFTERWORD_ALLOW_OPEN is set; the web UI is open to "
-                    "anyone who can reach the server.")
+        log.warning(
+            "AFTERWORD_ALLOW_OPEN is set; the web UI is open to anyone who can reach the server."
+        )
     proxy = os.environ.get("AFTERWORD_TRUSTED_PROXY", "").strip()
     extra = {}
     if proxy:
         extra = {
             "trusted_proxy": proxy,
-            "trusted_proxy_headers": "x-forwarded-for x-forwarded-proto "
-                                     "x-forwarded-host",
+            "trusted_proxy_headers": "x-forwarded-for x-forwarded-proto x-forwarded-host",
             "clear_untrusted_proxy_headers": True,
         }
     ports = _ports(cfg)
     listen = " ".join(f"{cfg.host}:{p}" for p in ports)
-    log.info("waitress on %s%s", listen,
-             f" (behind proxy {proxy})" if proxy else "")
+    log.info("waitress on %s%s", listen, f" (behind proxy {proxy})" if proxy else "")
     name = os.environ.get("AFTERWORD_MDNS_NAME", "").strip()
     if name:
         import mdns
+
         # The friendliest port: 80 when it's served (no ":8000" to type).
         mdns.announce(name, 80 if 80 in ports else cfg.port)
     serve(
-        app, listen=listen, threads=8,
+        app,
+        listen=listen,
+        threads=8,
         # Body limit matches Flask's MAX_CONTENT_LENGTH (create_app).
         max_request_body_size=app.config["MAX_CONTENT_LENGTH"],
         **extra,

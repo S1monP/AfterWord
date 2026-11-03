@@ -141,7 +141,7 @@ class TasksServiceTests(LRTestCase):
         # Order: open tasks by priority (urgent, low), then done.
         ids = [t.id for t in listed]
         self.assertEqual(ids[:2], [t2.id, t1.id])  # urgent then low
-        self.assertEqual(ids[2], t3.id)            # done
+        self.assertEqual(ids[2], t3.id)  # done
 
     def test_list_filter_by_status(self):
         svc = self._service()
@@ -370,17 +370,19 @@ class TasksWebUITests(LRTestCase):
             content_type="application/json",
         )
         body = self.client.get("/todos").get_data(as_text=True)
-        done = body[body.index('<details class="tdone">'):]
+        done = body[body.index('<details class="tdone">') :]
         self.assertIn("first todo", done)
         self.assertNotIn("second todo", done)
         self.assertIn("Done · 1", done)
 
     def test_deadline_groups_and_days_left(self):
         today = timeutil.local_today()
-        self._create(title="Far away", kind="deadline", due_at=(today + dt.timedelta(days=30)).isoformat())
+        self._create(
+            title="Far away", kind="deadline", due_at=(today + dt.timedelta(days=30)).isoformat()
+        )
         self._create(title="Due today", kind="deadline", due_at=today.isoformat())
         body = self.client.get("/todos").get_data(as_text=True)
-        panel = body[body.index('data-panel="deadline"'):]
+        panel = body[body.index('data-panel="deadline"') :]
         self.assertIn("This week", panel)
         self.assertIn("Later", panel)
         self.assertIn("<span>today</span>", panel)
@@ -504,10 +506,13 @@ class TasksDueAtTests(LRTestCase):
         # open bucket).
         svc = self._service()
         overdue_high = svc.create(
-            title="overdue high", priority="high", due_at="2020-01-01",
+            title="overdue high",
+            priority="high",
+            due_at="2020-01-01",
         )
         nodate_urgent = svc.create(
-            title="no date urgent", priority="urgent",
+            title="no date urgent",
+            priority="urgent",
         )
         listed, _ = svc.list()
         self.assertEqual(listed[0].id, overdue_high.id)
@@ -515,6 +520,7 @@ class TasksDueAtTests(LRTestCase):
 
     def test_is_overdue_helper(self):
         from services.tasks import is_overdue
+
         self.assertTrue(is_overdue("2020-01-01T00:00:00Z", "2026-10-06T10:00:00Z"))
         self.assertFalse(is_overdue("2099-01-01T00:00:00Z", "2026-10-06T10:00:00Z"))
         self.assertFalse(is_overdue(None, "2026-10-06T10:00:00Z"))
@@ -524,6 +530,7 @@ class TasksDueAtTests(LRTestCase):
 
     def test_is_due_today_helper(self):
         from services.tasks import is_due_today
+
         self.assertTrue(is_due_today("2026-10-06T15:00:00Z", "2026-10-06T10:00:00Z"))
         self.assertFalse(is_due_today("2026-10-05T15:00:00Z", "2026-10-06T10:00:00Z"))
         self.assertFalse(is_due_today("2026-10-07T15:00:00Z", "2026-10-06T10:00:00Z"))
@@ -604,7 +611,9 @@ class TasksDueAtAPITests(LRTestCase):
     def test_api_quick_add_with_priority_and_due_at(self):
         resp = self.client.post(
             "/api/v1/tasks",
-            data=json.dumps({"title": "Form task", "kind": "task", "priority": "high", "due_at": "2027-01-15"}),
+            data=json.dumps(
+                {"title": "Form task", "kind": "task", "priority": "high", "due_at": "2027-01-15"}
+            ),
             content_type="application/json",
         )
         self.assertEqual(resp.status_code, 201)
@@ -644,7 +653,9 @@ class TasksBrowserEndpointsTests(LRTestCase):
         self.assertEqual(resp.status_code, 200)
         # Deadline.
         d = self._create(
-            title="Course", kind="deadline", due_at="2027-01-01",
+            title="Course",
+            kind="deadline",
+            due_at="2027-01-01",
         )
         resp = self.client.post(
             f"/api/v1/tasks/{d['id']}/status",
@@ -659,7 +670,9 @@ class TasksBrowserEndpointsTests(LRTestCase):
         resp = self.client.delete(f"/api/v1/tasks/{t['id']}")
         self.assertEqual(resp.status_code, 204)
         d = self._create(
-            title="Course", kind="deadline", due_at="2027-01-01",
+            title="Course",
+            kind="deadline",
+            due_at="2027-01-01",
         )
         resp = self.client.delete(f"/api/v1/tasks/{d['id']}")
         self.assertEqual(resp.status_code, 204)
@@ -697,8 +710,13 @@ class DeadlinesDeepLinkTests(LRTestCase):
 
     def test_deadline_with_source_ref_renders_as_link(self):
         self.app.config["AFTERWORD_STORAGE"].upsert_session(
-            "abcdef1234567890", title="t", expected_count=1, sample_rate=22050,
-            channels=1, bits_per_sample=32, started_at="2026-01-15T10:00:00Z",
+            "abcdef1234567890",
+            title="t",
+            expected_count=1,
+            sample_rate=22050,
+            channels=1,
+            bits_per_sample=32,
+            started_at="2026-01-15T10:00:00Z",
         )
         self._create_deadline(
             source_ref="abcdef1234567890",
@@ -707,7 +725,8 @@ class DeadlinesDeepLinkTests(LRTestCase):
         body = self.client.get("/todos").get_data(as_text=True)
         # "Said in …" links to the recording, where it is read, at ?t=<ms>.
         self.assertIn(
-            'href="/other?session=abcdef1234567890&amp;t=42000"', body,
+            'href="/other?session=abcdef1234567890&amp;t=42000"',
+            body,
         )
         self.assertIn("titem__said", body)
 

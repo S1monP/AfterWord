@@ -1,5 +1,5 @@
-"""Calendar events API (incl. ICS import).
-"""
+"""Calendar events API (incl. ICS import)."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -28,13 +28,19 @@ def api_list_events() -> Any:
     except ValueError:
         return jsonify({"error": "invalid_limit_or_offset"}), 400
     if limit < 1 or limit > 500:
-        return jsonify({
-            "error": "invalid_limit", "detail": "limit must be 1..500",
-        }), 400
+        return jsonify(
+            {
+                "error": "invalid_limit",
+                "detail": "limit must be 1..500",
+            }
+        ), 400
     if offset < 0:
-        return jsonify({
-            "error": "invalid_offset", "detail": "offset must be >= 0",
-        }), 400
+        return jsonify(
+            {
+                "error": "invalid_offset",
+                "detail": "offset must be >= 0",
+            }
+        ), 400
     try:
         events, total = current_app_events_service().list(
             kind=request.args.get("kind") or None,
@@ -44,15 +50,20 @@ def api_list_events() -> Any:
             offset=offset,
         )
     except ValueError as exc:
-        return jsonify({
-            "error": "invalid_payload", "detail": str(exc),
-        }), 400
-    return jsonify({
-        "events": [_event_to_dict(e) for e in events],
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-    })
+        return jsonify(
+            {
+                "error": "invalid_payload",
+                "detail": str(exc),
+            }
+        ), 400
+    return jsonify(
+        {
+            "events": [_event_to_dict(e) for e in events],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+    )
 
 
 @bp.post("/api/v1/events")
@@ -89,12 +100,18 @@ def api_create_event() -> Any:
             )
             count = 1
     except ValueError as exc:
-        return jsonify({
-            "error": "invalid_payload", "detail": str(exc),
-        }), 400
-    return jsonify({
-        "event": _event_to_dict(ev), "created_count": count,
-    }), 201
+        return jsonify(
+            {
+                "error": "invalid_payload",
+                "detail": str(exc),
+            }
+        ), 400
+    return jsonify(
+        {
+            "event": _event_to_dict(ev),
+            "created_count": count,
+        }
+    ), 201
 
 
 @bp.get("/api/v1/events/<event_id>")
@@ -113,9 +130,17 @@ def api_update_event(event_id: str) -> Any:
     ``description=null`` etc. to clear those too."""
     payload = request.get_json(silent=True) or {}
     kwargs: dict[str, Any] = {}
-    for field in ("title", "kind", "starts_at", "ends_at",
-                  "description", "location", "source",
-                  "source_ref", "course_id"):
+    for field in (
+        "title",
+        "kind",
+        "starts_at",
+        "ends_at",
+        "description",
+        "location",
+        "source",
+        "source_ref",
+        "course_id",
+    ):
         if field in payload:
             kwargs[field] = payload[field]
     try:
@@ -123,9 +148,12 @@ def api_update_event(event_id: str) -> Any:
     except KeyError:
         return jsonify({"error": "not_found"}), 404
     except ValueError as exc:
-        return jsonify({
-            "error": "invalid_payload", "detail": str(exc),
-        }), 400
+        return jsonify(
+            {
+                "error": "invalid_payload",
+                "detail": str(exc),
+            }
+        ), 400
     return jsonify({"event": _event_to_dict(ev)})
 
 
@@ -145,36 +173,46 @@ def api_import_events_ics() -> Any:
     that isn't a calendar is a 400 with a ``detail`` for the user."""
     cfg = current_app.config["AFTERWORD_CONFIG"]
     if "file" not in request.files:
-        return jsonify({
-            "error": "missing_file",
-            "detail": "multipart field 'file' is required",
-        }), 400
+        return jsonify(
+            {
+                "error": "missing_file",
+                "detail": "multipart field 'file' is required",
+            }
+        ), 400
     upload = request.files["file"]
     raw = upload.read()
     if not raw:
         return jsonify({"error": "empty_file"}), 400
     if len(raw) > cfg.max_upload_bytes:
-        return jsonify({
-            "error": "file_too_large",
-            "detail": (
-                f"file is {len(raw)} bytes; max is "
-                f"{cfg.max_upload_bytes}"
-            ),
-        }), 413
+        return jsonify(
+            {
+                "error": "file_too_large",
+                "detail": (f"file is {len(raw)} bytes; max is {cfg.max_upload_bytes}"),
+            }
+        ), 413
     # ``kind`` (form field): what the events are; meeting by default.
     # Importing the same file again updates instead of duplicating.
     from services.calendar_feeds import FeedError
     from web.common import current_app_subscriptions_service
+
     try:
         result = current_app_subscriptions_service().import_file(
-            raw, (request.form.get("kind") or "meeting").strip(),
+            raw,
+            (request.form.get("kind") or "meeting").strip(),
         )
     except (ValueError, FeedError) as exc:
-        return jsonify({
-            "error": "invalid_payload", "detail": str(exc), "imported": 0,
-        }), 400
-    return jsonify({
-        "imported": result.added + result.updated,
-        "added": result.added, "updated": result.updated,
-        "summary": result.summary(),
-    })
+        return jsonify(
+            {
+                "error": "invalid_payload",
+                "detail": str(exc),
+                "imported": 0,
+            }
+        ), 400
+    return jsonify(
+        {
+            "imported": result.added + result.updated,
+            "added": result.added,
+            "updated": result.updated,
+            "summary": result.summary(),
+        }
+    )

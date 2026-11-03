@@ -1,6 +1,7 @@
 """The web UI's settings: theme mode and colour scheme. Stored by the
 server, so every device shows the same, and sent with every page
 (``ui_settings``), so a page is drawn in the right scheme at once."""
+
 from __future__ import annotations
 
 from typing import Any

@@ -17,15 +17,14 @@ The service is constructed with a :class:`storage.Storage` instance
 so it can be tested without a Flask app. Routes get the service via
 ``app.current_app_classification_service``.
 """
+
 from __future__ import annotations
 
 from storage import Session, Storage
 
 # --- Constants --------------------------------------------------------------
 
-VALID_KINDS: frozenset[str] = frozenset(
-    {"lecture", "voice_memo", "meeting", "command", "other"}
-)
+VALID_KINDS: frozenset[str] = frozenset({"lecture", "voice_memo", "meeting", "command", "other"})
 #: Kinds offered in the "Classify as" menus. A ``command`` recording
 #: (only a request to add a to-do, deadline or calendar entry) is
 #: carried out and then kept out of sight, so it is not offered.
@@ -40,6 +39,7 @@ LLM_NOT_IMPLEMENTED = "llm_not_implemented"
 
 # --- Service ----------------------------------------------------------------
 
+
 class ClassificationService:
     """Coordinates manual and (future) LLM classification."""
 
@@ -49,7 +49,9 @@ class ClassificationService:
     # -- manual override -------------------------------------------------
 
     def override_kind(
-        self, session_id: str, kind: str | None,
+        self,
+        session_id: str,
+        kind: str | None,
     ) -> Session:
         """Set the kind manually. Pass ``kind=None`` to clear.
 
@@ -60,22 +62,24 @@ class ClassificationService:
         if not isinstance(session_id, str) or not session_id:
             raise ValueError("session_id is required")
         if kind is not None and kind not in VALID_KINDS:
-            raise ValueError(
-                f"kind must be one of {sorted(VALID_KINDS)} or null; "
-                f"got {kind!r}"
-            )
+            raise ValueError(f"kind must be one of {sorted(VALID_KINDS)} or null; got {kind!r}")
         if self._store.get_session(session_id) is None:
             raise KeyError(session_id)
         # set_kind accepts None to clear; confidence of 1.0 marks
         # this as a manual override (vs an LLM guess).
         return self._store.set_kind(
-            session_id, kind, confidence=1.0,
+            session_id,
+            kind,
+            confidence=1.0,
         )
 
     # -- LLM classify (stub) ---------------------------------------------
 
     def classify_session(
-        self, session_id: str, *, classifier=None,
+        self,
+        session_id: str,
+        *,
+        classifier=None,
     ) -> tuple[str, float] | None:
         """Run the LLM classifier on a session's transcript.
 
@@ -105,7 +109,8 @@ class ClassificationService:
         # so the route surfaces a friendly "transcribe first"
         # message instead of a stack trace.
         transcript_artifact = self._store.get_artifact(
-            session_id, "transcript",
+            session_id,
+            "transcript",
         )
         if not transcript_artifact or not transcript_artifact.get("content"):
             return None
@@ -115,6 +120,7 @@ class ClassificationService:
         # a circular import with ``services.llm``.
         if classifier is None:
             from services.llm import default_providers
+
             classifier = default_providers().get("text")
         try:
             result = classifier.classify(transcript)
@@ -124,7 +130,6 @@ class ClassificationService:
             # can surface a clean error to the user.
             return None
         return (result.kind, result.confidence)
-
 
     # -- convenience for the /unsorted page -----------------------------
 

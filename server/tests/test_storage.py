@@ -2,6 +2,7 @@
 
 Run from the server directory: ``python -m unittest discover -s tests -v``.
 """
+
 from __future__ import annotations
 
 import struct
@@ -12,7 +13,6 @@ from tests.conftest import LRTestCase
 
 
 class InitialiseTests(LRTestCase):
-
     def test_initialise_creates_dirs(self) -> None:
         self.assertTrue(self._tmpdir.exists())
         self.assertTrue((self._tmpdir / "db").exists())
@@ -46,7 +46,6 @@ class InitialiseTests(LRTestCase):
 
 
 class SessionTests(LRTestCase):
-
     def test_upsert_creates_session(self) -> None:
         store = self.app.config["AFTERWORD_STORAGE"]
         sid = "abcdef1234567890"
@@ -67,13 +66,21 @@ class SessionTests(LRTestCase):
         store = self.app.config["AFTERWORD_STORAGE"]
         sid = "abcdef1234567890"
         store.upsert_session(
-            sid, title="First", expected_count=2,
-            sample_rate=22050, channels=1, bits_per_sample=32,
+            sid,
+            title="First",
+            expected_count=2,
+            sample_rate=22050,
+            channels=1,
+            bits_per_sample=32,
             started_at=storage.now_iso(),
         )
         sess, created = store.upsert_session(
-            sid, title="Second", expected_count=2,
-            sample_rate=22050, channels=1, bits_per_sample=32,
+            sid,
+            title="Second",
+            expected_count=2,
+            sample_rate=22050,
+            channels=1,
+            bits_per_sample=32,
             started_at=storage.now_iso(),
         )
         self.assertFalse(created)
@@ -83,8 +90,12 @@ class SessionTests(LRTestCase):
         store = self.app.config["AFTERWORD_STORAGE"]
         with self.assertRaises(ValueError):
             store.upsert_session(
-                "ab", title="x", expected_count=1,
-                sample_rate=22050, channels=1, bits_per_sample=32,
+                "ab",
+                title="x",
+                expected_count=1,
+                sample_rate=22050,
+                channels=1,
+                bits_per_sample=32,
                 started_at=storage.now_iso(),
             )
 
@@ -94,8 +105,12 @@ class SessionTests(LRTestCase):
         # deterministic without depending on real wall-clock time.
         for i, tag in enumerate(("aaaa", "bbbb", "cccc")):
             store.upsert_session(
-                tag, title=tag, expected_count=1,
-                sample_rate=22050, channels=1, bits_per_sample=32,
+                tag,
+                title=tag,
+                expected_count=1,
+                sample_rate=22050,
+                channels=1,
+                bits_per_sample=32,
                 started_at=f"2026-10-03T12:00:0{i}Z",
             )
         sessions = store.list_sessions()
@@ -103,13 +118,16 @@ class SessionTests(LRTestCase):
 
 
 class ChunkWriteTests(LRTestCase):
-
     def _make_session(self, expected: int = 2) -> str:
         store = self.app.config["AFTERWORD_STORAGE"]
         sid = "abcdef1234567890"
         store.upsert_session(
-            sid, title="t", expected_count=expected,
-            sample_rate=22050, channels=1, bits_per_sample=32,
+            sid,
+            title="t",
+            expected_count=expected,
+            sample_rate=22050,
+            channels=1,
+            bits_per_sample=32,
             started_at=storage.now_iso(),
         )
         return sid
@@ -132,9 +150,7 @@ class ChunkWriteTests(LRTestCase):
         data = store.chunk_path(sid, 1).read_bytes()
         self.assertEqual(data, b)
         # No .tmp file should remain after a successful write.
-        self.assertFalse(
-            store.chunk_path(sid, 1).with_suffix(".aac.tmp").exists()
-        )
+        self.assertFalse(store.chunk_path(sid, 1).with_suffix(".aac.tmp").exists())
 
     def test_write_chunk_too_high_index_rejected(self) -> None:
         sid = self._make_session(expected=2)
@@ -157,13 +173,16 @@ class ChunkWriteTests(LRTestCase):
 
 
 class FinishTests(LRTestCase):
-
     def _make_full_session(self, n: int = 3) -> str:
         store = self.app.config["AFTERWORD_STORAGE"]
         sid = "abcdef1234567890"
         store.upsert_session(
-            sid, title="t", expected_count=n,
-            sample_rate=22050, channels=1, bits_per_sample=32,
+            sid,
+            title="t",
+            expected_count=n,
+            sample_rate=22050,
+            channels=1,
+            bits_per_sample=32,
             started_at=storage.now_iso(),
         )
         for i in range(1, n + 1):
@@ -174,8 +193,12 @@ class FinishTests(LRTestCase):
         store = self.app.config["AFTERWORD_STORAGE"]
         sid = "abcdef1234567890"
         store.upsert_session(
-            sid, title="t", expected_count=3,
-            sample_rate=22050, channels=1, bits_per_sample=32,
+            sid,
+            title="t",
+            expected_count=3,
+            sample_rate=22050,
+            channels=1,
+            bits_per_sample=32,
             started_at=storage.now_iso(),
         )
         store.write_chunk(sid, 1, self.make_wav())
@@ -238,9 +261,11 @@ class NonMinimalWavTests(LRTestCase):
     """
 
     @staticmethod
-    def _build_wav_with_extra_chunk(payload: bytes,
-                                     extra_chunk_id: bytes = b"LIST",
-                                     extra_payload: bytes = b"INFO" + b"\x00" * 8) -> bytes:
+    def _build_wav_with_extra_chunk(
+        payload: bytes,
+        extra_chunk_id: bytes = b"LIST",
+        extra_payload: bytes = b"INFO" + b"\x00" * 8,
+    ) -> bytes:
         """Build a canonical 22050 Hz mono 32-bit PCM WAV with an extra
         chunk inserted between the fmt and data chunks, mimicking the
         output of ffmpeg 9.x.
@@ -258,12 +283,12 @@ class NonMinimalWavTests(LRTestCase):
         # fmt chunk (16 bytes payload)
         out += b"fmt "
         out += struct.pack("<I", 16)
-        out += struct.pack("<H", 1)            # PCM
-        out += struct.pack("<H", 1)            # channels
-        out += struct.pack("<I", 22050)       # sample rate
-        out += struct.pack("<I", byte_rate)    # byte rate
+        out += struct.pack("<H", 1)  # PCM
+        out += struct.pack("<H", 1)  # channels
+        out += struct.pack("<I", 22050)  # sample rate
+        out += struct.pack("<I", byte_rate)  # byte rate
         out += struct.pack("<H", block_align)  # block align
-        out += struct.pack("<H", 32)           # bits per sample
+        out += struct.pack("<H", 32)  # bits per sample
 
         # extra chunk (LIST/INFO/JUNK/etc.)
         out += extra_chunk_id
@@ -283,8 +308,12 @@ class NonMinimalWavTests(LRTestCase):
         store = self.app.config["AFTERWORD_STORAGE"]
         sid = "listchunk1234567890"
         store.upsert_session(
-            sid, title="t", expected_count=1,
-            sample_rate=22050, channels=1, bits_per_sample=32,
+            sid,
+            title="t",
+            expected_count=1,
+            sample_rate=22050,
+            channels=1,
+            bits_per_sample=32,
             started_at=storage.now_iso(),
         )
         # write_chunk should accept the messy WAV; the existing strict
@@ -296,14 +325,19 @@ class NonMinimalWavTests(LRTestCase):
 
     def test_wav_with_junk_chunk_is_accepted(self) -> None:
         wav = self._build_wav_with_extra_chunk(
-            b"\x00" * 200, extra_chunk_id=b"JUNK",
+            b"\x00" * 200,
+            extra_chunk_id=b"JUNK",
             extra_payload=b"\x00" * 64,
         )
         store = self.app.config["AFTERWORD_STORAGE"]
         sid = "junkchunk1234567890"
         store.upsert_session(
-            sid, title="t", expected_count=1,
-            sample_rate=22050, channels=1, bits_per_sample=32,
+            sid,
+            title="t",
+            expected_count=1,
+            sample_rate=22050,
+            channels=1,
+            bits_per_sample=32,
             started_at=storage.now_iso(),
         )
         store.write_chunk(sid, 1, wav)
@@ -318,8 +352,12 @@ class NonMinimalWavTests(LRTestCase):
         store = self.app.config["AFTERWORD_STORAGE"]
         sid = "payload1234567890ab"
         store.upsert_session(
-            sid, title="t", expected_count=1,
-            sample_rate=22050, channels=1, bits_per_sample=32,
+            sid,
+            title="t",
+            expected_count=1,
+            sample_rate=22050,
+            channels=1,
+            bits_per_sample=32,
             started_at=storage.now_iso(),
         )
         store.write_chunk(sid, 1, wav)
@@ -333,8 +371,12 @@ class NonMinimalWavTests(LRTestCase):
         store = self.app.config["AFTERWORD_STORAGE"]
         sid = "concat1234567890a"
         store.upsert_session(
-            sid, title="t", expected_count=3,
-            sample_rate=22050, channels=1, bits_per_sample=32,
+            sid,
+            title="t",
+            expected_count=3,
+            sample_rate=22050,
+            channels=1,
+            bits_per_sample=32,
             started_at=storage.now_iso(),
         )
         chunks = [
@@ -381,7 +423,6 @@ class M8StatusConstantsTests(unittest.TestCase):
         ):
             self.assertIn(s, storage.ALL_STATUSES)
 
-
     def test_m9_status_values_exist(self):
         # M9 adds two more pipeline states between
         # ``classifying`` and ``done``.
@@ -397,7 +438,8 @@ class M8StatusConstantsTests(unittest.TestCase):
         for s in storage.ALL_STATUSES:
             self.assertIn(s, storage.ALLOWED_STATUS_TRANSITIONS)
             self.assertIsInstance(
-                storage.ALLOWED_STATUS_TRANSITIONS[s], frozenset,
+                storage.ALLOWED_STATUS_TRANSITIONS[s],
+                frozenset,
             )
 
 
@@ -406,11 +448,16 @@ class M8TransitionGuardTests(LRTestCase):
 
     def _make(self):
         import uuid
+
         sid = uuid.uuid4().hex
         store = self.app.config["AFTERWORD_STORAGE"]
         store.upsert_session(
-            sid, title="x", expected_count=1,
-            sample_rate=22050, channels=1, bits_per_sample=32,
+            sid,
+            title="x",
+            expected_count=1,
+            sample_rate=22050,
+            channels=1,
+            bits_per_sample=32,
             started_at="2026-01-15T10:00:00Z",
         )
         return sid, store
@@ -419,7 +466,8 @@ class M8TransitionGuardTests(LRTestCase):
         sid, store = self._make()
         store.update_status(sid, storage.STATUS_STITCHING)
         self.assertEqual(
-            store.get_session(sid).status, storage.STATUS_STITCHING,
+            store.get_session(sid).status,
+            storage.STATUS_STITCHING,
         )
 
     def test_illegal_transition_raises(self):
@@ -427,7 +475,8 @@ class M8TransitionGuardTests(LRTestCase):
         with self.assertRaises(ValueError):
             store.update_status(sid, storage.STATUS_DONE)
         self.assertEqual(
-            store.get_session(sid).status, storage.STATUS_RECEIVING,
+            store.get_session(sid).status,
+            storage.STATUS_RECEIVING,
         )
 
     def test_legal_pipeline_progression(self):
@@ -437,7 +486,9 @@ class M8TransitionGuardTests(LRTestCase):
         sid, store = self._make()
         store.update_status(sid, storage.STATUS_STITCHING)
         store.update_status(
-            sid, storage.STATUS_READY, finished_at=storage.now_iso(),
+            sid,
+            storage.STATUS_READY,
+            finished_at=storage.now_iso(),
         )
         store.update_status(sid, storage.STATUS_TRANSCRIBING)
         store.update_status(sid, storage.STATUS_TRANSCRIBED)
@@ -446,14 +497,16 @@ class M8TransitionGuardTests(LRTestCase):
         store.update_status(sid, storage.STATUS_EXTRACTING)
         store.update_status(sid, storage.STATUS_DONE)
         self.assertEqual(
-            store.get_session(sid).status, storage.STATUS_DONE,
+            store.get_session(sid).status,
+            storage.STATUS_DONE,
         )
 
     def test_set_status_is_alias(self):
         sid, store = self._make()
         store.set_status(sid, storage.STATUS_STITCHING)
         self.assertEqual(
-            store.get_session(sid).status, storage.STATUS_STITCHING,
+            store.get_session(sid).status,
+            storage.STATUS_STITCHING,
         )
 
 
@@ -463,11 +516,16 @@ class M8AddArtifactTests(LRTestCase):
 
     def _make(self):
         import uuid
+
         sid = uuid.uuid4().hex
         store = self.app.config["AFTERWORD_STORAGE"]
         store.upsert_session(
-            sid, title="x", expected_count=1,
-            sample_rate=22050, channels=1, bits_per_sample=32,
+            sid,
+            title="x",
+            expected_count=1,
+            sample_rate=22050,
+            channels=1,
+            bits_per_sample=32,
             started_at="2026-01-15T10:00:00Z",
         )
         return sid, store
@@ -475,7 +533,9 @@ class M8AddArtifactTests(LRTestCase):
     def test_add_artifact_persists_row(self):
         sid, store = self._make()
         row = store.add_artifact(
-            sid, "transcript", "hello world",
+            sid,
+            "transcript",
+            "hello world",
             model="openai/whisper-large-v3",
         )
         self.assertEqual(row["kind"], "transcript")
@@ -509,13 +569,14 @@ class M8AddArtifactTests(LRTestCase):
         store.add_artifact(sid, "transcript", "second needle")
         fetched = store.get_artifact(sid, "transcript")
         self.assertEqual(fetched["content"], "second needle")
-        self.assertEqual(store.get_artifact(sid, "summary")["content"],
-                         "the summary")
+        self.assertEqual(store.get_artifact(sid, "summary")["content"], "the summary")
         with store._tx() as conn:
             rows = conn.execute(
-                "SELECT COUNT(*) FROM artifacts WHERE session_id = ? "
-                "AND kind = 'transcript'", (sid,)).fetchone()[0]
+                "SELECT COUNT(*) FROM artifacts WHERE session_id = ? AND kind = 'transcript'",
+                (sid,),
+            ).fetchone()[0]
         self.assertEqual(rows, 1)
         import search
+
         hits = search.search(store, "needle")["recording"]
         self.assertEqual([h.best["text"] for h in hits], ["second needle"])

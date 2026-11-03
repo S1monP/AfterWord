@@ -22,6 +22,7 @@ kept in step with it:
 One-off imports (``import_file``) use the same parsing and the same
 keys, so importing a file twice updates instead of duplicating.
 """
+
 from __future__ import annotations
 
 import datetime as _dt
@@ -44,7 +45,7 @@ log = logging.getLogger(__name__)
 KINDS = ("lecture", "meeting", "other")
 WINDOW_BACK = _dt.timedelta(days=90)
 WINDOW_AHEAD = _dt.timedelta(days=365)
-IMPORT_WINDOW = _dt.timedelta(days=730)     # a file: two years either way
+IMPORT_WINDOW = _dt.timedelta(days=730)  # a file: two years either way
 MAX_EVENTS = 2000
 MAX_IMPORT_EVENTS = 5000
 MAX_BYTES = 10 * 1024 * 1024
@@ -85,16 +86,19 @@ class SyncResult:
     updated: int = 0
     removed: int = 0
     total: int = 0
-    skipped: int = 0        # deleted by the user, or already in a subscription
+    skipped: int = 0  # deleted by the user, or already in a subscription
 
     def summary(self) -> str:
-        parts = [f"{self.added} added" if self.added else "",
-                 f"{self.updated} updated" if self.updated else "",
-                 f"{self.removed} removed" if self.removed else ""]
+        parts = [
+            f"{self.added} added" if self.added else "",
+            f"{self.updated} updated" if self.updated else "",
+            f"{self.removed} removed" if self.removed else "",
+        ]
         return ", ".join(p for p in parts if p) or "No changes"
 
 
 # --- Fetching and parsing --------------------------------------------------------
+
 
 def normalise_url(url: str) -> str:
     """``webcal://`` links are plain web links; only http(s) is fetched."""
@@ -115,14 +119,20 @@ def display_url(url: str) -> str:
 
 
 def fetch(url: str) -> bytes:
-    req = urllib.request.Request(normalise_url(url), headers={
-        "User-Agent": "AfterWord calendar sync", "Accept": "text/calendar, */*;q=0.5",
-    })
+    req = urllib.request.Request(
+        normalise_url(url),
+        headers={
+            "User-Agent": "AfterWord calendar sync",
+            "Accept": "text/calendar, */*;q=0.5",
+        },
+    )
     try:
         with urllib.request.urlopen(req, timeout=FETCH_TIMEOUT_S) as resp:
             data = resp.read(MAX_BYTES + 1)
     except urllib.error.HTTPError as exc:
-        raise FeedError(f"The calendar server answered {exc.code} ({exc.reason}). Is the link still valid?") from exc
+        raise FeedError(
+            f"The calendar server answered {exc.code} ({exc.reason}). Is the link still valid?"
+        ) from exc
     except (urllib.error.URLError, OSError) as exc:
         reason = getattr(exc, "reason", exc)
         raise FeedError(f"Couldn't reach the calendar ({reason}).") from exc
@@ -168,7 +178,8 @@ def parse(data: bytes, start: _dt.date, end: _dt.date, cap: int = MAX_EVENTS) ->
     except (ValueError, TypeError) as exc:
         raise FeedError("The calendar couldn't be read.") from exc
     repeating = {
-        str(c.get("UID", "")) for c in cal.walk("VEVENT")
+        str(c.get("UID", ""))
+        for c in cal.walk("VEVENT")
         if "RRULE" in c or "RDATE" in c or "RECURRENCE-ID" in c
     }
     try:
@@ -210,12 +221,20 @@ def parse(data: bytes, start: _dt.date, end: _dt.date, cap: int = MAX_EVENTS) ->
         description = _clean(comp.get("DESCRIPTION"), 4000)
         if description:
             description = _STAMP.sub("", description).strip()[:2000] or None
-        events.append(FeedEvent(
-            key=key, title=title, starts_at=_iso(starts), ends_at=_iso(ends) if ends else None,
-            location=_clean(comp.get("LOCATION"), 200), description=description,
-        ))
+        events.append(
+            FeedEvent(
+                key=key,
+                title=title,
+                starts_at=_iso(starts),
+                ends_at=_iso(ends) if ends else None,
+                location=_clean(comp.get("LOCATION"), 200),
+                description=description,
+            )
+        )
         if len(events) > cap:
-            raise FeedError(f"That calendar has more than {cap} events in the coming year; it can't be added.")
+            raise FeedError(
+                f"That calendar has more than {cap} events in the coming year; it can't be added."
+            )
     # X-WR-CALNAME isn't a standard property, so its text escapes ("\,")
     # are left in.
     raw_name = re.sub(r"\\([,;\\])", r"\1", str(cal.get("X-WR-CALNAME", ""))).replace("\\n", " ")
@@ -226,7 +245,9 @@ def parse(data: bytes, start: _dt.date, end: _dt.date, cap: int = MAX_EVENTS) ->
 # --- Courses ----------------------------------------------------------------------
 
 _CODE = re.compile(r"^([A-Za-z]{2,5}\d{2,4}[A-Za-z]?)\b[\s:·-]*(.*)$")
-_PART = re.compile(r"\s+(lecture|lab|tutorial|seminar|workshop|class|practical)s?\s*\d*$", re.IGNORECASE)
+_PART = re.compile(
+    r"\s+(lecture|lab|tutorial|seminar|workshop|class|practical)s?\s*\d*$", re.IGNORECASE
+)
 
 
 def module_of(title: str) -> tuple[str, str]:
@@ -253,6 +274,7 @@ def match_course(title: str, courses: list) -> str | None:
 
 # --- Applying a feed --------------------------------------------------------------
 
+
 def _changes(ev: Event, fe: FeedEvent) -> dict:
     out = {}
     for f in ("title", "starts_at", "ends_at", "location", "description"):
@@ -266,7 +288,7 @@ class SubscriptionsService:
 
     def __init__(self, store: Storage) -> None:
         self._store = store
-        self._lock = threading.Lock()       # one sync at a time
+        self._lock = threading.Lock()  # one sync at a time
 
     # --- the list -----------------------------------------------------------------
     def list(self) -> list[Subscription]:
@@ -281,8 +303,9 @@ class SubscriptionsService:
         if course_id and self._store.get_course(course_id) is None:
             raise ValueError("That course doesn't exist")
 
-    def add(self, url: str, *, name: str = "", kind: str = "lecture",
-            course_id: str | None = None) -> tuple[Subscription, SyncResult]:
+    def add(
+        self, url: str, *, name: str = "", kind: str = "lecture", course_id: str | None = None
+    ) -> tuple[Subscription, SyncResult]:
         """Check the link (it must return a calendar), save it and add
         its events. Raises ``ValueError`` / ``FeedError`` and saves
         nothing when the link doesn't work."""
@@ -292,15 +315,24 @@ class SubscriptionsService:
             raise ValueError("You're already subscribed to that calendar")
         feed = self._read(url)
         sub = self._store.create_subscription(
-            uuid.uuid4().hex, name=_clean(name, 100) or feed.name or urllib.parse.urlsplit(url).netloc,
-            url=url, kind=kind, course_id=course_id or None,
+            uuid.uuid4().hex,
+            name=_clean(name, 100) or feed.name or urllib.parse.urlsplit(url).netloc,
+            url=url,
+            kind=kind,
+            course_id=course_id or None,
         )
         with self._lock:
             result = self._apply_subscription(sub, feed)
         return self._store.get_subscription(sub.id), result  # type: ignore[return-value]
 
-    def update(self, sub_id: str, *, name: str | None = None, kind: str | None = None,
-               course_id: object = storage._UNSET) -> Subscription:
+    def update(
+        self,
+        sub_id: str,
+        *,
+        name: str | None = None,
+        kind: str | None = None,
+        course_id: object = storage._UNSET,
+    ) -> Subscription:
         """Rename, or change what its events are: a new kind or course
         applies to all of them (``course_id=None``: match by name)."""
         sub = self._store.get_subscription(sub_id)
@@ -340,7 +372,9 @@ class SubscriptionsService:
         """The user deleted a subscribed event: keep it out from now on."""
         sub = self._store.get_subscription(event.subscription_id or "")
         if sub is not None and event.source_ref:
-            self._store.update_subscription(sub.id, hidden_keys=[*sub.hidden_keys, event.source_ref])
+            self._store.update_subscription(
+                sub.id, hidden_keys=[*sub.hidden_keys, event.source_ref]
+            )
 
     # --- syncing --------------------------------------------------------------------
     def _read(self, url: str) -> Feed:
@@ -382,7 +416,7 @@ class SubscriptionsService:
         hidden = set(sub.hidden_keys)
         existing: dict[str, Event] = {}
         for ev in store.events_from_feed(sub.id):
-            if ev.source_ref in existing:          # a duplicate from before: drop it
+            if ev.source_ref in existing:  # a duplicate from before: drop it
                 store.delete_event(ev.id)
                 continue
             existing[ev.source_ref or ""] = ev
@@ -397,7 +431,9 @@ class SubscriptionsService:
                 continue
             ev = existing.get(fe.key)
             if ev is None and fe.key in imported:
-                ev = store.update_event(imported[fe.key].id, subscription_id=sub.id, source=SOURCE_SUB)
+                ev = store.update_event(
+                    imported[fe.key].id, subscription_id=sub.id, source=SOURCE_SUB
+                )
                 existing[fe.key] = ev
             if ev is not None:
                 change = _changes(ev, fe)
@@ -410,21 +446,32 @@ class SubscriptionsService:
                     result.updated += 1
                 continue
             store.create_event(
-                uuid.uuid4().hex, title=fe.title, kind=sub.kind, starts_at=fe.starts_at,
-                ends_at=fe.ends_at, description=fe.description, location=fe.location,
-                source=SOURCE_SUB, source_ref=fe.key, subscription_id=sub.id,
+                uuid.uuid4().hex,
+                title=fe.title,
+                kind=sub.kind,
+                starts_at=fe.starts_at,
+                ends_at=fe.ends_at,
+                description=fe.description,
+                location=fe.location,
+                source=SOURCE_SUB,
+                source_ref=fe.key,
+                subscription_id=sub.id,
                 course_id=sub.course_id or match_course(fe.title, courses),
             )
             result.added += 1
         # Gone from the feed (or cancelled): remove it, but only inside
         # the window; older events are history and stay.
-        window_start = _iso(_utc(_dt.datetime.combine(timeutil.local_today() - WINDOW_BACK, _dt.time())))
+        window_start = _iso(
+            _utc(_dt.datetime.combine(timeutil.local_today() - WINDOW_BACK, _dt.time()))
+        )
         for key, ev in existing.items():
             if key not in seen and ev.starts_at >= window_start:
                 store.delete_event(ev.id)
                 result.removed += 1
         store.update_subscription(
-            sub.id, last_synced_at=storage.now_iso(), last_error=None,
+            sub.id,
+            last_synced_at=storage.now_iso(),
+            last_error=None,
             event_count=len(store.events_from_feed(sub.id)),
         )
         return result
@@ -454,9 +501,15 @@ class SubscriptionsService:
                         result.updated += 1
                     continue
                 store.create_event(
-                    uuid.uuid4().hex, title=fe.title, kind=kind, starts_at=fe.starts_at,
-                    ends_at=fe.ends_at, description=fe.description, location=fe.location,
-                    source=SOURCE_IMPORT, source_ref=fe.key,
+                    uuid.uuid4().hex,
+                    title=fe.title,
+                    kind=kind,
+                    starts_at=fe.starts_at,
+                    ends_at=fe.ends_at,
+                    description=fe.description,
+                    location=fe.location,
+                    source=SOURCE_IMPORT,
+                    source_ref=fe.key,
                     course_id=match_course(fe.title, courses),
                 )
                 result.added += 1
@@ -497,6 +550,7 @@ class SubscriptionsService:
 def start_scheduler(app) -> threading.Thread:
     """Sync due subscriptions every few minutes, in the background.
     ``app.config["AFTERWORD_SUBSCRIPTION_SYNC"] = False`` turns it off (tests)."""
+
     def run() -> None:
         time.sleep(20)
         while True:
