@@ -1,6 +1,5 @@
 r"""A second server on 127.0.0.1:8010 with made-up demo data, for
-screenshots and click-through checks (scripts/browser_check.py) without
-touching real data.
+screenshots and trying the UI without touching real data.
 
 Throwaway data dir (%TEMP%/afterword-demo-data, rebuilt each start), no AI
 keys, no calendar syncing, and "now" pinned to today 13:42 local so the

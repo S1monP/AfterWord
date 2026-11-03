@@ -109,11 +109,10 @@ for the two keys.
 Tests that need ffmpeg are skipped without it. None of them call the AI
 APIs.
 
-For checking the web UI by eye, without touching real data:
+To try the web UI with made-up data, without touching real data:
 
 ```powershell
-.venv\Scripts\python.exe scripts\demo_server.py             # demo data on http://127.0.0.1:8010
-.venv\Scripts\python.exe scripts\browser_check.py steps.json # real clicks, typing, screenshots
+.venv\Scripts\python.exe scripts\demo_server.py              # http://127.0.0.1:8010
 ```
 
 ## Running it on the home network
