@@ -99,7 +99,7 @@ for the two keys.
 ## Tests
 
 ```powershell
-.venv\Scripts\python.exe -m unittest discover -s tests       # 574 tests
+.venv\Scripts\python.exe -m unittest discover -s tests       # all tests
 .venv\Scripts\python.exe -m unittest tests.test_tasks        # one module
 .venv\Scripts\python.exe scripts\run_tests.py                # same, output to test.log
 .venv\Scripts\python.exe scripts\e2e_check.py [--live]       # device protocol end to end
@@ -113,14 +113,14 @@ For checking the web UI by eye, without touching real data:
 
 ```powershell
 .venv\Scripts\python.exe scripts\demo_server.py             # demo data on http://127.0.0.1:8010
-.venv\Scripts\python.exe scriptsrowser_check.py steps.json # real clicks, typing, screenshots
+.venv\Scripts\python.exe scripts\browser_check.py steps.json # real clicks, typing, screenshots
 ```
 
 ## Running it on the home network
 
-`scriptsun_home.ps1` runs the production server as **http://afterword.local**
+`scripts\run_home.ps1` runs the production server as **http://afterword.local**
 (port 80, plus 8000 for the recorder), logging to `data\server.log`.
-`scriptsutostart.ps1` makes it start at Windows logon (`-Remove` undoes it).
+`scripts\autostart.ps1` makes it start at Windows logon (`-Remove` undoes it).
 
 ## Layout
 
