@@ -1,5 +1,5 @@
 // =============================================================================
-//  AI NoteTaker  --  lecture recorder firmware (ESP-IDF, ESP32-S3 N16R8)
+//  AfterWord recorder firmware (ESP-IDF, ESP32-S3 N16R8)
 //
 //  Record -> encode AAC live -> 5-minute chunks on SD -> upload to the
 //  server when on WiFi -> delete only after the server confirms.
@@ -207,7 +207,7 @@ static void on_wifi_connected(void) {
 //  Boot + main loop
 // -----------------------------------------------------------------------------
 void app_main(void) {
-    ESP_LOGI(TAG, "AI NoteTaker " FW_VERSION " -- server %s, token %s",
+    ESP_LOGI(TAG, "AfterWord " FW_VERSION " -- server %s, token %s",
              SERVER_URL, DEVICE_TOKEN[0] ? "set" : "none");
 
     esp_err_t err = nvs_flash_init();

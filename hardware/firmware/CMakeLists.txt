@@ -1,8 +1,8 @@
-# AI NoteTaker firmware (ESP-IDF v6.1, ESP32-S3).
+# AfterWord recorder firmware (ESP-IDF v6.1, ESP32-S3).
 cmake_minimum_required(VERSION 3.16)
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-project(ai_notetaker)
+project(afterword_recorder)
 
 # esp_audio_codec adds an unquoted "-L <its lib dir>" link flag, which breaks
 # the link when the project path contains a space ("Visual Studio").  The

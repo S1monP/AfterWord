@@ -32,7 +32,7 @@ static int  s_seen_n;
 static const char PAGE_HEAD[] =
     "<!DOCTYPE html><html><head><meta charset='utf-8'>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-    "<title>AI NoteTaker</title><style>"
+    "<title>AfterWord</title><style>"
     "body{font-family:sans-serif;margin:1em auto;max-width:480px;padding:0 1em;color:#222}"
     "h1{font-size:1.4em}"
     "button,input,select{font-size:1em;padding:0.5em;margin:0.3em 0;width:100%;box-sizing:border-box}"
@@ -72,7 +72,7 @@ static void send_escaped(httpd_req_t *req, const char *s) {
 static esp_err_t page_root(httpd_req_t *req) {
     httpd_resp_sendstr_chunk(req, PAGE_HEAD);
     httpd_resp_sendstr_chunk(req,
-        "<h1>AI NoteTaker WiFi Setup</h1><p>What do you want to do?</p>"
+        "<h1>AfterWord Wi-Fi setup</h1><p>What do you want to do?</p>"
         "<a class='btn' href='/add'>Add network</a>"
         "<a class='btn' href='/manage'>Manage networks</a>");
     httpd_resp_sendstr_chunk(req, PAGE_TAIL);

@@ -19,6 +19,7 @@
 
 static const char *TAG = "wifi";
 
+// The project's first name; saved networks live here, so it stays.
 #define NVS_NS          "ai_notetaker"
 #define EV_GOT_IP       BIT0
 #define EV_DISCONNECTED BIT1
@@ -196,7 +197,7 @@ void wifi_mgr_start(bool force_portal) {
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     esp_netif_t *sta = esp_netif_create_default_wifi_sta();
     esp_netif_create_default_wifi_ap();
-    esp_netif_set_hostname(sta, "ai-notetaker");
+    esp_netif_set_hostname(sta, "afterword-recorder");
 
     wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&init));
