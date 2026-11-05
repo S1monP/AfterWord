@@ -1,0 +1,5 @@
+# Layout-only commits, hidden from git blame.
+# GitHub reads this file; locally: git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# Server: format with ruff
+88909f2dcbd2a1df93d1aca755917ba1da5c80f5
