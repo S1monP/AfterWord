@@ -1199,7 +1199,7 @@ _EXTRACT_SECTION_PROMPT = (
     "'action_item', 'topic', 'key_term', 'study_question', or 'fact') and "
     "'text' (the item's content).\n\n"
     + _KIND_ITEMS
-    + "Aim for 3-10 items. Only include items that are clearly supported "
+    + "Quality over quantity: include only items you are confident are real and useful, and return fewer, or none, rather than pad the list. When unsure whether something is a real commitment, leave it out. Only include items that are clearly supported "
     "by THIS SECTION; do not invent. If the section has no relevant "
     'items, return {"items": []}.\n\n' + _FILING_RULES
 )
@@ -1620,7 +1620,7 @@ _EXTRACT_SYSTEM_PROMPT = (
     "'action_item', 'topic', 'key_term', 'study_question', or 'fact') and "
     "'text' (the item's content).\n\n"
     + _KIND_ITEMS
-    + "Aim for 3-10 items. Only include items that are clearly supported "
+    + "Quality over quantity: include only items you are confident are real and useful, and return fewer, or none, rather than pad the list. When unsure whether something is a real commitment, leave it out. Only include items that are clearly supported "
     "by the transcript; do not invent.\n\n" + _FILING_RULES
 )
 
