@@ -158,9 +158,15 @@ class FilingTests(LRTestCase):
         titles = sorted(t.title for t in self._all_tasks())
         self.assertEqual(titles, ["Email the tutor", "Read chapter 5"])
 
-    def test_pipeline_files_for_lectures_and_commands_only(self):
+    def test_pipeline_files_commands_only(self):
         items = [{"type": "action_item", "text": "Buy a lab coat"}]
-        for kind, expect in (("lecture", 1), ("voice_memo", 0), ("other", 0), ("command", 1)):
+        for kind, expect in (
+            ("lecture", 0),
+            ("meeting", 0),
+            ("voice_memo", 0),
+            ("other", 0),
+            ("command", 1),
+        ):
             with self.subTest(kind=kind):
                 with self.store._tx() as conn:
                     conn.execute("DELETE FROM tasks")
@@ -218,6 +224,77 @@ class FilingTests(LRTestCase):
             llm_provider=provider,
         )
         self.assertEqual(self._all_tasks(), [])
+
+    def _extracted_lecture(self):
+        sid = self._session(None)
+        provider = _Provider(
+            "lecture",
+            [
+                {"type": "deadline", "text": "Submit essay", "due": "2026-01-23", "at": "00:10"},
+                {"type": "action_item", "text": "Read chapter 4"},
+                {"type": "event", "text": "Midterm exam", "start": "2026-02-02T09:00"},
+                {"type": "deadline", "text": "Old quiz", "due": "2026-01-01"},
+                {"type": "topic", "text": "Entropy"},
+            ],
+        )
+        processing.run_post_finish_pipeline(
+            self.store,
+            sid,
+            transcript_provider=provider,
+            classifier=provider,
+            llm_provider=provider,
+        )
+        return sid
+
+    def _propose(self, sid, index, action):
+        return self.client.post(
+            f"/api/v1/sessions/{sid}/proposals/{index}", json={"action": action}
+        )
+
+    def test_lecture_items_wait_for_confirmation_one_by_one(self):
+        sid = self._extracted_lecture()
+        self.assertEqual(self._all_tasks(), [])  # nothing filed on its own
+        shown = filing.proposals(self.store, sid)
+        # The past deadline and the topic are not offered.
+        self.assertEqual([p["index"] for p in shown], [0, 1, 2])
+        body = self.client.get(f"/lectures?session={sid}", headers={"X-Soft-Nav": "1"}).get_data(
+            as_text=True
+        )
+        self.assertIn("Suggested for your lists", body)
+        self.assertIn("Submit essay", body)
+
+        self.assertEqual(self._propose(sid, 0, "add").get_json()["result"], "added")
+        (task,) = self._all_tasks()
+        self.assertEqual((task.title, task.source_ref), ("Submit essay", sid))
+        self.assertEqual(task.source_offset_ms, 10_000)
+        self.assertEqual(self._propose(sid, 1, "dismiss").get_json()["result"], "dismissed")
+        self.assertEqual(len(self._all_tasks()), 1)  # dismissing adds nothing
+        self.assertEqual([p["index"] for p in filing.proposals(self.store, sid)], [2])
+        # Each can be decided only once.
+        self.assertEqual(self._propose(sid, 0, "add").status_code, 404)
+        self.assertEqual(self._propose(sid, 1, "add").status_code, 404)
+        self.assertEqual(self._propose(sid, 99, "add").status_code, 404)
+        self.assertEqual(self._propose(sid, 2, "later").status_code, 400)
+        self.assertEqual(self._propose(sid, 2, "add").get_json()["result"], "added")
+        events, _ = self.app.config["AFTERWORD_EVENTS_SERVICE"].list()
+        self.assertEqual([e.title for e in events], ["Midterm exam"])
+        self.assertEqual(filing.proposals(self.store, sid), [])
+
+    def test_reprocessing_offers_the_suggestions_again(self):
+        sid = self._extracted_lecture()
+        self._propose(sid, 1, "dismiss")
+        self.assertEqual(len(filing.proposals(self.store, sid)), 2)
+        provider = _Provider("lecture", [{"type": "action_item", "text": "Read chapter 4"}])
+        with self.store._tx() as conn:  # as a retry does
+            conn.execute("UPDATE sessions SET status = ? WHERE id = ?", (storage.STATUS_READY, sid))
+        processing.run_post_finish_pipeline(
+            self.store,
+            sid,
+            transcript_provider=provider,
+            classifier=provider,
+            llm_provider=provider,
+        )
+        self.assertEqual([p["index"] for p in filing.proposals(self.store, sid)], [0])
 
     def test_detail_pane_lists_filed_items(self):
         sid = self._session("lecture")

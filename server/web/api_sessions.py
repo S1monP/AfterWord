@@ -357,6 +357,26 @@ def api_delete_session(session_id: str) -> Any:
     return jsonify({"ok": True})
 
 
+# --- API: confirm a suggested deadline / to-do / event ---------------
+@bp.post("/api/v1/sessions/<session_id>/proposals/<int:index>")
+def api_decide_proposal(session_id: str, index: int) -> Any:
+    """Add or dismiss one item suggested from a recording.
+
+    Body: ``{"action": "add" | "dismiss"}``. ``404`` when there is no
+    such open suggestion (already decided, or the recording was
+    re-processed)."""
+    from services import filing
+
+    action = (request.get_json(silent=True) or {}).get("action")
+    if action not in ("add", "dismiss"):
+        return jsonify({"error": "invalid_payload", "detail": "action: add or dismiss"}), 400
+    try:
+        result = filing.decide(current_app_storage(), session_id, index, action)
+    except KeyError:
+        return jsonify({"error": "not_found"}), 404
+    return jsonify({"ok": True, "result": result})
+
+
 # --- API: recording-kind classification (manual override) ----------
 @bp.post("/api/v1/sessions/<session_id>/kind")
 def api_set_kind(session_id: str) -> Any:

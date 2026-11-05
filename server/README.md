@@ -222,11 +222,15 @@ calendar event by start time.
   event>: <topic>". Pages show the date, time and length under the name.
   A name given by hand (Rename) is never replaced.
 - **Filing** (`services/filing.py`): deadlines, to-dos and dated events
-  from lectures and meetings go into Deadlines, To-dos and the Calendar,
-  linked to the moment in the recording; the recording's page lists them.
-  Duplicates of open items and dates before the recording are skipped;
-  re-processing replaces only items never touched. Voice memos and
-  "other" recordings (including videos playing) file nothing.
+  found in lectures and meetings are only *suggested*: the recording's
+  page lists them under the summary and each one is added (to
+  Deadlines, To-dos or the Calendar, linked to the moment in the
+  recording) or dismissed by hand, one by one
+  (`POST /api/v1/sessions/<id>/proposals/<n>`, `{"action": "add"|"dismiss"}`).
+  Dates before the recording are not offered; adding a duplicate of an
+  open item adds nothing; re-processing offers the suggestions again.
+  Voice memos and "other" recordings (including videos playing) suggest
+  nothing.
 - **Command** recordings ("remind me to call the dentist tomorrow") only
   file their request, without a link, and are then deleted: the
   recording is not kept. One that filed nothing (probably misheard)

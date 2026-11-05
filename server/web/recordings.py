@@ -9,6 +9,7 @@ from typing import Any
 
 import storage
 import timeutil
+from services import filing
 from services.llm import parse_transcript_lines
 from services.processing import NO_SPEECH_DETAIL
 from web.common import (
@@ -204,6 +205,10 @@ def reader(listing: Listing, sess) -> dict[str, Any]:
         }
         for e in filed_events
     ]
+    suggested = [
+        {**p, "at": _clock(p["ms"]) if p["ms"] is not None else ""}
+        for p in filing.proposals(store, sess.id)
+    ]
     kind = sess.kind or "other"
     if kind == "lecture":
         chip = " · ".join(filter(None, [row["course"], row["number"]])) or "Lecture"
@@ -220,6 +225,7 @@ def reader(listing: Listing, sess) -> dict[str, Any]:
         "summary": summary,
         "lines": lines,
         "filed": filed,
+        "suggested": suggested,
         "points_label": "Decisions" if kind == "meeting" else "Key points",
         "processing": processing,
         "failed": sess.status == storage.STATUS_FAILED,

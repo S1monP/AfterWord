@@ -626,15 +626,20 @@ def _file_items(
     kind: str | None,
     items: list,
 ) -> int:
-    """Copy deadlines / to-dos / events into the user's lists (only for
-    :data:`filing.FILING_KINDS`; other kinds just drop what an earlier
-    run filed) and return how many were filed. Never fails the
-    pipeline."""
+    """Copy deadlines / to-dos / events into the user's lists and return
+    how many were filed. Only a request recording (``command``) is
+    filed here; a lecture's or meeting's items are proposed in the
+    reader for the user to confirm one by one (``filing.proposals``),
+    so a re-run only forgets earlier decisions. Other kinds drop what
+    an earlier run filed. Never fails the pipeline."""
     try:
+        if kind in filing.PROPOSAL_KINDS:
+            storage.delete_artifacts(session_id, filing.DECISIONS)
+            return 0
         counts = filing.refile(
             storage,
             session_id,
-            list(items) if kind in filing.FILING_KINDS else [],
+            list(items) if kind in filing.UNLINKED_KINDS else [],
         )
     except Exception:  # pragma: no cover  (defensive)
         traceback.print_exc()

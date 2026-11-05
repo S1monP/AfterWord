@@ -1,8 +1,11 @@
-"""Auto-filing: deadlines, to-dos and dated events found in a recording.
+"""Filing: deadlines, to-dos and dated events found in a recording.
 
-The extraction step (``services.llm``) returns typed items. For the
-kinds in :data:`FILING_KINDS`, three item types are copied into the
-user's lists (``source='extracted'``):
+The extraction step (``services.llm``) returns typed items. Those from
+lectures and meetings are only *proposed* (:func:`proposals`): the
+reader lists them below the summary and the user adds each one by hand
+(:func:`decide`). Those from a ``command`` recording are the user's own
+request and are filed at once (:func:`refile`). Either way, three item
+types are copied into the user's lists (``source='extracted'``):
 
 * ``deadline`` with a ``due`` date  -> Deadlines (a task of kind deadline)
 * ``action_item``                    -> Todos (``due`` if one was said)
@@ -23,6 +26,7 @@ before the recording, are skipped.
 from __future__ import annotations
 
 import datetime as _dt
+import json
 import re
 from typing import Any
 
@@ -53,6 +57,120 @@ class _Link:
         name = f"the recording “{sess.title}”" if named else "a recording"
         at = f" at {_clock(offset_ms)}" if offset_ms is not None else ""
         self.description = f"From {name}{at}."
+
+
+#: Recording kinds whose items are only proposed: the reader lists them
+#: below the summary and the user adds each one by hand. A "command"
+#: recording is the user's own request, so it is filed straight away.
+PROPOSAL_KINDS = FILING_KINDS - UNLINKED_KINDS
+
+#: Artifact holding what was decided about each proposal, by position in
+#: the extraction: ``{"3": "added", "5": "dismissed"}``.
+DECISIONS = "decisions"
+
+
+def _extracted_items(storage: Storage, session_id: str) -> list:
+    art = storage.get_artifact(session_id, "extraction")
+    try:
+        items = json.loads((art or {}).get("content") or "")["items"]
+    except (TypeError, ValueError, KeyError):
+        return []
+    return items if isinstance(items, list) else []
+
+
+def _decisions(storage: Storage, session_id: str) -> dict[str, str]:
+    art = storage.get_artifact(session_id, DECISIONS)
+    try:
+        data = json.loads((art or {}).get("content") or "")
+    except (TypeError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _decide(storage: Storage, session_id: str, index: int, what: str) -> None:
+    decisions = _decisions(storage, session_id)
+    decisions[str(index)] = what
+    storage.add_artifact(session_id, DECISIONS, json.dumps(decisions))
+
+
+_LABEL = {"deadline": "Deadline", "action_item": "To-do", "event": "Calendar"}
+
+
+def proposals(storage: Storage, session_id: str) -> list[dict]:
+    """What the recording suggested and the user has not yet decided on:
+    ``{"index", "label", "when", "ms"}`` per item. Only lectures and
+    meetings propose; items that could not be filed (no usable date,
+    dated before the recording) are not shown."""
+    sess = storage.get_session(session_id)
+    if sess is None or sess.kind not in PROPOSAL_KINDS:
+        return []
+    recorded = (timeutil.to_local(sess.started_at) or timeutil.local_now()).date()
+    decided = _decisions(storage, session_id)
+    out = []
+    for index, item in enumerate(_extracted_items(storage, session_id)):
+        if str(index) in decided or not isinstance(item, dict):
+            continue
+        shown = _describe(item, recorded)
+        if shown is None:
+            continue
+        label, text, when = shown
+        out.append(
+            {
+                "index": index,
+                "label": f"{label} · {text}",
+                "when": when,
+                "ms": _offset_ms(item.get("at")),
+            }
+        )
+    return out
+
+
+def _describe(item: dict, recorded_day: _dt.date) -> tuple[str, str, str] | None:
+    """``(list name, text, date shown)`` for an item that can be filed."""
+    kind = item.get("type")
+    text = " ".join(str(item.get("text", "")).split())[:_MAX_TITLE]
+    if kind not in _LABEL or not text:
+        return None
+    if kind == "event":
+        when = _local(item.get("start"))
+        label = "Calendar" if when and when[1] else "Deadline"
+    else:
+        when = _local(item.get("due"))
+        label = "Deadline" if kind == "deadline" and when else "To-do"
+    if kind == "event" and when is None:
+        return None
+    if when is not None and when[0].date() < recorded_day:
+        return None
+    shown = ""
+    if when is not None:
+        shown = f"{when[0]:%a} {when[0].day} {when[0]:%b}" + (
+            f", {when[0]:%H:%M}" if when[1] else ""
+        )
+    return label, text, shown
+
+
+def decide(storage: Storage, session_id: str, index: int, action: str) -> str:
+    """Add (``"add"``) or drop (``"dismiss"``) one proposal. Returns
+    ``"added"``, ``"duplicate"`` (already in the lists) or
+    ``"dismissed"``. Raises ``KeyError`` for a proposal that does not
+    exist or was already decided."""
+    sess = storage.get_session(session_id)
+    if sess is None or sess.kind not in PROPOSAL_KINDS:
+        raise KeyError(session_id)
+    items = _extracted_items(storage, session_id)
+    if not 0 <= index < len(items) or str(index) in _decisions(storage, session_id):
+        raise KeyError(index)
+    item = items[index]
+    if action == "dismiss":
+        _decide(storage, session_id, index, "dismissed")
+        return "dismissed"
+    recorded = timeutil.to_local(sess.started_at) or timeutil.local_now()
+    link = _Link(sess, _offset_ms(item.get("at") if isinstance(item, dict) else None))
+    filed = _file_one(
+        item, sess, recorded.date(), TasksService(storage), EventsService(storage), link
+    )
+    _decide(storage, session_id, index, "added")
+    return "added" if filed else "duplicate"
 
 
 def refile(storage: Storage, session_id: str, items: list[dict]) -> dict:

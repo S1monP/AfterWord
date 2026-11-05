@@ -19,8 +19,9 @@ play back from the exact moment something was said.
 - **Understands** each recording on the server: a transcript with
   speakers, the kind of recording (lecture, meeting, voice memo, a spoken
   request), a title and a summary in sections, in English or Russian.
-- **Files** what was said: deadlines, to-dos and dated events go into
-  their lists and the calendar, each linked to the moment in the audio.
+- **Suggests** what to file: deadlines, to-dos and dated events it hears
+  are listed under the summary, and you confirm each one before it goes
+  into your lists and the calendar, linked to the moment in the audio.
 - **Finds** anything again: one search box across transcripts, summaries,
   notes, tasks and the calendar, matching word forms in both languages.
 - **Fits the day:** lectures are matched to the timetable (imported or

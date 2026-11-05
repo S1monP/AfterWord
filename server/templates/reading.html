@@ -168,6 +168,24 @@
           {% elif not reader.failed %}
             <p class="muted">No summary for this recording.</p>
           {% endif %}
+          {% if reader.suggested %}
+            <h4 class="rsum__filed-h">Suggested for your lists</h4>
+            <p class="muted rsum__hint">Nothing is added until you confirm it.</p>
+            <div class="rsum__suggest">
+              {% for s in reader.suggested %}
+                <div class="suggest" data-suggest="{{ s.index }}">
+                  <div class="suggest__text">
+                    <span>{{ s.label }}</span>
+                    {% if s.when or s.at %}<span class="muted suggest__when">{{ s.when }}{% if s.when and s.at %} · {% endif %}{% if s.at %}said at {{ s.at }}{% endif %}</span>{% endif %}
+                  </div>
+                  <div class="suggest__btns">
+                    <button type="button" class="btn btn--fill" data-suggest-do="add">Add</button>
+                    <button type="button" class="btn" data-suggest-do="dismiss">Dismiss</button>
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          {% endif %}
           {% if reader.filed %}
             <h4 class="rsum__filed-h">Added to your lists</h4>
             <div class="rsum__filed">

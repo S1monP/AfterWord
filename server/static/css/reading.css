@@ -87,6 +87,15 @@
 .rsum__filed-h { margin: 22px 0 8px; font-size: 15px; }
 .rsum__filed { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 .rsum__filed .moment { font-size: 13px; padding: 5px 10px; text-align: left; }
+.rsum__hint { margin: -4px 0 10px; font-size: 13px; }
+.rsum__suggest { display: flex; flex-direction: column; gap: 8px; }
+.suggest {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  padding: 10px 12px; border: 1px solid var(--seam); border-radius: 8px; background: var(--hi);
+}
+.suggest__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 220px; }
+.suggest__when { font-size: 13px; }
+.suggest__btns { display: flex; gap: 8px; }
 .moment.is-done { text-decoration: line-through; color: var(--faint); }
 
 .rtr__head { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }

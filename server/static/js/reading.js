@@ -140,6 +140,32 @@
     if (s) seek(+s.dataset.seek, true);
   });
 
+  /* Suggested deadlines / to-dos / events: each is added or dismissed by hand. */
+  document.addEventListener("click", function (e) {
+    var btn = e.target.closest("[data-suggest-do]");
+    if (!btn) return;
+    var row = btn.closest("[data-suggest]"), action = btn.dataset.suggestDo;
+    row.querySelectorAll("button").forEach(function (b) { b.disabled = true; });
+    AW.api("POST", "/api/v1/sessions/" + readerId + "/proposals/" + row.dataset.suggest, { action: action }).then(function (r) {
+      if (action === "add") {
+        AW.toastNext(r.result === "duplicate" ? "Already in your lists" : "Added to your lists");
+        location.reload();
+        return;
+      }
+      var box = row.parentNode;
+      row.remove();
+      if (!box.children.length) {
+        var head = box.previousElementSibling; /* the hint line, then the heading */
+        if (head) { var h = head.previousElementSibling; head.remove(); if (h) h.remove(); }
+        box.remove();
+      }
+      AW.toast("Dismissed");
+    }).catch(function (err) {
+      row.querySelectorAll("button").forEach(function (b) { b.disabled = false; });
+      AW.toast(err.message || "Could not save that");
+    });
+  });
+
   /* Opened from search or "Said in": ?t= (ms) jumps there; ?hl= marks words. */
   document.querySelectorAll("[data-tab]").forEach(function (b) { b.addEventListener("click", function () { showTab(b.dataset.tab); }); });
   var startTab = params.get("t") || params.get("hl") ? "transcript" : "summary";
