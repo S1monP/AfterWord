@@ -1,4 +1,4 @@
-"""AI NoteTaker server: Flask app factory and development entry point.
+"""AfterWord server: Flask app factory and development entry point.
 
 Receives recordings from the device (announce, chunk uploads, finish),
 stitches the AAC chunks, runs the AI pipeline (transcribe, classify,

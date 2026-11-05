@@ -55,8 +55,9 @@ SOURCE_SUB = "subscription"
 SOURCE_IMPORT = "ical_import"
 
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
-# MyTimetable (City) stamps every description with the time of the last
-# export; without this every sync would "change" every event.
+# Some timetable exports (MyTimetable, for one) stamp every description
+# with the time of the last export; without this every sync would
+# "change" every event.
 _STAMP = re.compile(r"\s*Last synchroni[sz]ed on [^\n]*$", re.IGNORECASE)
 
 

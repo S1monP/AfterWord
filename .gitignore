@@ -1,4 +1,4 @@
-# Repo root: AI_NoteTaker monorepo (server/ + hardware/).
+# AfterWord: the recorder (hardware/) and its server (server/).
 # server/ has its own .gitignore for Python/data rules.
 
 # Editor / OS

@@ -1,6 +1,6 @@
-# AI NoteTaker server
+# AfterWord server
 
-A small Flask server for the lecture recorder in [`../hardware`](../hardware).
+The Flask server behind the [AfterWord recorder](../hardware).
 The device uploads each recording in AAC chunks; the server stitches them,
 then transcribes, classifies, summarises and extracts tasks in the
 background, and serves a web UI for lectures, meetings, notes (with voice
@@ -144,7 +144,8 @@ uv pip compile requirements.in --universal --python-version 3.11 -o requirements
 ## Running it on the home network
 
 `scripts\run_home.ps1` runs the production server as **http://afterword.local**
-(port 80, plus 8000 for the recorder), logging to `data\server.log`.
+(port 80, plus 8000 for the recorder), logging to `data\server.log`. It
+listens on the network, so `AFTERWORD_WEB_PASSWORD` must be set in `.env`.
 `scripts\autostart.ps1` makes it start at Windows logon (`-Remove` undoes it).
 
 ## Layout
@@ -156,22 +157,27 @@ server/
 ├── config.py         settings from env / .env
 ├── auth.py           device token, web login, session key
 ├── logsetup.py       log format, level, rotating log file
+├── mdns.py           the afterword.local name on the home network
 ├── timeutil.py       UTC storage / local display rules
 ├── storage.py        SQLite + files: sessions, chunks, stitching, artifacts
 ├── search.py         search index and queries (see Search)
-├── services/         processing (AI pipeline), llm (OpenRouter), transcode
-│                     (ffmpeg), notes, tasks, events (+ ICS), courses,
+├── services/         processing (AI pipeline), llm (AI providers), transcode
+│                     (ffmpeg), filing, notes, tasks, events (+ ICS),
+│                     calendar_feeds (subscriptions), courses, palette,
 │                     classification
 ├── web/              routes as blueprints
-│   ├── pages.py          HTML pages
+│   ├── pages.py          HTML pages; home.py, recordings.py, notes_page.py,
+│   │                     calendar_page.py and todos_page.py build their data
 │   ├── api_sessions.py   device protocol, sessions, audio, pipeline
-│   ├── api_search.py     the dashboard's search box
-│   ├── api_notes.py, api_tasks.py, api_events.py, api_courses.py
+│   ├── api_search.py     the search box
+│   ├── api_notes.py, api_tasks.py, api_events.py, api_courses.py,
+│   │   api_settings.py, api_subscriptions.py
+│   ├── export.py         Markdown export
 │   ├── common.py         accessors, template filters, helpers
 │   └── pipeline.py       background worker and boot sweep
-├── templates/, static/
+├── templates/, static/   Jinja pages, CSS and JavaScript (no build step)
 ├── tests/
-└── scripts/          tests and checks, demo server, browser check, home-network start
+└── scripts/          end-to-end checks, demo server, home-network start
 ```
 
 ## Device protocol
@@ -214,10 +220,10 @@ calendar event by start time.
 - **Names:** the summary includes a short title in the recording's
   language; a recording matched to a calendar event is "<course or
   event>: <topic>". Pages show the date, time and length under the name.
-  A name given by hand (the pencil) is never replaced.
+  A name given by hand (Rename) is never replaced.
 - **Filing** (`services/filing.py`): deadlines, to-dos and dated events
-  from lectures and meetings go into Deadlines, Todos and the Calendar,
-  linked to the moment in the recording; the detail pane lists them.
+  from lectures and meetings go into Deadlines, To-dos and the Calendar,
+  linked to the moment in the recording; the recording's page lists them.
   Duplicates of open items and dates before the recording are skipped;
   re-processing replaces only items never touched. Voice memos and
   "other" recordings (including videos playing) file nothing.
@@ -236,9 +242,9 @@ calendar event by start time.
   to another page removes the note (`services/notes.py`).
 - A recording with no speech ends done ("no speech detected"), without a
   kind; it is listed on the Other page.
-- Changing a finished recording's kind by hand ("Classify as" on the
-  Other page or a memo) rewrites its summary for the new kind, reusing
-  the transcript.
+- Changing a finished recording's kind by hand ("Move to" in its
+  actions menu) rewrites its summary for the new kind, reusing the
+  transcript.
 - After a server restart, sessions stranded mid-pipeline are requeued;
   finished steps are not repeated.
 - A failed session (API error) stays failed and is listed on the Other
@@ -250,17 +256,17 @@ Every recording is read on one page: Lectures, Meetings, Notes (voice
 memos) or Other (everything else). Links to a recording (search results,
 "Said in" on to-dos) open it there (`web.common.recording_url`).
 
-Each recording's pane also has: clickable transcript timestamps (play
-from there), **Export (.md)** (name, summary, items, transcript),
-**Download audio**, and **Delete** (`DELETE /api/v1/sessions/<id>`; the
-items it filed stay, unlinked).
+Transcript timestamps play the recording from there. Each recording's
+actions menu also has **Export as Markdown** (name, summary, items,
+transcript), **Download audio** and **Delete**
+(`DELETE /api/v1/sessions/<id>`; the items it filed stay, unlinked).
 
 ## Search
 
-The search box on the dashboard searches recordings (names, summaries,
-transcripts), notes, to-dos and deadlines, and calendar events. Matches
-drop down as you type, grouped; Enter or a click opens one, and `/`
-jumps to the box.
+One search box (on Home, and as a popup on every other page; `/` opens
+it) searches recordings (names, summaries, transcripts), notes, to-dos
+and deadlines, and calendar events. Matches drop down as you type,
+grouped; Enter or a click opens one.
 
 - **Word forms:** words are matched by their stems (snowballstemmer,
   Russian or English rules by alphabet), so "лекция" finds "лекции" and
@@ -295,8 +301,8 @@ Deleting `data/` resets the server.
 
 - **The device cannot connect:** check `SERVER_URL`, the Windows network
   profile (Private), and that the server listens on `0.0.0.0`.
-- **`NOT STARTING: AFTERWORD_HOST=0.0.0.0 ...`:** the server is set to be
-  reachable from other devices but has no password; set
+- **`not starting: AFTERWORD_HOST=0.0.0.0 ...` in the log:** the server
+  is set to be reachable from other devices but has no password; set
   `AFTERWORD_WEB_PASSWORD`.
 - **`Provider returned 400` on transcription:** the model rejected the
   audio or an option. MP3 is accepted by the default model; check
