@@ -61,8 +61,8 @@ def make_aac(payload: bytes) -> bytes:
 
 
 def run_checks(req) -> int:
-    # 1. Empty state (the recordings list; "/" is the dashboard)
-    s, b, _ = req("GET", "/recordings")
+    # 1. Empty state: a recording with no kind yet is listed on Other
+    s, b, _ = req("GET", "/other")
     assert s == 200 and b"No recordings yet" in b, (s, b[:80])
     print("1. Empty state OK")
 
@@ -129,15 +129,15 @@ def run_checks(req) -> int:
     assert len(b) == len(aac1b) + len(aac2) and b"X" in b and b"B" in b
     print(f"7. Audio OK, size={len(b)}")
 
-    # 8. UI recordings list
-    s, b, _ = req("GET", "/recordings")
+    # 8. UI: listed on the Other page
+    s, b, _ = req("GET", "/other")
     assert s == 200 and b"E2E Test" in b
-    print("8. UI recordings list OK")
+    print("8. UI list OK")
 
-    # 9. UI session page
-    s, b, _ = req("GET", f"/sessions/{sid}")
+    # 9. UI: opened in the reader, with its player
+    s, b, _ = req("GET", f"/other?session={sid}")
     assert s == 200 and b"<audio" in b
-    print("9. UI session page OK")
+    print("9. UI reader OK")
 
     # 10. Missing chunks
     sid2 = "missingtest1234"
@@ -184,15 +184,15 @@ def main() -> int:
 
     try:
         if "--live" in sys.argv:
-            # Spawn the dev server in a background thread.
+            # Spawn the dev server in a background thread, on a free port.
             from werkzeug.serving import make_server
 
             app = create_app(cfg)
-            server = make_server("127.0.0.1", 8000, app, threaded=True)
+            server = make_server("127.0.0.1", 0, app, threaded=True)
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
             time.sleep(0.5)
-            base = "http://127.0.0.1:8000"
+            base = f"http://127.0.0.1:{server.server_port}"
 
             def req(method, path, data=None, headers=None):
                 r = Request(base + path, method=method, data=data, headers=headers or {})

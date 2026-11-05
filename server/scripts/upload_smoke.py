@@ -95,11 +95,11 @@ def main() -> int:
     app = create_app(cfg)
     from werkzeug.serving import make_server
 
-    server = make_server("127.0.0.1", 8001, app, threaded=True)
+    server = make_server("127.0.0.1", 0, app, threaded=True)  # a free port
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     time.sleep(0.5)
-    base = "http://127.0.0.1:8001"
+    base = f"http://127.0.0.1:{server.server_port}"
 
     def req(method, path, data=None, headers=None):
         r = Request(base + path, method=method, data=data, headers=headers or {})
@@ -111,7 +111,7 @@ def main() -> int:
 
     try:
         s, b, _ = req("GET", "/upload")
-        assert s == 200 and b"Drop a file here" in b, (s, b[:80])
+        assert s == 200 and b"Drop an audio file here" in b, (s, b[:80])
         print("1. Upload page OK")
 
         wav = make_wav()
