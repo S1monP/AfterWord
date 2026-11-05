@@ -13,6 +13,7 @@ import dataclasses
 import datetime as dt
 import json
 import shutil
+import subprocess
 import sys
 import tempfile
 import uuid
@@ -63,13 +64,57 @@ def at(day_offset, h, m=0):
     )
 
 
+def silent_audio(sid, seconds):
+    """A silent track as the recording's audio, so the reader shows its
+    player. Skipped without ffmpeg."""
+    ffmpeg = shutil.which(cfg.ffmpeg_path)
+    if not ffmpeg:
+        return
+    path = store.full_audio_path(sid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        [
+            ffmpeg,
+            "-v",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "anullsrc=r=22050:cl=mono",
+            "-t",
+            str(seconds),
+            "-c:a",
+            "aac",
+            "-b:a",
+            "16k",
+            "-f",
+            "adts",
+            str(path),
+        ],
+        check=True,
+    )
+
+
 la = courses.create(name="Linear Algebra", code="MATH2341")
 th = courses.create(name="Thermodynamics")
 mi = courses.create(name="Microeconomics")
 wr = courses.create(name="Academic Writing")
 
 
-def recording(title, kind, course, started, *, status="done", summary=None, lines=(), seconds=0):
+def recording(
+    title,
+    kind,
+    course,
+    started,
+    *,
+    status="done",
+    summary=None,
+    sections=(),
+    key_points=(),
+    lines=(),
+    seconds=0,
+):
     sid = uuid.uuid4().hex
     store.upsert_session(
         sid,
@@ -85,6 +130,8 @@ def recording(title, kind, course, started, *, status="done", summary=None, line
             "UPDATE sessions SET status=?, kind=?, course_id=?, title=?, title_source='ai' WHERE id=?",
             (status, kind, course.id if course else None, title, sid),
         )
+    if seconds:
+        silent_audio(sid, seconds)
     if lines:
         store.add_artifact(
             sid,
@@ -93,7 +140,15 @@ def recording(title, kind, course, started, *, status="done", summary=None, line
         )
     if summary:
         store.add_artifact(
-            sid, "summary", json.dumps({"text": summary, "sections": [], "key_points": []})
+            sid,
+            "summary",
+            json.dumps(
+                {
+                    "text": summary,
+                    "sections": [{"heading": h, "text": x} for h, x in sections],
+                    "key_points": list(key_points),
+                }
+            ),
         )
     return sid
 
@@ -104,10 +159,36 @@ la8 = recording(
     la,
     at(0, 9),
     summary="How to find eigenvalues from the characteristic polynomial, when a matrix can be diagonalised, and a worked 3x3 example.",
+    sections=[
+        (
+            "Eigenvalues and eigenvectors",
+            "An eigenvector of A keeps its direction under A: Av = λv. The eigenvalues are the roots of the characteristic polynomial det(A − λI) = 0.",
+        ),
+        (
+            "When a matrix can be diagonalised",
+            "A is diagonalisable when it has n linearly independent eigenvectors. Distinct eigenvalues guarantee this; repeated ones need their eigenspaces checked.",
+        ),
+        (
+            "Worked example",
+            "A 3x3 matrix with eigenvalues 1, 2 and 2: the eigenspace of 2 has dimension 2, so A = PDP⁻¹ with the eigenvectors as the columns of P.",
+        ),
+    ],
+    key_points=[
+        "Solve det(A − λI) = 0 for the eigenvalues, then (A − λI)v = 0 for each eigenvector.",
+        "n independent eigenvectors ⇔ diagonalisable.",
+        "Diagonal form makes powers easy: Aᵏ = PDᵏP⁻¹.",
+    ],
     lines=[
-        (12, 1, "Good morning. Today: eigenvalues."),
+        (12, 1, "Good morning. Today is about eigenvalues and when a matrix can be diagonalised."),
+        (95, 1, "Start with the definition: a vector whose direction A does not change."),
+        (310, 1, "So the eigenvalues are the roots of det of A minus lambda I."),
+        (742, 2, "Does a repeated eigenvalue always break diagonalisation?"),
+        (751, 1, "Not always. You have to check the dimension of its eigenspace."),
+        (1388, 1, "Let's do a three by three example on the board."),
+        (2105, 1, "And that's why powers of a diagonal matrix are so cheap."),
         (2480, 1, "For Tuesday, read chapter 5, and problem set 4 is due Tuesday night."),
     ],
+    seconds=2580,
 )
 th6 = recording(
     "Entropy and the second law",
